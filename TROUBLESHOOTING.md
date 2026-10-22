@@ -45,7 +45,7 @@ server is running.
   .\.venv\Scripts\python.exe -m channel_press.cli set-password --username owner
   ```
 
-- If no owner exists, the app shows **Set up the newsroom**. If the database has
+- If no owner exists, the app shows **Set up Channel Press**. If the database has
   users but you are locked out, reset with `set-password`; do not delete the
   database.
 

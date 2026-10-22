@@ -44,7 +44,7 @@ pins, and test a fixture build after any upgrade.
 
 ## 2. Accounts and roles
 
-The first account is created by **Set up the newsroom** or:
+The first account is created by **Set up Channel Press** or:
 
 ```powershell
 .\.venv\Scripts\python.exe -m channel_press.cli setup --demo-channel

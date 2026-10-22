@@ -34,7 +34,7 @@ registration screen; accounts are created by an owner.
 
 ### If the first-run screen appears
 
-When no owner exists, the app shows **Set up the newsroom**. Enter a username,
+When no owner exists, the app shows **Set up Channel Press**. Enter a username,
 display name and a password of at least 12 characters. The first account becomes
 the owner. This screen only exists while the user table is empty.
 
@@ -269,9 +269,10 @@ before release, not a cosmetic detail.
 From the edition page:
 
 - **Open PDF** — the searchable tabloid PDF.
-- **Print HTML** — the browser composition used for the PDF.
 - **E-paper** — the offline viewer.
-- **Manifest** — version, geometry, hashes, sources and article map.
+- The **Bundle** panel marks **Print HTML**, **E-paper** and **Manifest** as
+  available. The print composition is `print.html` and the manifest is
+  `manifest.json` inside the edition folder; open either from disk for inspection.
 
 The PDF is exactly 11 × 17 inches (792 × 1224 pt) for the tabloid profile. Print
 with “Actual size” or 100% scaling and disable “fit to page”; the margins are part
