@@ -80,8 +80,9 @@ The live adapter is optional and was not exercised in this build.
 
 - `Telethon is not installed` — install the optional package in the venv:
   `.\.venv\Scripts\python.exe -m pip install telethon`.
-- `API ID/hash missing` — set `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` in `.env`.
-  Create them at <https://my.telegram.org> with the owner's account.
+- `API ID/hash missing` — set `CHANNEL_PRESS_TELEGRAM_API_ID` and
+  `CHANNEL_PRESS_TELEGRAM_API_HASH` in `.env`. Create them at
+  <https://my.telegram.org> with the owner's account.
 - `Session password needed` / `unauthorized` — complete the interactive login in a
   terminal, or recreate the session. Never commit `data/telegram.session`.
 - `FloodWait` — Telegram has rate-limited the account. Wait the stated period; do
@@ -100,7 +101,8 @@ verified path and needs no Telegram credentials.
 
 - Ollama is not running or not installed. Start `ollama serve`, or continue with
   the deterministic composer. The fixture demo never needs a model.
-- Check `OLLAMA_BASE_URL`; the default is `http://127.0.0.1:11434`.
+- Check `CHANNEL_PRESS_OLLAMA_BASE_URL`; the default is
+  `http://127.0.0.1:11434`.
 
 **Model loads but the build falls back**
 

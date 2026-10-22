@@ -116,9 +116,10 @@ content into a demo edition.
 The repository includes an isolated, optional Telethon adapter for authorized
 history access. It requires:
 
-- `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from the owner's Telegram developer
-  account;
-- `TELEGRAM_SESSION_PATH` pointing outside Git (default `./data/telegram.session`);
+- `CHANNEL_PRESS_TELEGRAM_API_ID` and `CHANNEL_PRESS_TELEGRAM_API_HASH` from the
+  owner's Telegram developer account;
+- `CHANNEL_PRESS_TELEGRAM_SESSION_PATH` pointing outside Git (default
+  `./data/telegram.session`);
 - the optional Telethon package, which is not installed by the baseline script;
 - a recorded rights declaration before any content is processed.
 
@@ -158,12 +159,12 @@ ollama serve
 Configuration (`.env`):
 
 ```text
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen2.5:3b-instruct
-OLLAMA_KEEP_ALIVE=60s
+CHANNEL_PRESS_OLLAMA_BASE_URL=http://127.0.0.1:11434
+CHANNEL_PRESS_OLLAMA_MODEL=qwen2.5:3b-instruct
+CHANNEL_PRESS_OLLAMA_KEEP_ALIVE=60s
 ```
 
-Or the matching `CHANNEL_PRESS_*` variables for the app settings. The adapter:
+All app settings use the `CHANNEL_PRESS_` prefix. The adapter:
 
 - sends only the story evidence bundle and the versioned prompt;
 - requires a strict schema and retries a limited number of times;
