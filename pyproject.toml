@@ -1,0 +1,43 @@
+[project]
+name = "channel-press"
+version = "1.0.0"
+description = "Channel Press: authorized Telegram-channel roundup to printable newspaper and e-paper"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.115.6",
+  "uvicorn[standard]==0.34.0",
+  "sqlalchemy==2.0.36",
+  "alembic==1.14.0",
+  "pydantic-settings==2.7.0",
+  "jinja2==3.1.5",
+  "python-multipart==0.0.20",
+  "argon2-cffi==23.1.0",
+  "itsdangerous==2.2.0",
+  "httpx==0.28.1",
+  "pillow==11.1.0",
+  "qrcode[pil]==8.0",
+  "pyyaml==6.0.2",
+  "python-dateutil==2.9.0.post0",
+  "tzdata==2024.2",
+  "playwright==1.49.1",
+  "PyMuPDF==1.25.1",
+  "pypdf==5.1.0",
+]
+
+[project.optional-dependencies]
+video = ["opencv-python-headless==4.10.0.84"]
+test = ["pytest==8.3.4", "openpyxl==3.1.5"]
+
+[project.scripts]
+channel-press = "channel_press.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "slow: end-to-end print and large-fixture checks",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
