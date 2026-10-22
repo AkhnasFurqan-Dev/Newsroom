@@ -1,0 +1,1146 @@
+{
+  "schema": "channel_press.export.v1",
+  "channel": {
+    "title": "Channel Press Fixture Desk",
+    "handle": "@fixture_newsroom",
+    "telegram_id": -1001234567890,
+    "is_public": false,
+    "is_demo": true
+  },
+  "messages": [
+    {
+      "id": 10000,
+      "date": "2026-10-19T10:00:00Z",
+      "text": "Security forces continued a clearance operation in Gwadar on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Gwadar after checkpoint attack",
+        "incident_key": "conflict-70-0",
+        "location": "Gwadar"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10001,
+      "date": "2026-10-19T10:16:00Z",
+      "text": "The highway to Sargodha reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Sargodha reopens after landslide",
+        "incident_key": "regional-70-1",
+        "location": "Sargodha"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10002,
+      "date": "2026-10-19T10:32:00Z",
+      "text": "The district administration announced a water supply project for Taftan on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Taftan water project",
+        "incident_key": "national-70-2",
+        "location": "Taftan"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10003,
+      "date": "2026-10-19T10:48:00Z",
+      "text": "A trade delegation from Gilgit met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Gilgit meets Pakistani officials",
+        "incident_key": "international-70-3",
+        "location": "Gilgit"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true,
+      "grouped_id": 50003
+    },
+    {
+      "id": 10004,
+      "date": "2026-10-19T11:05:00Z",
+      "text": "An army unit completed a scheduled training exercise near Hyderabad, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Hyderabad",
+        "incident_key": "defence-70-4",
+        "location": "Hyderabad"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10005,
+      "date": "2026-10-19T11:21:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Quetta markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Quetta markets",
+        "incident_key": "economy-70-5",
+        "location": "Quetta"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true,
+      "forward_from": "Fixture Repost Channel"
+    },
+    {
+      "id": 10006,
+      "date": "2026-10-19T11:37:00Z",
+      "text": "Analysis: The closure of the road through Muzaffarabad matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Muzaffarabad road closure means for local trade",
+        "incident_key": "analysis-70-6",
+        "location": "Muzaffarabad"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10007,
+      "date": "2026-10-19T11:54:00Z",
+      "text": "Join our channel for updates: https://t.me/fixture_promo",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Mardan need a published budget",
+        "incident_key": "opinion-70-7",
+        "location": "Mardan"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true,
+      "promotion": true
+    },
+    {
+      "id": 10008,
+      "date": "2026-10-19T12:10:00Z",
+      "text": "Security forces continued a clearance operation in Peshawar on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Peshawar after checkpoint attack",
+        "incident_key": "conflict-70-8",
+        "location": "Peshawar"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10009,
+      "date": "2026-10-19T12:26:00Z",
+      "text": "The highway to Dera Ismail Khan reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Dera Ismail Khan reopens after landslide",
+        "incident_key": "regional-70-9",
+        "location": "Dera Ismail Khan"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true,
+      "deleted": true
+    },
+    {
+      "id": 10010,
+      "date": "2026-10-19T12:42:00Z",
+      "text": "The district administration announced a water supply project for Chaman on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Chaman water project",
+        "incident_key": "national-70-10",
+        "location": "Chaman"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10011,
+      "date": "2026-10-19T12:59:00Z",
+      "text": "A trade delegation from Lahore met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Lahore meets Pakistani officials",
+        "incident_key": "international-70-11",
+        "location": "Lahore"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10012,
+      "date": "2026-10-19T13:15:00Z",
+      "text": "An army unit completed a scheduled training exercise near Abbottabad, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Abbottabad",
+        "incident_key": "defence-70-12",
+        "location": "Abbottabad"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10013,
+      "date": "2026-10-19T13:31:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Bannu markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Bannu markets",
+        "incident_key": "economy-70-13",
+        "location": "Bannu"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10014,
+      "date": "2026-10-19T13:48:00Z",
+      "text": "Analysis: The closure of the road through Multan matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Multan road closure means for local trade",
+        "incident_key": "analysis-70-14",
+        "location": "Multan"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10015,
+      "date": "2026-10-19T14:04:00Z",
+      "text": "Editorial: Residents of Sialkot deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Sialkot need a published budget",
+        "incident_key": "opinion-70-15",
+        "location": "Sialkot"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10016,
+      "date": "2026-10-19T14:20:00Z",
+      "text": "Security forces continued a clearance operation in Swat on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Swat after checkpoint attack",
+        "incident_key": "conflict-70-16",
+        "location": "Swat"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10017,
+      "date": "2026-10-19T14:36:00Z",
+      "text": "The highway to Sukkur reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Sukkur reopens after landslide",
+        "incident_key": "regional-70-17",
+        "location": "Sukkur"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10018,
+      "date": "2026-10-19T14:53:00Z",
+      "text": "The district administration announced a water supply project for Bahawalpur on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Bahawalpur water project",
+        "incident_key": "national-70-18",
+        "location": "Bahawalpur"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10019,
+      "date": "2026-10-19T15:09:00Z",
+      "text": "A trade delegation from Chilas met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Chilas meets Pakistani officials",
+        "incident_key": "international-70-19",
+        "location": "Chilas"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10020,
+      "date": "2026-10-19T15:25:00Z",
+      "text": "An army unit completed a scheduled training exercise near Gwadar, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Gwadar",
+        "incident_key": "defence-70-20",
+        "location": "Gwadar"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10021,
+      "date": "2026-10-19T15:42:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Sargodha markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Sargodha markets",
+        "incident_key": "economy-70-21",
+        "location": "Sargodha"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10022,
+      "date": "2026-10-19T15:58:00Z",
+      "text": "Analysis: The closure of the road through Taftan matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Taftan road closure means for local trade",
+        "incident_key": "analysis-70-22",
+        "location": "Taftan"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true,
+      "grouped_id": 50022
+    },
+    {
+      "id": 10023,
+      "date": "2026-10-19T16:14:00Z",
+      "text": "Editorial: Residents of Gilgit deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Gilgit need a published budget",
+        "incident_key": "opinion-70-23",
+        "location": "Gilgit"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10024,
+      "date": "2026-10-19T16:30:00Z",
+      "text": "Security forces continued a clearance operation in Hyderabad on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Hyderabad after checkpoint attack",
+        "incident_key": "conflict-70-24",
+        "location": "Hyderabad"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10025,
+      "date": "2026-10-19T16:47:00Z",
+      "text": "The highway to Quetta reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Quetta reopens after landslide",
+        "incident_key": "regional-70-25",
+        "location": "Quetta"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10026,
+      "date": "2026-10-19T17:03:00Z",
+      "text": "The district administration announced a water supply project for Muzaffarabad on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Muzaffarabad water project",
+        "incident_key": "national-70-26",
+        "location": "Muzaffarabad"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true,
+      "deleted": true
+    },
+    {
+      "id": 10027,
+      "date": "2026-10-19T17:19:00Z",
+      "text": "A trade delegation from Mardan met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Mardan meets Pakistani officials",
+        "incident_key": "international-70-27",
+        "location": "Mardan"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10028,
+      "date": "2026-10-19T17:36:00Z",
+      "text": "An army unit completed a scheduled training exercise near Peshawar, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Peshawar",
+        "incident_key": "defence-70-28",
+        "location": "Peshawar"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true,
+      "forward_from": "Fixture Repost Channel"
+    },
+    {
+      "id": 10029,
+      "date": "2026-10-19T17:52:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Dera Ismail Khan markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Dera Ismail Khan markets",
+        "incident_key": "economy-70-29",
+        "location": "Dera Ismail Khan"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10030,
+      "date": "2026-10-19T18:08:00Z",
+      "text": "Analysis: The closure of the road through Chaman matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Chaman road closure means for local trade",
+        "incident_key": "analysis-70-30",
+        "location": "Chaman"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10031,
+      "date": "2026-10-19T18:24:00Z",
+      "text": "Editorial: Residents of Lahore deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Lahore need a published budget",
+        "incident_key": "opinion-70-31",
+        "location": "Lahore"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10032,
+      "date": "2026-10-19T18:41:00Z",
+      "text": "Security forces continued a clearance operation in Abbottabad on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Abbottabad after checkpoint attack",
+        "incident_key": "conflict-70-32",
+        "location": "Abbottabad"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10033,
+      "date": "2026-10-19T18:57:00Z",
+      "text": "The highway to Bannu reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Bannu reopens after landslide",
+        "incident_key": "regional-70-33",
+        "location": "Bannu"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10034,
+      "date": "2026-10-19T19:13:00Z",
+      "text": "The district administration announced a water supply project for Multan on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Multan water project",
+        "incident_key": "national-70-34",
+        "location": "Multan"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10035,
+      "date": "2026-10-19T19:30:00Z",
+      "text": "A trade delegation from Sialkot met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Sialkot meets Pakistani officials",
+        "incident_key": "international-70-35",
+        "location": "Sialkot"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10036,
+      "date": "2026-10-19T19:46:00Z",
+      "text": "An army unit completed a scheduled training exercise near Swat, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Swat",
+        "incident_key": "defence-70-36",
+        "location": "Swat"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10037,
+      "date": "2026-10-19T20:02:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Sukkur markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Sukkur markets",
+        "incident_key": "economy-70-37",
+        "location": "Sukkur"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10038,
+      "date": "2026-10-19T20:18:00Z",
+      "text": "Join our channel for updates: https://t.me/fixture_promo",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Bahawalpur road closure means for local trade",
+        "incident_key": "analysis-70-38",
+        "location": "Bahawalpur"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true,
+      "promotion": true
+    },
+    {
+      "id": 10039,
+      "date": "2026-10-19T20:35:00Z",
+      "text": "Editorial: Residents of Chilas deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Chilas need a published budget",
+        "incident_key": "opinion-70-39",
+        "location": "Chilas"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10040,
+      "date": "2026-10-19T20:51:00Z",
+      "text": "Security forces continued a clearance operation in Gwadar on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Gwadar after checkpoint attack",
+        "incident_key": "conflict-70-40",
+        "location": "Gwadar"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10041,
+      "date": "2026-10-19T21:07:00Z",
+      "text": "The highway to Sargodha reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Sargodha reopens after landslide",
+        "incident_key": "regional-70-41",
+        "location": "Sargodha"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true,
+      "grouped_id": 50041
+    },
+    {
+      "id": 10042,
+      "date": "2026-10-19T21:24:00Z",
+      "text": "The district administration announced a water supply project for Taftan on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Taftan water project",
+        "incident_key": "national-70-42",
+        "location": "Taftan"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10043,
+      "date": "2026-10-19T21:40:00Z",
+      "text": "A trade delegation from Gilgit met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Gilgit meets Pakistani officials",
+        "incident_key": "international-70-43",
+        "location": "Gilgit"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true,
+      "deleted": true
+    },
+    {
+      "id": 10044,
+      "date": "2026-10-19T21:56:00Z",
+      "text": "An army unit completed a scheduled training exercise near Hyderabad, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Hyderabad",
+        "incident_key": "defence-70-44",
+        "location": "Hyderabad"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10045,
+      "date": "2026-10-19T22:12:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Quetta markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Quetta markets",
+        "incident_key": "economy-70-45",
+        "location": "Quetta"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10046,
+      "date": "2026-10-19T22:29:00Z",
+      "text": "Analysis: The closure of the road through Muzaffarabad matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Muzaffarabad road closure means for local trade",
+        "incident_key": "analysis-70-46",
+        "location": "Muzaffarabad"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10047,
+      "date": "2026-10-19T22:45:00Z",
+      "text": "Editorial: Residents of Mardan deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Mardan need a published budget",
+        "incident_key": "opinion-70-47",
+        "location": "Mardan"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10048,
+      "date": "2026-10-19T23:01:00Z",
+      "text": "Security forces continued a clearance operation in Peshawar on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Peshawar after checkpoint attack",
+        "incident_key": "conflict-70-48",
+        "location": "Peshawar"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10049,
+      "date": "2026-10-19T23:18:00Z",
+      "text": "The highway to Dera Ismail Khan reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Dera Ismail Khan reopens after landslide",
+        "incident_key": "regional-70-49",
+        "location": "Dera Ismail Khan"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10050,
+      "date": "2026-10-19T23:34:00Z",
+      "text": "The district administration announced a water supply project for Chaman on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Chaman water project",
+        "incident_key": "national-70-50",
+        "location": "Chaman"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10051,
+      "date": "2026-10-19T23:50:00Z",
+      "text": "A trade delegation from Lahore met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Lahore meets Pakistani officials",
+        "incident_key": "international-70-51",
+        "location": "Lahore"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true,
+      "forward_from": "Fixture Repost Channel"
+    },
+    {
+      "id": 10052,
+      "date": "2026-10-20T00:06:00Z",
+      "text": "An army unit completed a scheduled training exercise near Abbottabad, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Abbottabad",
+        "incident_key": "defence-70-52",
+        "location": "Abbottabad"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10053,
+      "date": "2026-10-20T00:23:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Bannu markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Bannu markets",
+        "incident_key": "economy-70-53",
+        "location": "Bannu"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10054,
+      "date": "2026-10-20T00:39:00Z",
+      "text": "Analysis: The closure of the road through Multan matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Multan road closure means for local trade",
+        "incident_key": "analysis-70-54",
+        "location": "Multan"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10055,
+      "date": "2026-10-20T00:55:00Z",
+      "text": "Editorial: Residents of Sialkot deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Sialkot need a published budget",
+        "incident_key": "opinion-70-55",
+        "location": "Sialkot"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10056,
+      "date": "2026-10-20T01:12:00Z",
+      "text": "Security forces continued a clearance operation in Swat on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Swat after checkpoint attack",
+        "incident_key": "conflict-70-56",
+        "location": "Swat"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10057,
+      "date": "2026-10-20T01:28:00Z",
+      "text": "The highway to Sukkur reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Sukkur reopens after landslide",
+        "incident_key": "regional-70-57",
+        "location": "Sukkur"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10058,
+      "date": "2026-10-20T01:44:00Z",
+      "text": "The district administration announced a water supply project for Bahawalpur on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Bahawalpur water project",
+        "incident_key": "national-70-58",
+        "location": "Bahawalpur"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10059,
+      "date": "2026-10-20T02:00:00Z",
+      "text": "A trade delegation from Chilas met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Chilas meets Pakistani officials",
+        "incident_key": "international-70-59",
+        "location": "Chilas"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10060,
+      "date": "2026-10-20T02:17:00Z",
+      "text": "An army unit completed a scheduled training exercise near Gwadar, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Gwadar",
+        "incident_key": "defence-70-60",
+        "location": "Gwadar"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true,
+      "grouped_id": 50060,
+      "deleted": true
+    },
+    {
+      "id": 10061,
+      "date": "2026-10-20T02:33:00Z",
+      "text": "Wheat flour prices rose by 4 percent in Sargodha markets this week, according to a traders' association. The association blamed transport costs. Official price data for the week was not immediately available.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Sargodha markets",
+        "incident_key": "economy-70-61",
+        "location": "Sargodha"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10062,
+      "date": "2026-10-20T02:49:00Z",
+      "text": "Analysis: The closure of the road through Taftan matters because it carries most of the district's supplies. The evidence available shows a short interruption, not a prolonged blockade, but no official estimate of losses has been published.",
+      "segment_meta": {
+        "genre": "analysis",
+        "topic": "analysis",
+        "title": "What the Taftan road closure means for local trade",
+        "incident_key": "analysis-70-62",
+        "location": "Taftan"
+      },
+      "tags": [
+        "analysis"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10063,
+      "date": "2026-10-20T03:06:00Z",
+      "text": "Editorial: Residents of Gilgit deserve a clear account of how municipal funds are spent. The council should publish quarterly figures and allow time for public questions.",
+      "segment_meta": {
+        "genre": "opinion",
+        "topic": "opinion",
+        "title": "Editorial: Local services in Gilgit need a published budget",
+        "incident_key": "opinion-70-63",
+        "location": "Gilgit"
+      },
+      "tags": [
+        "opinion"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10064,
+      "date": "2026-10-20T03:22:00Z",
+      "text": "Security forces continued a clearance operation in Hyderabad on Monday after gunmen attacked a checkpoint, the provincial counterterrorism department said. Two police officers were wounded. No group claimed responsibility.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "conflict",
+        "title": "Security operation continues in Hyderabad after checkpoint attack",
+        "incident_key": "conflict-70-64",
+        "location": "Hyderabad"
+      },
+      "tags": [
+        "conflict"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10065,
+      "date": "2026-10-20T03:38:00Z",
+      "text": "The highway to Quetta reopened to light traffic after a landslide blocked it for several hours, the works department said. No injuries were reported and heavy machinery cleared the debris.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "regional",
+        "title": "Road link to Quetta reopens after landslide",
+        "incident_key": "regional-70-65",
+        "location": "Quetta"
+      },
+      "tags": [
+        "regional"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10066,
+      "date": "2026-10-20T03:54:00Z",
+      "text": "The district administration announced a water supply project for Muzaffarabad on Tuesday. The scheme will add 12 filtration units and is expected to cost 850 million rupees, officials said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "national",
+        "title": "District administration announces Muzaffarabad water project",
+        "incident_key": "national-70-66",
+        "location": "Muzaffarabad"
+      },
+      "tags": [
+        "national"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10067,
+      "date": "2026-10-20T04:11:00Z",
+      "text": "A trade delegation from Mardan met commerce ministry officials in Islamabad on Monday to discuss customs procedures. Both sides agreed to hold technical talks next month, a ministry statement said.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "international",
+        "title": "Trade delegation from Mardan meets Pakistani officials",
+        "incident_key": "international-70-67",
+        "location": "Mardan"
+      },
+      "tags": [
+        "international"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10068,
+      "date": "2026-10-20T04:27:00Z",
+      "text": "An army unit completed a scheduled training exercise near Peshawar, a military statement said. The drills covered medical evacuation and communications. No live ammunition was used.",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "defence",
+        "title": "Army unit completes training exercise near Peshawar",
+        "incident_key": "defence-70-68",
+        "location": "Peshawar"
+      },
+      "tags": [
+        "defence"
+      ],
+      "bulk_fixture": true
+    },
+    {
+      "id": 10069,
+      "date": "2026-10-20T04:43:00Z",
+      "text": "Join our channel for updates: https://t.me/fixture_promo",
+      "segment_meta": {
+        "genre": "news",
+        "topic": "economy",
+        "title": "Prices of wheat flour rise in Dera Ismail Khan markets",
+        "incident_key": "economy-70-69",
+        "location": "Dera Ismail Khan"
+      },
+      "tags": [
+        "economy"
+      ],
+      "bulk_fixture": true,
+      "promotion": true
+    }
+  ]
+}
