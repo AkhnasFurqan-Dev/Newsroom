@@ -15,8 +15,9 @@ Status labels:
 ## Test runs
 
 ```text
-.\.venv\Scripts\python.exe -m pytest -m "not slow" -q   -> 54 passed
-.\.venv\Scripts\python.exe -m pytest -q                 -> 59 passed
+.\.venv\Scripts\python.exe -m pytest -m "not slow" -q         -> 54 passed
+.\.venv\Scripts\python.exe -m pytest -q                       -> 59 passed
+.\.venv\Scripts\python.exe -m ruff check channel_press tests  -> all checks passed
 ```
 
 The five slow tests render real PDFs through Chrome:

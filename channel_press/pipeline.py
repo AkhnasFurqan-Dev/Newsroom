@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -28,10 +28,8 @@ from .ai.providers import (
     DraftProvider,
     FixtureDraftProvider,
     OllamaDraftProvider,
-    StoryBundle,
 )
 from .auth import active_rights
-from .config import settings
 from .editorial.clustering import build_stories, clear_editorial_drafts
 from .editorial.drafting import draft_story
 from .models import (

@@ -186,6 +186,7 @@ unverified integrations, recorded as limits rather than claimed successes.
   150-post build: ~276 MB peak process-group working set, ~5.2 s Python CPU,
   ~0.68 GB system RAM delta including Chrome, GPU unused.
 - **Verification:** `pytest -q` → **59 passed**.
+- **Lint:** `ruff check channel_press tests` → all checks passed.
 - **Commit:** `test(e2e): PDF geometry, capacity and rights gates`
 
 ## M14 — Packaging and documentation
@@ -199,6 +200,30 @@ unverified integrations, recorded as limits rather than claimed successes.
 - **Verification:** documented commands re-run; full suite re-run after final
   fixes; demo rebuilt clean with zero QA warnings.
 - **Commit:** `docs: readme, manuals, QA report and decision records`
+
+## Git history
+
+The application was built in one continuous session, so the repository history
+groups finished subsystems rather than replaying every intermediate save. Each
+milestone has a commit:
+
+| Milestone | Commit | Subject |
+| --- | --- | --- |
+| M00 | `905d61a` | chore: bootstrap repository, dependencies and build contract |
+| M01 | `4dc581d` | feat(auth): schema, Argon2id sessions, roles and audit |
+| M02 | `39e678d` | feat(config): consent, branding and local secrets |
+| M03 | `fd6bd06` | feat(ingestion): exports, fixtures, normalization and exclusions |
+| M04 | `c43280d` | feat(scheduling): idempotent jobs, leases and catch-up |
+| M05 | `6ebfd96` | feat(story): clustering, claims, corrections and chronology |
+| M06 | `2cf1518` | feat(ai): versioned prompts, drafting and independent audit |
+| M07 | `29fd752` | feat(media): ranking, derivatives, video frames and credits |
+| M08 | `8fa714d` | feat(graphics): sourced charts, timelines and disclosed maps |
+| M09 | `96212df` | feat(layout): tabloid composition, PDF render and geometry QA |
+| M10 | `36282e8` | feat(planner): edition plan, continuation and source appendix |
+| M11 | `2436fca` | feat(web): newsroom dashboard, review and page studio |
+| M12 | `7c8ce25` | feat(publishing): atomic release, manifest and e-paper bundle |
+| M13 | `6efc139` | test(e2e): PDF geometry, capacity and rights gates |
+| M14 | `2798c10` | docs: readme, manuals, QA evidence and decision records |
 
 ## Final demo artifact
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..models import StoryClaim, StoryTimelineEvent
 from ..timeutil import to_local

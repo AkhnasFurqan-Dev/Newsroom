@@ -5,7 +5,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -295,7 +295,7 @@ def build_seed(db, story: StoryCluster) -> dict | None:
 def gather_bundle(db, story: StoryCluster) -> StoryBundle:
     from sqlalchemy import select
 
-    from ..models import PostFragment, SourcePost
+    from ..models import PostFragment
 
     rows = db.execute(
         select(PostFragment, SourcePost)

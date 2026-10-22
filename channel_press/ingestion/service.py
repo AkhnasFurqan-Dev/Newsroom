@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from ..auth import audit
 from ..models import (
     Channel,
-    ChannelOwnership,
     PostFragment,
     PostMedia,
     PostVersion,
@@ -23,7 +22,7 @@ from ..models import (
 )
 from ..security import safe_filename, sha256_bytes, sha256_text
 from ..timeutil import utcnow
-from .adapters import NormalizedMessage, normalize_messages
+from .adapters import normalize_messages
 from .normalize import clean_text, detect_language, exclusion_reason, split_segments
 
 

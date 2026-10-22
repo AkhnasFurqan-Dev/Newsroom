@@ -23,7 +23,7 @@ from channel_press.media.service import (
     rank_media,
     select_lead_media,
 )
-from channel_press.models import Article, PostMedia, StoryCluster, StoryTimelineEvent
+from channel_press.models import PostMedia, StoryCluster, StoryTimelineEvent
 from channel_press.ai.providers import FixtureDraftProvider
 from channel_press.editorial.clustering import build_stories
 from channel_press.editorial.drafting import draft_story
@@ -98,7 +98,7 @@ def test_collage_combines_labelled_images(tmp_path):
 def test_locator_map_draws_real_geometry_with_profile_disclosure(db):
     from channel_press.bootstrap import ensure_defaults
 
-    profile = ensure_defaults(db)
+    ensure_defaults(db)
     db.commit()
     from channel_press.models import CartographicProfile
 

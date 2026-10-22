@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-from sqlalchemy import select
 from fastapi.testclient import TestClient
 
 from channel_press.config import settings

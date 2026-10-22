@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import html
 import json
-import re
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 import fitz
@@ -13,7 +11,7 @@ from markupsafe import Markup
 from playwright.sync_api import sync_playwright
 from sqlalchemy.orm import Session
 
-from ..config import BASE_DIR, settings
+from ..config import BASE_DIR
 from ..constants import SECTION_LABELS
 from ..models import Edition
 from ..timeutil import human_local
@@ -165,8 +163,6 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
         filtered = [p for p in items if p is not lead]
         if not filtered:
             continue
-        if section not in section_chunks:
-            paragraphs: list[StoryChunk] = []
         entries = section_chunks.get(section, [])
         # If the lead remainder was just inserted, keep it first.
         for package in filtered:
@@ -457,9 +453,9 @@ def _section_context(db: Session, plan: EditionPlan) -> dict[str, dict]:
 def _edition_evidence(
     db: Session, edition: Edition, plan: EditionPlan, chunk_plan: PageChunkPlan
 ) -> dict:
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
-    from ..models import ArticleClaimLink, PostFragment, SourcePost, StoryClaim
+    from ..models import ArticleClaimLink, SourcePost, StoryClaim
 
     posts = list(
         db.scalars(

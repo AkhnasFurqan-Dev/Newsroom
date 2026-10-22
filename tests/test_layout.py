@@ -5,7 +5,6 @@ from pathlib import Path
 import fitz
 
 from channel_press.layout.engine import (
-    StoryChunk,
     build_page_plan,
     chunk_paragraphs,
     inspect_pdf,

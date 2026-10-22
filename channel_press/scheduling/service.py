@@ -22,7 +22,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from ..auth import audit
@@ -38,7 +38,6 @@ from ..models import (
     JobStep,
     PublicationAttempt,
     RetryAttempt,
-    ReviewFlag,
 )
 from ..pipeline import PipelineResult, run_pipeline
 from ..timeutil import local_boundary_utc, to_local, utcnow

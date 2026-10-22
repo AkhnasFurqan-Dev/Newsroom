@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..ai.providers import gather_bundle
-from ..constants import SECTION_LABELS, SECTION_ORDER
-from ..graphics.cartography import MapResult, fallback_location_html, render_locator_map
+from ..constants import SECTION_ORDER
+from ..graphics.cartography import MapResult, render_locator_map
 from ..graphics.charts import ChartSpec, build_percentage_chart, render_chart_svg, render_timeline_html
 from ..media.service import select_lead_media
 from ..models import (
@@ -22,7 +20,6 @@ from ..models import (
     ExternalReference,
     PostFragment,
     PublicationProfile,
-    SourceAppendix,
     SourcePost,
     StoryClaim,
     StoryCluster,
@@ -260,7 +257,6 @@ def create_plan(
         )
         articles = [article for article in articles if article.story_id in eligible_ids]
         for index, article in enumerate(articles):
-            story = db.get(StoryCluster, article.story_id)
             links.append(
                 EditionArticle(
                     edition_id=edition.id,

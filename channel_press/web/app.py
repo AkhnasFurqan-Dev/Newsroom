@@ -14,8 +14,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
-import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -56,14 +54,12 @@ from ..bootstrap import (
 from ..config import BASE_DIR, settings
 from ..constants import EXCLUSION_REASONS, ROLE_RANK, SECTION_LABELS, SECTIONS
 from ..db import SessionLocal, session_dependency
-from ..editorial.audit import audit_publication, publish_gate
+from ..editorial.audit import publish_gate
 from ..editorial.drafting import reaudit_article, save_editor_edit
-from ..ingestion.adapters import ImportFormatError, load_json, normalize_messages
+from ..ingestion.adapters import ImportFormatError, normalize_messages
 from ..ingestion.service import ensure_import_media_dir, import_payload
-from ..layout.engine import inspect_pdf
 from ..migrations import current_revision, upgrade_database
 from ..models import (
-    AppSetting,
     Article,
     ArticleMedia,
     ArticleVersion,
@@ -77,8 +73,6 @@ from ..models import (
     EditionSchedule,
     Job,
     JobStep,
-    LoginSession,
-    ModelRun,
     PostFragment,
     PostMedia,
     PublicationAttempt,
@@ -92,12 +86,8 @@ from ..models import (
     StoryTimelineEvent,
     User,
 )
-from ..pipeline import PipelineError
 from ..publishing.service import (
-    LayoutQualityError,
-    PublicationError,
     edition_review_blockers,
-    publish_edition,
     record_manifest_release,
 )
 from ..scheduling.service import (
@@ -107,7 +97,6 @@ from ..scheduling.service import (
     enqueue_manual_job,
     enqueue_republish_job,
     latest_due_cutoff,
-    release_expired_locks,
     worker_once,
 )
 from ..security import hash_password, redact, verify_password
@@ -1659,7 +1648,6 @@ def job_cancel(
 
 @app.get("/branding")
 def branding_page(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
     maps = list(db.scalars(select(CartographicProfile).order_by(CartographicProfile.id)))
     return render(request, "branding.html", _ctx(db, request, user, "branding", maps=maps))
 

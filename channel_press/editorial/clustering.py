@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -32,9 +32,7 @@ from .entities import (
     jaccard,
     locations,
     proper_nouns,
-    sentence_split,
     token_set,
-    tokens,
 )
 
 
@@ -262,17 +260,11 @@ def build_stories(
 
     clusters: list[StoryCluster] = []
     cluster_views: dict[int, list[FragmentView]] = {}
-    used_fingerprints: set[str] = set()
-    reply_targets = {
-        edge.from_post_id: edge.to_post_id
-        for edge in db.scalars(select(ReplyEdge).where(ReplyEdge.from_post_id.in_(by_post.keys())))
-    }
 
     for view in views:
         target_cluster: StoryCluster | None = None
         if view.post.reply_to_message_id:
             # The imported reply edge is authoritative.
-            target_post_id = view.post.id
             edges = db.scalars(select(ReplyEdge).where(ReplyEdge.from_post_id == view.post.id)).all()
             for edge in edges:
                 candidate_views = by_post.get(edge.to_post_id, [])

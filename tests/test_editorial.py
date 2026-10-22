@@ -161,7 +161,7 @@ def test_article_drafting_audits_claims_and_raises_review_flags(db, demo_channel
 def test_clear_editorial_drafts_removes_only_unpublished_material(db, demo_channel, sample_import):
     stories = build_stories(db, demo_channel.id, *WINDOW)
     chaman = _story_with_message(db, 101)
-    article = draft_story(db, chaman, FixtureDraftProvider())
+    draft_story(db, chaman, FixtureDraftProvider())
     db.commit()
     assert db.query(Article).count() == 1
     cleared = clear_editorial_drafts(db, demo_channel.id, *WINDOW)

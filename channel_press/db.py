@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime
 from typing import Iterator
 
 from sqlalchemy import DateTime, create_engine, event

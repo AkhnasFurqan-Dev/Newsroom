@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,7 +38,6 @@ def image_metrics(path: Path) -> dict:
         variance = sum((p - brightness) ** 2 for p in pixels) / len(pixels) if pixels else 0
     try:
         import cv2
-        import numpy as np
 
         matrix = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
         sharpness = float(cv2.Laplacian(matrix, cv2.CV_64F).var()) if matrix is not None else 0.0
@@ -242,7 +241,6 @@ def extract_video_frames(media: PostMedia, max_frames: int = 3) -> list[dict]:
         return []
     try:
         import cv2
-        import numpy as np
     except ImportError:
         return []
     capture = cv2.VideoCapture(str(media.original_path))

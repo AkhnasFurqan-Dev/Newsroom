@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .auth import audit
 from .config import BASE_DIR
 from .models import (
     AppSetting,

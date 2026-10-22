@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from ..ai.providers import DraftProvider, DraftResult, FixtureDraftProvider, StoryBundle, gather_bundle
+from ..ai.providers import DraftProvider, DraftResult, FixtureDraftProvider, gather_bundle
 from ..models import (
     Article,
     ArticleClaimLink,
@@ -19,7 +18,6 @@ from ..models import (
 from ..timeutil import utcnow
 from .audit import audit_article
 from .claims import build_claims, contains_injection, strip_injection
-from .entities import sentence_split
 
 
 def _snapshot(article: Article) -> str:

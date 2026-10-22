@@ -24,7 +24,6 @@ from channel_press.models import (
     ReplyEdge,
     SourcePost,
 )
-from channel_press.timeutil import utcnow
 from tests.conftest import FIXTURES, import_fixture
 
 

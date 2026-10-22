@@ -210,6 +210,10 @@ a tight cutoff-to-release window.
 
 # Full suite, including real PDF renders for sample/30/70/150 fixtures
 .\.venv\Scripts\python.exe -m pytest -q
+
+# Lint (dev extra)
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m ruff check channel_press tests
 ```
 
 Last recorded run: **59 passed** (54 fast + 5 end-to-end). The slow suite renders

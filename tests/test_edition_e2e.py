@@ -8,11 +8,9 @@ from pathlib import Path
 import fitz
 import pytest
 
-from channel_press.config import settings
 from channel_press.models import (
     ArticleMedia,
     Channel,
-    Edition,
     EditionArticle,
     EditionPage,
     SourceAppendix,
@@ -20,7 +18,7 @@ from channel_press.models import (
 )
 from channel_press.pipeline import PipelineRequest, RightsError, run_pipeline
 from channel_press.timeutil import utcnow
-from tests.conftest import FIXTURES, import_fixture
+from tests.conftest import import_fixture
 
 pytestmark = pytest.mark.slow
 

@@ -12,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..config import BASE_DIR, settings
+from ..config import settings
 from ..layout.engine import RenderResult, compile_edition
 from ..layout.planner import EditionPlan, create_plan
 from ..models import (
