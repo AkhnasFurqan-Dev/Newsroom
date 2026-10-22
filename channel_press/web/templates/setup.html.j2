@@ -1,0 +1,35 @@
+{% extends "base.html.j2" %}
+{% block title %}First-run setup{% endblock %}
+{% block shell_class %}shell--narrow{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="masthead">
+      <div class="kicker">First run</div>
+      <h1>Set up {{ app_name }}</h1>
+      <p class="small">This owner account controls rights declarations, users and exports. Choose a password of at least 12 characters.</p>
+    </div>
+    <form method="post" action="/setup" class="stack">
+      <div class="field">
+        <label for="username">Owner username</label>
+        <input id="username" name="username" type="text" value="owner" required>
+      </div>
+      <div class="field">
+        <label for="display_name">Display name</label>
+        <input id="display_name" name="display_name" type="text" placeholder="Editor in chief">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" minlength="12" required>
+      </div>
+      <div class="field">
+        <label for="confirm">Confirm password</label>
+        <input id="confirm" name="confirm" type="password" minlength="12" required>
+      </div>
+      <label class="field--inline"><input type="checkbox" name="demo_channel" value="1" checked> Create the synthetic fixture channel for the local demo</label>
+      <p class="help">The fixture channel contains invented test content. It is labelled as a demonstration and must not be published as journalism.</p>
+      <button type="submit">Create owner and continue</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

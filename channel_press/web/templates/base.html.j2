@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %} · {{ profile.name if profile else app_name }}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% set tz = profile.timezone if profile else 'Asia/Karachi' %}
+<header class="topbar">
+  <a class="brand" href="/">{{ profile.name if profile else app_name }}<span>.</span></a>
+  <div class="topbar__meta">
+    <div>{{ app_name }} newsroom</div>
+    <div>{{ today|localtime(tz, '%A, %d %B %Y') }} · {{ tz }}</div>
+    {% if user %}<div>{{ user.display_name }} · {{ user.role }}</div>{% endif %}
+  </div>
+</header>
+
+{% if user %}
+<nav class="mainnav" aria-label="Main navigation">
+  <a href="/" class="{{ 'is-active' if active == 'dashboard' }}">Dashboard</a>
+  <a href="/sources" class="{{ 'is-active' if active == 'sources' }}">Sources</a>
+  <a href="/stories" class="{{ 'is-active' if active == 'stories' }}">Stories</a>
+  <a href="/articles" class="{{ 'is-active' if active == 'articles' }}">Articles</a>
+  <a href="/build" class="{{ 'is-active' if active == 'build' }}">Build</a>
+  <a href="/editions" class="{{ 'is-active' if active == 'editions' }}">Editions</a>
+  <a href="/schedules" class="{{ 'is-active' if active == 'schedules' }}">Schedules</a>
+  <a href="/jobs" class="{{ 'is-active' if active == 'jobs' }}">Jobs</a>
+  <a href="/branding" class="{{ 'is-active' if active == 'branding' }}">Branding</a>
+  {% if can.own %}<a href="/users" class="{{ 'is-active' if active == 'users' }}">Users</a>{% endif %}
+  {% if can.edit %}<a href="/audit" class="{{ 'is-active' if active == 'audit' }}">Audit</a>{% endif %}
+  {% if can.own %}<a href="/diagnostics" class="{{ 'is-active' if active == 'diagnostics' }}">Diagnostics</a>{% endif %}
+</nav>
+{% endif %}
+
+<main class="shell {% block shell_class %}{% endblock %}">
+  {% if message %}<div class="flash" role="status">{{ message }}</div>{% endif %}
+  {% if error %}<div class="flash flash--error" role="alert">{{ error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  <span>{{ profile.name if profile else app_name }} · local-first newsroom. Generated editions are an editorial roundup of the owner's authorized source channel.</span>
+  <span>{% if user %}<a href="/account">Account</a> · {% endif %}Data stays on this computer.</span>
+</footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>

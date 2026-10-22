@@ -1,0 +1,42 @@
+{% extends "base.html.j2" %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Worker queue</div>
+    <h1>Jobs</h1>
+    <p class="lede">Persistent, idempotent production jobs. A single file lock prevents concurrent workers; a lost lease is retried after the lock expires.</p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn--ghost" href="/schedules">Schedule settings</a>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th class="num">Job</th><th>Kind</th><th>Channel</th><th>Status</th><th>Stage</th><th class="num">Attempt</th><th>Scheduled</th><th>Finished</th><th>Error</th></tr></thead>
+    <tbody>
+    {% for job in jobs %}
+      <tr>
+        <td class="num"><a href="/jobs/{{ job.id }}">#{{ job.id }}</a></td>
+        <td>{{ job.kind|status_label }}</td>
+        <td class="small">#{{ job.channel_id or '—' }}</td>
+        <td><span class="badge badge--{{ job.status }}">{{ job.status|status_label }}</span></td>
+        <td>{{ job.stage|status_label }}</td>
+        <td class="num">{{ job.attempt }}/{{ job.max_attempts }}</td>
+        <td class="small">{{ job.scheduled_for|localtime(profile.timezone if profile else 'Asia/Karachi') if job.scheduled_for else '—' }}</td>
+        <td class="small">{{ job.finished_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.finished_at else '—' }}</td>
+        <td class="small error-text">{{ job.error[:140] }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted">No jobs. Queue a build from the <a href="/build">Build</a> page.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="notice" style="margin-top:20px">
+  <h3>Detached execution</h3>
+  <p>Builds in the UI start a one-shot worker outside the browser request. If the browser is closed, the job continues. If the machine restarts, the lease expires and the job can be retried without duplicating an edition.</p>
+</div>
+{% endblock %}

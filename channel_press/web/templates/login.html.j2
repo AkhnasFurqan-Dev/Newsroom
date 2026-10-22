@@ -1,0 +1,26 @@
+{% extends "base.html.j2" %}
+{% block title %}Sign in{% endblock %}
+{% block shell_class %}shell--narrow{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="masthead">
+      <div class="kicker">Local newsroom</div>
+      <h1>{{ app_name }}</h1>
+      <p class="small">Authorized source roundup → printable tabloid edition and offline e-paper.</p>
+    </div>
+    <form method="post" action="/login" class="stack">
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit">Sign in</button>
+      <p class="small">Five failed attempts in {{ 15 }} minutes trigger a temporary lockout. This application is intended for a single trusted workstation.</p>
+    </form>
+  </div>
+</div>
+{% endblock %}

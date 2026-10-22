@@ -1,0 +1,76 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ story.canonical_title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">{{ section_labels.get(story.section, story.section) }} · {{ story.genre|status_label }}</div>
+    <h1>{{ story.canonical_title }}</h1>
+    <p class="lede">{{ story.summary }}</p>
+  </div>
+  <div class="page-head__actions">
+    <span class="badge badge--{{ story.risk_level }}">Risk: {{ story.risk_level }}</span>
+    {% if article %}<a class="btn" href="/articles/{{ article.id }}">Open article</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid grid--sidebar">
+  <div>
+    <h2>Claim ledger</h2>
+    <p class="help">Every hard fact in a draft must trace to these claims. A correction supersedes an earlier claim without deleting it.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Claim</th><th>Type</th><th>Certainty</th><th>Verification</th><th>Event time</th><th>Source</th></tr></thead>
+        <tbody>
+        {% for claim in claims %}
+          <tr>
+            <td>{{ claim.text[:280] }}{% if claim.text|length > 280 %}…{% endif %}</td>
+            <td>{{ claim.claim_type }}</td>
+            <td>{{ claim.certainty }}</td>
+            <td>{{ claim.verification_status }}</td>
+            <td class="small">{{ claim.event_at|localtime(profile.timezone if profile else 'Asia/Karachi') if claim.event_at else '—' }}</td>
+            <td class="small">{% if claim.source_post_id %}post #{{ claim.source_post_id }}{% else %}—{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="muted">No claims built yet. Claims are extracted during the edition build.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Source fragments</h2>
+    {% for fragment, post in fragments %}
+      <div class="card" style="margin-bottom:10px">
+        <div class="split">
+          <strong>Message {{ post.telegram_message_id }}</strong>
+          <span class="small">{{ post.posted_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</span>
+        </div>
+        <p class="prose prose--ui" style="margin:8px 0 0">{{ fragment.text }}</p>
+        {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
+      </div>
+    {% else %}
+      <p class="muted">No fragments attached.</p>
+    {% endfor %}
+  </div>
+
+  <aside>
+    <h2>Chronology</h2>
+    {% for event in timeline %}
+      <div class="card" style="margin-bottom:8px">
+        <div class="small">{{ event.event_at|localtime(profile.timezone if profile else 'Asia/Karachi') }} · {{ event.certainty }}</div>
+        <div>{{ event.description }}</div>
+      </div>
+    {% else %}
+      <p class="muted">No timeline events.</p>
+    {% endfor %}
+
+    <h2>Story state</h2>
+    <div class="card">
+      <div class="small">Fingerprint</div>
+      <div class="mono">{{ story.fingerprint }}</div>
+      <div class="small" style="margin-top:8px">Created {{ story.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</div>
+      <div class="small">Updated {{ story.updated_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</div>
+      <div class="small">Channel #{{ story.channel_id }}</div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

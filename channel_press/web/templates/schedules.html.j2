@@ -1,0 +1,97 @@
+{% extends "base.html.j2" %}
+{% block title %}Schedules{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Automation</div>
+    <h1>Schedules</h1>
+    <p class="lede">A schedule creates one idempotent job per cutoff. The Windows Task Scheduler runs a short-lived worker; no model or server process needs to stay active while idle.</p>
+  </div>
+</div>
+
+<div class="notice">
+  <h3>Cutoff and release are separate</h3>
+  <p>Source posts are captured with an upper bound at the cutoff. The release timestamp is when a reviewed edition may be marked published. A missed trigger is caught up from the watermark; it never silently reuses an old edition.</p>
+</div>
+
+{% for row in rows %}
+  {% set schedule = row.schedule %}
+  <div class="card" style="margin-bottom:18px">
+    <div class="split">
+      <div>
+        <div class="kicker">{{ row.channel.title }}</div>
+        <h2 style="margin:4px 0 2px">{{ schedule.kind|status_label }}</h2>
+        <div class="small">{{ schedule.timezone }} · cutoff {{ schedule.cutoff_time }} · release {{ schedule.release_time }} · days {{ schedule.weekdays }}</div>
+      </div>
+      <div>
+        {% if schedule.enabled %}<span class="badge badge--published">Enabled</span>{% else %}<span class="badge">Disabled</span>{% endif %}
+        {% if schedule.requires_review %}<span class="badge badge--review">Review required</span>{% else %}<span class="badge">Auto release</span>{% endif %}
+      </div>
+    </div>
+    {% if can.edit %}
+    <form method="post" action="/schedules/{{ schedule.id }}" class="stack" style="margin-top:14px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="grid grid--4">
+        <div class="field"><label>Cutoff (local)</label><input name="cutoff_time" type="time" value="{{ schedule.cutoff_time }}" required></div>
+        <div class="field"><label>Release (local)</label><input name="release_time" type="time" value="{{ schedule.release_time }}" required></div>
+        <div class="field"><label>Timezone</label><input name="timezone" type="text" value="{{ schedule.timezone }}" required></div>
+        <div class="field"><label>Enabled</label><label class="field--inline"><input type="checkbox" name="enabled" value="1" {% if schedule.enabled %}checked{% endif %}> Run this schedule</label></div>
+      </div>
+      <div class="field-row">
+        {% for index, label in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}
+          <label class="field--inline"><input type="checkbox" name="weekdays" value="{{ index }}" {% if index|string in schedule.weekdays.split(',') %}checked{% endif %}> {{ label }}</label>
+        {% endfor %}
+      </div>
+      <div class="field-row">
+        <label class="field--inline"><input type="checkbox" name="requires_review" value="1" {% if schedule.requires_review %}checked{% endif %}> Require human review before release</label>
+        <label class="field--inline"><input type="checkbox" name="auto_publish_nonrisk" value="1" {% if schedule.auto_publish_nonrisk %}checked{% endif %}> Auto-release only clean, non-risk editions</label>
+      </div>
+      <p class="help">Auto-release is only valid when review is not required. Builds that contain high-risk or unsupported claims always wait for an editor.</p>
+      <div class="field-row"><button type="submit">Save schedule</button></div>
+    </form>
+    {% endif %}
+    {% if can.operate %}
+    <div class="field-row" style="margin-top:10px">
+      <form method="post" action="/schedules/{{ schedule.id }}/run" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost btn--small">Run the latest cutoff now</button>
+      </form>
+      <form method="post" action="/schedules/{{ schedule.id }}/catchup" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost btn--small">Enqueue missed cutoffs</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+{% else %}
+  <p class="muted">No schedules. Create one below.</p>
+{% endfor %}
+
+{% if can.edit %}
+<h2>Add a schedule</h2>
+<form method="post" action="/schedules/new" class="stack" style="max-width:820px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="grid grid--2">
+    <div class="field">
+      <label for="channel_id">Channel</label>
+      <select id="channel_id" name="channel_id" required>
+        {% for channel in channels %}<option value="{{ channel.id }}">{{ channel.title }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="kind">Kind</label>
+      <select id="kind" name="kind">
+        <option value="daily">Daily</option>
+        <option value="weekly_roundup">Weekly roundup</option>
+        <option value="monthly_roundup">Monthly roundup</option>
+      </select>
+    </div>
+    <div class="field"><label>Cutoff</label><input name="cutoff_time" type="time" value="05:00" required></div>
+    <div class="field"><label>Release</label><input name="release_time" type="time" value="08:00" required></div>
+    <div class="field"><label>Timezone</label><input name="timezone" type="text" value="{{ profile.timezone if profile else 'Asia/Karachi' }}" required></div>
+  </div>
+  <p class="help">New schedules start disabled and in review-required mode.</p>
+  <div><button type="submit">Create schedule</button></div>
+</form>
+{% endif %}
+{% endblock %}

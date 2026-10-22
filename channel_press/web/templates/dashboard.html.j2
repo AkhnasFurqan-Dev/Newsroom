@@ -1,0 +1,108 @@
+{% extends "base.html.j2" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Newsroom overview</div>
+    <h1>Today’s desk</h1>
+    <p class="lede">Source evidence, editorial review and production state for {{ profile.name if profile else 'this publication' }}.</p>
+  </div>
+  <div class="page-head__actions">
+    {% if can.operate %}<a class="btn" href="/build">Build edition</a>{% endif %}
+    <a class="btn btn--ghost" href="/sources">Source desk</a>
+  </div>
+</div>
+
+<div class="grid grid--4">
+  <div class="card"><div class="card__label">Source posts</div><div class="card__value">{{ counts.posts }}</div><div class="card__hint">Authorized imports</div></div>
+  <div class="card"><div class="card__label">Articles</div><div class="card__value">{{ counts.articles }}</div><div class="card__hint">{{ counts.stories }} clustered stories</div></div>
+  <div class="card"><div class="card__label">Editions</div><div class="card__value">{{ counts.editions }}</div><div class="card__hint">PDF + e-paper bundles</div></div>
+  <div class="card"><div class="card__label">Open review items</div><div class="card__value">{{ counts.review }}</div><div class="card__hint">{{ counts.jobs }} active or retryable job(s)</div></div>
+</div>
+
+{% if not ready %}
+<div class="notice notice--warn">
+  <h3>Setup is not complete</h3>
+  <p>Create an owner account and publication profile before building an edition.</p>
+</div>
+{% endif %}
+
+<div class="grid grid--sidebar" style="margin-top:26px">
+  <div>
+    <h2>Recent editions</h2>
+    {% if editions %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Edition</th><th>Window end</th><th>Status</th><th class="num">Pages</th><th></th></tr></thead>
+        <tbody>
+        {% for edition in editions %}
+          {% set manifest = edition.manifest_json|json_loads({}) %}
+          <tr>
+            <td><a href="/editions/{{ edition.id }}">{{ edition.title }}</a><div class="small">#{{ edition.issue_number }} · v{{ edition.version }} · {{ edition.kind|status_label }}</div></td>
+            <td>{{ edition.window_end|shortdate(edition.timezone) }}</td>
+            <td><span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span></td>
+            <td class="num">{{ manifest.get('pdf', {}).get('page_count', '—') }}</td>
+            <td>{% if edition.output_dir %}<a href="/editions/{{ edition.id }}/pdf">PDF</a>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">No editions yet. Use <a href="/build">Build edition</a> after importing authorized source posts.</p>
+    {% endif %}
+
+    <h2>Open review items</h2>
+    {% if flags %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Severity</th><th>Item</th><th>Article</th><th>Raised</th></tr></thead>
+        <tbody>
+        {% for flag in flags %}
+          <tr>
+            <td><span class="badge badge--{{ flag.severity }}">{{ flag.severity|status_label }}</span></td>
+            <td>{{ flag.message[:160] }}<div class="small">{{ flag.category|status_label }}</div></td>
+            <td>{% if flag.article_id %}<a href="/articles/{{ flag.article_id }}">Article #{{ flag.article_id }}</a>{% else %}—{% endif %}</td>
+            <td class="small">{{ flag.created_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">No open review items. Sensitive or unsupported material is held automatically.</p>
+    {% endif %}
+  </div>
+
+  <aside>
+    <h2>Production queue</h2>
+    {% if jobs %}
+      {% for job in jobs %}
+      <div class="card" style="margin-bottom:10px">
+        <div class="split">
+          <a href="/jobs/{{ job.id }}">Job #{{ job.id }}</a>
+          <span class="badge badge--{{ job.status }}">{{ job.status|status_label }}</span>
+        </div>
+        <div class="small">{{ job.kind|status_label }} · {{ job.stage|status_label }}</div>
+        <div class="small">{{ job.created_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">No jobs recorded.</p>
+    {% endif %}
+
+    <h2>Channels</h2>
+    {% for channel in channels %}
+      <div class="card" style="margin-bottom:10px">
+        <div class="split">
+          <a href="/sources/{{ channel.id }}">{{ channel.title }}</a>
+          {% if channel.is_demo %}<span class="badge">Fixture</span>{% endif %}
+        </div>
+        <div class="small">{{ channel.handle or channel.slug }}</div>
+      </div>
+    {% else %}
+      <p class="muted">No channels registered. <a href="/sources">Register one</a> with a rights declaration.</p>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

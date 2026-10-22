@@ -1,0 +1,171 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ edition.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">{{ edition.kind|status_label }} · Volume {{ edition.volume }}, Issue {{ edition.issue_number }} · Version {{ edition.version }}</div>
+    <h1>{{ edition.title }}</h1>
+    <p class="lede">Reporting window {{ edition.window_start|localtime(edition.timezone) }} to {{ edition.window_end|localtime(edition.timezone) }}. Cutoff {{ edition.cutoff_at|localtime(edition.timezone) }}.</p>
+  </div>
+  <div class="page-head__actions">
+    <span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span>
+    {% if pdf_exists %}<a class="btn" href="/editions/{{ edition.id }}/pdf" target="_blank" rel="noopener">Open PDF</a>{% endif %}
+    {% if epaper_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/epaper" target="_blank" rel="noopener">E-paper</a>{% endif %}
+  </div>
+</div>
+
+{% if manifest.get('demo_edition') %}
+<div class="notice notice--warn">
+  <h3>Synthetic demonstration edition</h3>
+  <p>This edition was built only from repository fixture data. Its people, places, quotations and figures are invented for software testing. It is not a news report and must not be published as journalism.</p>
+</div>
+{% endif %}
+
+{% if blockers and edition.status != 'published' %}
+<div class="notice notice--danger">
+  <h3>Release held</h3>
+  <p>{{ blockers|join('; ') }}</p>
+  {% if flags %}<p class="small">Open items are listed below. Resolve them from each article's review page.</p>{% endif %}
+</div>
+{% elif blockers %}
+<div class="notice notice--warn">
+  <h3>Published with open review items</h3>
+  <p>This edition is already released. The following items remain open and are recorded against it: {{ blockers|join('; ') }}</p>
+  {% if flags %}<p class="small">Resolve them from each article's review page; a later edition will carry any correction.</p>{% endif %}
+</div>
+{% endif %}
+
+<div class="grid grid--sidebar">
+  <div>
+    <h2>Pages</h2>
+    {% if pages %}
+    <div class="page-strip">
+      {% for page in pages %}
+        <a class="page-thumb" href="/editions/{{ edition.id }}/preview/{{ page.page_number }}" target="_blank" rel="noopener">
+          {% if page.preview_path %}<img src="/editions/{{ edition.id }}/preview/{{ page.page_number }}" alt="Page {{ page.page_number }} preview">{% else %}<div style="height:180px;background:#eee"></div>{% endif %}
+          <span>Page {{ page.page_number }} · {{ page.template|status_label }}</span>
+        </a>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="muted">No page previews recorded.</p>
+    {% endif %}
+
+    <h2>Articles in this edition</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Article</th><th>Section</th><th>Genre</th><th>Status</th><th class="num">Words</th></tr></thead>
+        <tbody>
+        {% for article in articles %}
+          <tr>
+            <td><a href="/articles/{{ article.id }}">{{ article.title }}</a></td>
+            <td>{{ section_labels.get(article.section, article.section) }}</td>
+            <td>{{ article.genre|status_label }}</td>
+            <td><span class="badge badge--{{ article.status }}">{{ article.status|status_label }}</span></td>
+            <td class="num">{{ article.word_count }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="muted">No linked articles.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Quality inspection</h2>
+    {% set quality = manifest.get('quality', {}) %}
+    <div class="audit-box">
+      <div><strong>Page count:</strong> {{ quality.get('page_count', '—') }}</div>
+      <div><strong>Expected page size:</strong> {{ quality.get('expected_size_pt', {}).get('width', 792) }} × {{ quality.get('expected_size_pt', {}).get('height', 1224) }} pt (11 × 17 in)</div>
+      <div><strong>Office-print proof:</strong> {{ 'yes' if quality.get('office_print_proof') else 'no' }}</div>
+      <div><strong>Warnings:</strong> {{ quality.get('warnings', [])|join('; ') or 'none' }}</div>
+      {% if quality.get('pages') %}
+      <h3 style="font-size:14px">Per-page checks</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th class="num">Page</th><th>Size (in)</th><th class="num">Text chars</th><th class="num">Images</th><th class="num">Links</th><th class="num">Min font</th><th>Blank</th></tr></thead>
+          <tbody>
+          {% for row in quality.get('pages', []) %}
+            <tr>
+              <td class="num">{{ row.page }}</td>
+              <td>{{ row.width_in }} × {{ row.height_in }}</td>
+              <td class="num">{{ row.text_chars }}</td>
+              <td class="num">{{ row.images }}</td>
+              <td class="num">{{ row.links }}</td>
+              <td class="num">{{ row.min_font_pt }}</td>
+              <td>{{ 'YES' if row.blank else 'no' }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+
+    <h2>Open review items</h2>
+    {% if flags %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Article</th><th>Category</th><th>Severity</th><th>Message</th></tr></thead>
+        <tbody>
+        {% for flag in flags %}
+          <tr>
+            <td><a href="/articles/{{ flag.article_id }}">Article #{{ flag.article_id }}</a></td>
+            <td>{{ flag.category|status_label }}</td>
+            <td><span class="badge badge--{{ flag.severity }}">{{ flag.severity|status_label }}</span></td>
+            <td>{{ flag.message[:200] }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="muted">No open review items for this edition.</p>
+    {% endif %}
+  </div>
+
+  <aside>
+    <h2>Release</h2>
+    <p class="small">A release marks this immutable local bundle as published. It does not upload anything to a public host.</p>
+    {% if can.edit %}
+      <form method="post" action="/editions/{{ edition.id }}/publish" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" {% if blockers or edition.status == 'published' %}disabled{% endif %}>Release edition</button>
+      </form>
+      {% if can.operate %}
+      <form method="post" action="/editions/{{ edition.id }}/republish" class="stack" style="margin-top:10px">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost">Re-render as version {{ edition.version + 1 }}</button>
+        <span class="help">Re-renders the same article set (for layout or correction fixes) into a new versioned folder.</span>
+      </form>
+      {% endif %}
+    {% endif %}
+
+    <h2>Bundle</h2>
+    <ul class="checklist">
+      <li><span>PDF</span><b>{% if pdf_exists %}<a href="/editions/{{ edition.id }}/pdf">available</a>{% else %}missing{% endif %}</b></li>
+      <li><span>Print HTML</span><b>{{ 'available' if manifest.get('pdf') else '—' }}</b></li>
+      <li><span>E-paper</span><b>{% if epaper_exists %}<a href="/editions/{{ edition.id }}/epaper">available</a>{% else %}missing{% endif %}</b></li>
+      <li><span>Manifest</span><b>{{ 'recorded' if manifest else 'missing' }}</b></li>
+      <li><span>PDF SHA-256</span><b class="mono">{{ (manifest.get('pdf', {}).get('sha256') or '')[:16] }}{% if manifest.get('pdf', {}).get('sha256') %}…{% endif %}</b></li>
+      <li><span>PDF bytes</span><b>{{ manifest.get('pdf', {}).get('bytes', '—') }}</b></li>
+    </ul>
+
+    <h2>Provenance</h2>
+    <div class="small">
+      <p>{{ manifest.get('provenance_note', 'No provenance note recorded.') }}</p>
+      <p><strong>Generated:</strong> {{ manifest.get('generated_at', '—') }}</p>
+      <p><strong>Cartography:</strong> {{ manifest.get('publication', {}).get('cartographic_profile', '—') }}</p>
+      <p><strong>Accent:</strong> {{ manifest.get('publication', {}).get('accent', '—') }}</p>
+      <p><strong>Output:</strong> <span class="mono">{{ edition.output_dir or '—' }}</span></p>
+    </div>
+
+    {% if job %}
+    <h2>Build job</h2>
+    <p><a href="/jobs/{{ job.id }}">Job #{{ job.id }}</a> · <span class="badge badge--{{ job.status }}">{{ job.status|status_label }}</span></p>
+    {% endif %}
+
+    <h2>Notes</h2>
+    <p class="small">This PDF is an office-print proof, not a certified PDF/X print-shop file. Verify the paper size and margins with the printer before commercial production. The source appendix is the evidence trail; QR codes appear only when a public destination is verified.</p>
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,50 @@
+{% extends "base.html.j2" %}
+{% block title %}Stories{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Editorial memory</div>
+    <h1>Stories</h1>
+    <p class="lede">Clustered editorial units with their claim ledger and source chronology. Importance is derived from source content, never from views or reactions.</p>
+  </div>
+</div>
+
+<form method="get" action="/stories" class="toolbar">
+  <div class="field">
+    <label for="channel">Channel</label>
+    <select id="channel" name="channel">
+      <option value="">All accessible</option>
+      {% for c in channels %}<option value="{{ c.id }}" {% if channel_id == c.id %}selected{% endif %}>{{ c.title }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="section">Section</label>
+    <select id="section" name="section">
+      <option value="">All sections</option>
+      {% for key, label in sections %}{% if key != 'front' %}<option value="{{ key }}" {% if section == key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="btn--ghost">Filter</button>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Story</th><th>Section</th><th>Genre</th><th>Risk</th><th class="num">Importance</th><th>Status</th><th>Updated</th></tr></thead>
+    <tbody>
+    {% for story in stories %}
+      <tr>
+        <td><a href="/stories/{{ story.id }}">{{ story.canonical_title }}</a><div class="small">{{ story.summary[:180] }}</div></td>
+        <td>{{ section_labels.get(story.section, story.section) }}</td>
+        <td>{{ story.genre|status_label }}</td>
+        <td><span class="badge {% if story.risk_level == 'high' %}badge--review{% endif %}">{{ story.risk_level }}</span></td>
+        <td class="num">{{ '%.2f'|format(story.importance) }}</td>
+        <td>{{ story.status|status_label }}</td>
+        <td class="small">{{ story.updated_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">No stories. Import source posts and build an edition.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

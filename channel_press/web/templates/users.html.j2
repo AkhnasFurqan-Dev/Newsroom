@@ -1,0 +1,69 @@
+{% extends "base.html.j2" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Access control</div>
+    <h1>Users</h1>
+    <p class="lede">Viewers read editions; operators can queue builds; editors review and edit content; owners control rights, users and secrets. Channel ownership is separate from global roles.</p>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last sign-in</th><th>Created</th><th>Role change</th><th>Access</th></tr></thead>
+    <tbody>
+    {% for record in users %}
+      <tr>
+        <td><strong>{{ record.display_name }}</strong><div class="small">{{ record.username }}</div></td>
+        <td>{{ record.role|status_label }}</td>
+        <td>{% if record.is_active %}<span class="badge badge--published">Active</span>{% else %}<span class="badge badge--rejected">Disabled</span>{% endif %}</td>
+        <td class="small">{{ record.last_login_at|localtime(profile.timezone if profile else 'Asia/Karachi') if record.last_login_at else '—' }}</td>
+        <td class="small">{{ record.created_at|shortdate(profile.timezone if profile else 'Asia/Karachi') }}</td>
+        <td>
+          <form method="post" action="/users/{{ record.id }}/role" class="toolbar" style="padding:0">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <select name="role" style="width:120px">
+              {% for role in ['viewer','operator','editor','owner'] %}<option value="{{ role }}" {% if record.role == role %}selected{% endif %}>{{ role|status_label }}</option>{% endfor %}
+            </select>
+            <button class="btn--small btn--ghost" type="submit">Save</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/users/{{ record.id }}/active" class="stack" style="min-width:170px">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input type="hidden" name="active" value="{{ '' if record.is_active else '1' }}">
+            <button class="btn--small btn--ghost" type="submit">{{ 'Disable' if record.is_active else 'Enable' }}</button>
+          </form>
+          <form method="post" action="/users/{{ record.id }}/password" class="stack" style="min-width:190px;margin-top:6px">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input name="password" type="password" minlength="12" placeholder="New password">
+            <button class="btn--small" type="submit">Reset password</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Create a user</h2>
+<form method="post" action="/users" class="stack" style="max-width:760px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="grid grid--2">
+    <div class="field"><label>Username</label><input name="username" type="text" required></div>
+    <div class="field"><label>Display name</label><input name="display_name" type="text"></div>
+    <div class="field"><label>Role</label>
+      <select name="role">
+        <option value="viewer">Viewer</option>
+        <option value="operator">Operator</option>
+        <option value="editor">Editor</option>
+        <option value="owner">Owner</option>
+      </select>
+    </div>
+    <div class="field"><label>Temporary password</label><input name="password" type="password" minlength="12" required></div>
+  </div>
+  <p class="help">The user must change this password after first sign-in. Passwords are hashed with Argon2id; plaintext is never stored.</p>
+  <div><button type="submit">Create user</button></div>
+</form>
+{% endblock %}

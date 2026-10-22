@@ -1,0 +1,195 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ channel.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Source channel</div>
+    <h1>{{ channel.title }}</h1>
+    <p class="lede">{{ channel.handle or channel.slug }} · {% if channel.is_demo %}synthetic fixture content{% else %}owner-authorized import{% endif %}</p>
+  </div>
+  <div class="page-head__actions">
+    {% if can.operate %}<a class="btn" href="/build?channel={{ channel.id }}">Build from this channel</a>{% endif %}
+  </div>
+</div>
+
+{% if not rights %}
+<div class="notice notice--danger">
+  <h3>Processing blocked</h3>
+  <p>No active content-rights declaration. Imports and AI processing are blocked until an owner records a grant.</p>
+</div>
+{% endif %}
+
+<div class="grid grid--3">
+  <div class="card">
+    <div class="card__label">Rights status</div>
+    <div class="card__value" style="font-size:22px">{% if rights %}Active{% else %}Missing{% endif %}</div>
+    <div class="card__hint">{% if rights %}{{ rights.grantor_name }}{% else %}No grant on record{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="card__label">Reporting window available</div>
+    <div class="card__hint" style="margin-top:8px">{{ window[0]|localtime(profile.timezone if profile else 'Asia/Karachi') }}<br>to {{ window[1]|localtime(profile.timezone if profile else 'Asia/Karachi') }}</div>
+  </div>
+  <div class="card">
+    <div class="card__label">Access</div>
+    <div class="card__value" style="font-size:22px">{{ channel_permission|status_label }}</div>
+    <div class="card__hint">{{ channel.is_public and 'Public source URL' or 'Private source; message IDs only' }}</div>
+  </div>
+</div>
+
+<h2>Import authorized content</h2>
+{% if can.edit %}
+<form method="post" action="/sources/{{ channel.id }}/import" enctype="multipart/form-data" class="stack" style="max-width:820px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field">
+    <label for="file">JSON export</label>
+    <input id="file" name="file" type="file" accept=".json,application/json" required>
+    <span class="help">Owner import format or Telegram Desktop JSON export. Maximum 40 MB. Files are treated as untrusted data; embedded instructions never become policy.</span>
+  </div>
+  <div class="field">
+    <label for="media">Referenced media files (optional)</label>
+    <input id="media" name="media" type="file" multiple>
+    <span class="help">Select the files named by the export so captions and credits stay linked to the original message. Derivative images are reversible copies; originals remain in the data directory.</span>
+  </div>
+  <div><button type="submit" {% if not rights and not channel.is_demo %}disabled{% endif %}>Import</button></div>
+</form>
+{% else %}
+<p class="muted">Editors and owners can import content.</p>
+{% endif %}
+
+<h2>Rights declarations</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Grantor</th><th>Authority basis</th><th>Scope</th><th>Accepted</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for grant in grants %}
+      <tr>
+        <td>{{ grant.grantor_name }}</td>
+        <td>{{ grant.authority_basis }}{% if grant.evidence_ref %}<div class="small">{{ grant.evidence_ref }}</div>{% endif %}</td>
+        <td class="small">{{ grant.scope_json|json_loads([])|join(', ') }}</td>
+        <td class="small">{{ grant.accepted_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %Y') }}</td>
+        <td>{% if grant.revoked_at %}<span class="badge badge--rejected">Revoked</span><div class="small">{{ grant.revoked_at|shortdate(profile.timezone if profile else 'Asia/Karachi') }}</div>{% else %}<span class="badge badge--published">Active</span>{% endif %}</td>
+        <td>
+          {% if not grant.revoked_at and can.own %}
+          <form method="post" action="/sources/{{ channel.id }}/rights/{{ grant.id }}/revoke" class="stack" style="min-width:220px">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input name="reason" type="text" placeholder="Revocation reason" required>
+            <button class="btn--danger btn--small" type="submit">Revoke</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No declarations recorded.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can.own %}
+<details>
+  <summary>Record a new rights declaration</summary>
+  <form method="post" action="/sources/{{ channel.id }}/rights" class="stack" style="max-width:760px;margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="grid grid--2">
+      <div class="field"><label>Grantor</label><input name="grantor_name" type="text" required></div>
+      <div class="field"><label>Evidence reference</label><input name="evidence_ref" type="text"></div>
+    </div>
+    <div class="field"><label>Authority basis</label><input name="authority_basis" type="text" required></div>
+    <div class="field"><label>Notes</label><input name="notes" type="text"></div>
+    <div class="field-row">
+      <label class="field--inline"><input type="checkbox" name="scope" value="ingest" checked> Ingest</label>
+      <label class="field--inline"><input type="checkbox" name="scope" value="ai_process" checked> AI processing</label>
+      <label class="field--inline"><input type="checkbox" name="scope" value="publish" checked> Publication</label>
+    </div>
+    <div><button type="submit">Record declaration</button></div>
+  </form>
+</details>
+{% endif %}
+
+<h2>Source posts <span class="small">({{ posts|length }} shown, newest first)</span></h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th class="num">Msg</th><th>Posted</th><th>Text</th><th>State</th><th>Media</th><th></th></tr></thead>
+    <tbody>
+    {% for post in posts %}
+      <tr>
+        <td class="num mono">{{ post.telegram_message_id }}</td>
+        <td class="small">{{ post.posted_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</td>
+        <td>{{ post.text[:220] }}{% if post.text|length > 220 %}…{% endif %}
+          {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
+          {% if post.exclusion_reason %}<div class="small error-text">{{ exclusion_reasons.get(post.exclusion_reason, post.exclusion_reason) }}</div>{% endif %}
+        </td>
+        <td>{% if post.inclusion_status == 'included' %}<span class="badge badge--published">Included</span>{% else %}<span class="badge">Excluded</span>{% endif %}</td>
+        <td class="small">
+          {% set count = media_counts.get(post.id, 0) %}
+          {% if count %}{{ count }} file{{ '' if count == 1 else 's' }}{% else %}—{% endif %}
+        </td>
+        <td>
+          {% if can.edit and post.inclusion_status == 'included' %}
+          <form method="post" action="/sources/{{ channel.id }}/posts/{{ post.id }}/withdraw" class="stack" style="min-width:150px">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <select name="reason">
+              <option value="rights_withdrawn">Rights withdrawn</option>
+              <option value="deleted">Deleted at source</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="promotion_only">Promotion only</option>
+            </select>
+            <button class="btn--danger btn--small" type="submit">Withdraw</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No posts imported.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Imports</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>File</th><th>Kind</th><th>Imported</th><th class="num">Raw</th><th class="num">Accepted</th><th class="num">Excluded</th><th>SHA-256</th></tr></thead>
+    <tbody>
+    {% for item in imports %}
+      <tr>
+        <td>{{ item.original_name or '(unnamed)' }}</td>
+        <td>{{ item.kind }}</td>
+        <td class="small">{{ item.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</td>
+        <td class="num">{{ item.raw_count }}</td>
+        <td class="num">{{ item.accepted_count }}</td>
+        <td class="num">{{ item.rejected_count }}</td>
+        <td class="mono">{{ item.sha256[:12] }}…</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">No imports recorded.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Schedules</h2>
+{% if schedules %}
+<ul>
+  {% for schedule in schedules %}
+  <li><a href="/schedules">{{ schedule.kind|status_label }}</a> · cutoff {{ schedule.cutoff_time }} · release {{ schedule.release_time }} · {{ schedule.timezone }} · {% if schedule.enabled %}enabled{% else %}disabled{% endif %}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No schedule. Add one on the <a href="/schedules">Schedules</a> page.</p>
+{% endif %}
+
+<h2>Recent stories</h2>
+{% if stories %}
+<ul class="article-list">
+  {% for story in stories %}
+  <li>
+    <div class="small">{{ section_labels.get(story.section, story.section) }} · importance {{ '%.2f'|format(story.importance) }} · risk {{ story.risk_level }}</div>
+    <h3><a href="/stories/{{ story.id }}">{{ story.canonical_title }}</a></h3>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No stories yet. Import content, then build an edition to cluster and draft.</p>
+{% endif %}
+{% endblock %}

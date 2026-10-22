@@ -1,0 +1,12 @@
+{% extends "base.html.j2" %}
+{% block title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Request stopped</div>
+    <h1>{{ code }}</h1>
+    <p class="lede">{{ detail or 'The request could not be completed.' }}</p>
+  </div>
+</div>
+<p><a class="btn" href="/">Return to dashboard</a></p>
+{% endblock %}

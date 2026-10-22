@@ -1,0 +1,77 @@
+{% extends "base.html.j2" %}
+{% block title %}Build edition{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Production</div>
+    <h1>Build an edition</h1>
+    <p class="lede">The build creates a persistent job. A detached worker clusters the window, drafts and audits articles, renders the tabloid PDF and writes the e-paper bundle. Closing this browser does not cancel it.</p>
+  </div>
+</div>
+
+{% if not channels %}
+<div class="notice notice--warn">
+  <h3>No channel available</h3>
+  <p>Register an authorized channel and import source posts first. The synthetic fixture desk can be created with <span class="mono">channel-press demo</span>.</p>
+</div>
+{% else %}
+<div class="grid grid--sidebar">
+  <div>
+    <form method="post" action="/build" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="field">
+        <label for="channel_id">Source channel</label>
+        <select id="channel_id" name="channel_id" required>
+          {% for channel in channels %}
+          <option value="{{ channel.id }}" {% if selected and selected.id == channel.id %}selected{% endif %}>{{ channel.title }}{% if channel.is_demo %} (fixture){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% if not is_demo and not rights %}
+      <div class="notice notice--danger"><h3>Rights declaration missing</h3><p>This channel cannot be built until an owner records an active grant. <a href="/sources/{{ selected.id if selected else '' }}">Open source desk</a>.</p></div>
+      {% endif %}
+      <div class="grid grid--2">
+        <div class="field">
+          <label for="window_start">Window start ({{ profile.timezone if profile else 'Asia/Karachi' }})</label>
+          <input id="window_start" name="window_start" type="datetime-local" value="{{ window_start_local }}" required>
+        </div>
+        <div class="field">
+          <label for="window_end">Window end / cutoff ({{ profile.timezone if profile else 'Asia/Karachi' }})</label>
+          <input id="window_end" name="window_end" type="datetime-local" value="{{ window_end_local }}" required>
+        </div>
+      </div>
+      <p class="help">Posts are selected with <span class="mono">posted_at &gt;= start</span> and <span class="mono">&lt; end</span>. The upper bound is the cutoff; a later post is never treated as fresh content in this edition.</p>
+      <div class="field">
+        <label for="kind">Edition kind</label>
+        <select id="kind" name="kind">
+          <option value="manual">Manual edition</option>
+          <option value="special">Special edition</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="title">Edition title (optional)</label>
+        <input id="title" name="title" type="text" placeholder="Leave blank for the publication name and kind">
+      </div>
+      <input type="hidden" name="publish" value="publish">
+      <div><button type="submit">Queue build</button></div>
+    </form>
+  </div>
+  <aside>
+    <h2>What the build does</h2>
+    <ol class="prose prose--ui">
+      <li>Verifies an active rights declaration for a live channel.</li>
+      <li>Selects included source posts inside the window and rebuilds fragments.</li>
+      <li>Clusters duplicates, albums, replies and corrections into stories.</li>
+      <li>Drafts each article, then runs a separate deterministic evidence audit.</li>
+      <li>Renders tabloid pages, inspects page geometry and writes the PDF.</li>
+      <li>Creates the offline e-paper bundle, manifest and checksums.</li>
+    </ol>
+    <div class="notice notice--warn">
+      <h3>Editorial hold</h3>
+      <p>Articles with unsupported facts or elevated-risk content are held as <strong>needs review</strong>. A low-risk build can still be released; a held edition waits for an editor.</p>
+    </div>
+    <p class="small">Provider: {% if selected and selected.is_demo %}deterministic fixture composer{% else %}Ollama when configured and installed, otherwise the deterministic source composer. Both still pass the independent audit.{% endif %}</p>
+  </aside>
+</div>
+{% endif %}
+{% endblock %}

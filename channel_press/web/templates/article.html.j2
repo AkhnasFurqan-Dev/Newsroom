@@ -1,0 +1,161 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ article.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">{{ section_labels.get(article.section, article.section) }} · {{ article.genre|status_label }} · Revision {{ article.revision }}</div>
+    <h1>{{ article.title }}</h1>
+    <p class="lede">{{ article.deck or article.standfirst }}</p>
+  </div>
+  <div class="page-head__actions">
+    <span class="badge badge--{{ article.status }}">{{ article.status|status_label }}</span>
+    <span class="badge {% if article.risk_level == 'high' %}badge--review{% endif %}">Risk: {{ article.risk_level }}</span>
+    {% if article.locked %}<span class="badge">Locked</span>{% endif %}
+    {% if story %}<a class="btn btn--ghost" href="/stories/{{ story.id }}">Story evidence</a>{% endif %}
+  </div>
+</div>
+
+{% if not gate %}
+<div class="notice notice--danger">
+  <h3>Publication held</h3>
+  <p>Blocking review items: {{ blockers|join(', ') }}. Resolve each item below before approving the article.</p>
+</div>
+{% endif %}
+
+<div class="grid grid--sidebar">
+  <div>
+    <h2>Draft text</h2>
+    {% if can.edit %}
+    <form method="post" action="/articles/{{ article.id }}/edit" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="field"><label for="title">Headline</label><input id="title" name="title" type="text" value="{{ article.title }}" maxlength="300" required></div>
+      <div class="field"><label for="deck">Deck</label><input id="deck" name="deck" type="text" value="{{ article.deck }}" maxlength="300"></div>
+      <div class="field"><label for="standfirst">Standfirst</label><textarea id="standfirst" name="standfirst" style="min-height:80px">{{ article.standfirst }}</textarea></div>
+      <div class="field"><label for="body_text">Body (blank line between paragraphs)</label><textarea id="body_text" class="body-editor" name="body_text" required>{{ article.body_text }}</textarea></div>
+      <label class="field--inline"><input type="checkbox" name="lock" value="1" {% if article.locked %}checked{% endif %}> Lock this headline and text against regeneration</label>
+      <div class="field-row">
+        <button type="submit">Save revision</button>
+      </div>
+    </form>
+    <form method="post" action="/articles/{{ article.id }}/reaudit" class="inline" style="margin-top:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="submit" class="btn--ghost">Re-run independent audit</button>
+    </form>
+    {% else %}
+      <div class="prose">
+        {% for paragraph in article.body_json|json_loads([]) %}<p>{{ paragraph }}</p>{% endfor %}
+      </div>
+    {% endif %}
+
+    <h2>Review items</h2>
+    {% if flags %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Category</th><th>Severity</th><th>Message</th><th>Status</th><th>Decision</th></tr></thead>
+        <tbody>
+        {% for flag in flags %}
+          <tr>
+            <td>{{ flag.category|status_label }}</td>
+            <td><span class="badge badge--{{ flag.severity }}">{{ flag.severity|status_label }}</span></td>
+            <td>{{ flag.message }}</td>
+            <td>{{ flag.status|status_label }}{% if flag.resolved_at %}<div class="small">{{ flag.resolved_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</div>{% endif %}</td>
+            <td>
+              {% if flag.status == 'open' and can.edit %}
+              <form method="post" action="/articles/{{ article.id }}/flags/{{ flag.id }}" class="stack" style="min-width:230px">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input name="note" type="text" placeholder="Decision note (stored in audit)">
+                <div class="field-row">
+                  <button class="btn--small" name="decision" value="approved">Approve item</button>
+                  <button class="btn--danger btn--small" name="decision" value="rejected">Reject item</button>
+                </div>
+              </form>
+              {% else %}
+                <span class="small">{{ flag.decision or '—' }}</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="muted">No review items recorded for this article.</p>
+    {% endif %}
+
+    <h2>Versions</h2>
+    {% for version in versions %}
+    <details>
+      <summary>Revision {{ version.revision }} · {{ version.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</summary>
+      <pre>{{ version.snapshot_json }}</pre>
+    </details>
+    {% else %}
+      <p class="muted">No saved revisions.</p>
+    {% endfor %}
+  </div>
+
+  <aside>
+    <h2>Audit</h2>
+    <div class="audit-box">
+      <div><strong>Citation coverage:</strong> {{ ((audit_data.get('citation_coverage', 0) or 0) * 100)|round|int }}%</div>
+      <div><strong>Fact sentences:</strong> {{ audit_data.get('supported', 0) }}/{{ audit_data.get('fact_sentences', 0) }} supported</div>
+      <div><strong>Claims available:</strong> {{ audit_data.get('claims_available', 0) }}</div>
+      <div><strong>Provider:</strong> {{ audit_data.get('provider', '—') }}{% if audit_data.get('model') %} · {{ audit_data.get('model') }}{% endif %}</div>
+      <div><strong>Audited:</strong> {{ audit_data.get('audited_at', '—') }}</div>
+      {% if audit_data.get('fallback_reason') %}<div class="error-text" style="margin-top:6px">Fallback: {{ audit_data.get('fallback_reason') }}</div>{% endif %}
+      {% if audit_data.get('unsupported') %}
+      <h3 style="font-size:14px">Unsupported sentences</h3>
+      <ul>
+        {% for item in audit_data.get('unsupported', []) %}
+        <li>{{ item.sentence[:220] }}<div class="small">{{ item.reasons|join('; ') }}</div></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if audit_data.get('style') %}
+      <h3 style="font-size:14px">Style lint</h3>
+      <div class="small">Stock phrases: {{ audit_data.get('style', {}).get('stock_phrases', [])|join(', ') or 'none' }}</div>
+      <div class="small">Repeated openings: {{ audit_data.get('style', {}).get('repeated_openings', [])|join(', ') or 'none' }}</div>
+      {% endif %}
+    </div>
+
+    <h2>Status decision</h2>
+    {% if can.edit %}
+    <form method="post" action="/articles/{{ article.id }}/status" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="field">
+        <label for="status">Article status</label>
+        <select id="status" name="status">
+          {% for value in ['draft', 'needs_review', 'approved', 'rejected'] %}
+          <option value="{{ value }}" {% if article.status == value %}selected{% endif %}>{{ value|status_label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit">Update status</button>
+    </form>
+    <form method="post" action="/articles/{{ article.id }}/lock" class="inline" style="margin-top:8px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="locked" value="{{ '' if article.locked else '1' }}">
+      <button type="submit" class="btn--ghost btn--small">{{ 'Unlock article' if article.locked else 'Lock article' }}</button>
+    </form>
+    {% endif %}
+
+    <h2>Media</h2>
+    {% for row in media %}
+      <div class="card" style="margin-bottom:8px">
+        <div class="small">{{ row.graphic_kind|status_label }}{% if row.selected %} · selected{% endif %}</div>
+        <div>{{ row.caption or '(no caption)' }}</div>
+        <div class="small">Credit: {{ row.credit or 'source channel' }}</div>
+        {% if row.checksum %}<div class="mono">{{ row.checksum[:16] }}…</div>{% endif %}
+      </div>
+    {% else %}
+      <p class="muted">No selected media.</p>
+    {% endfor %}
+
+    <h2>Appears in</h2>
+    {% for edition in editions %}
+      <div><a href="/editions/{{ edition.id }}">{{ edition.title }}</a> <span class="small">v{{ edition.version }} · {{ edition.status }}</span></div>
+    {% else %}
+      <p class="muted">Not linked to an edition.</p>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

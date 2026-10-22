@@ -1,0 +1,57 @@
+{% extends "base.html.j2" %}
+{% block title %}Sources{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Authorization and intake</div>
+    <h1>Source desk</h1>
+    <p class="lede">Only content the owner has the right to process may enter the newsroom. Every channel needs a recorded grantor, authority basis and evidence reference.</p>
+  </div>
+  <div class="page-head__actions"><a class="btn btn--ghost" href="/stories">View stories</a></div>
+</div>
+
+<div class="notice">
+  <h3>Telegram boundary</h3>
+  <p>Public read access does not grant republication rights. Live Telegram credentials are not configured in this installation. The rights-cleared JSON import and the synthetic fixture desk work without any Telegram account.</p>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Channel</th><th>Mode</th><th>Rights</th><th class="num">Posts</th><th class="num">Included</th><th class="num">Stories</th><th></th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td><a href="/sources/{{ row.channel.id }}">{{ row.channel.title }}</a><div class="small">{{ row.channel.handle or row.channel.slug }}</div></td>
+        <td>{% if row.channel.is_demo %}<span class="badge">Fixture</span>{% else %}<span class="badge">Live import</span>{% endif %}</td>
+        <td>{% if row.rights %}<span class="badge badge--published">Active</span><div class="small">{{ row.rights.grantor_name }}</div>{% else %}<span class="badge badge--block_publish">Missing</span>{% endif %}</td>
+        <td class="num">{{ row.posts }}</td>
+        <td class="num">{{ row.included }}</td>
+        <td class="num">{{ row.stories }}</td>
+        <td><a href="/sources/{{ row.channel.id }}">Open</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">No channels registered.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can.edit %}
+<h2>Register an authorized channel</h2>
+<p class="help">Use this for an owner-controlled channel or one for which you hold documented republication rights. A rights declaration is mandatory before importing live content.</p>
+<form method="post" action="/sources/new" class="stack" style="max-width:760px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="grid grid--2">
+    <div class="field"><label for="title">Channel title</label><input id="title" name="title" type="text" required placeholder="Regional desk channel"></div>
+    <div class="field"><label for="slug">Internal slug</label><input id="slug" name="slug" type="text" placeholder="regional-desk"></div>
+    <div class="field"><label for="handle">Telegram handle</label><input id="handle" name="handle" type="text" placeholder="@channel"></div>
+    <div class="field field--inline" style="align-self:end"><input id="public" name="public" type="checkbox" value="1"><label for="public">Channel has a public t.me address</label></div>
+  </div>
+  <div class="field"><label for="grantor">Grantor (person or organisation)</label><input id="grantor" name="grantor" type="text" required></div>
+  <div class="field"><label for="authority_basis">Authority basis</label><input id="authority_basis" name="authority_basis" type="text" required placeholder="Owner of the channel; written permission dated ..."></div>
+  <div class="field"><label for="evidence_ref">Evidence reference</label><input id="evidence_ref" name="evidence_ref" type="text" placeholder="Signed letter filed at ..."></div>
+  <p class="help">The declaration is recorded in the audit trail. Revocation immediately blocks new imports, AI processing and builds for the channel.</p>
+  <div><button type="submit">Register channel</button></div>
+</form>
+{% endif %}
+{% endblock %}

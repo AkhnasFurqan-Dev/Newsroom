@@ -1,0 +1,32 @@
+{% extends "base.html.j2" %}
+{% block title %}Account{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Account</div>
+    <h1>{{ user.display_name }}</h1>
+    <p class="lede">{{ user.username }} · {{ user.role|status_label }} · joined {{ user.created_at|shortdate(profile.timezone if profile else 'Asia/Karachi') }}</p>
+  </div>
+</div>
+
+<div class="grid grid--2">
+  <div>
+    <h2>Change password</h2>
+    <form method="post" action="/account" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <div class="field"><label>Current password</label><input name="current_password" type="password" required></div>
+      <div class="field"><label>New password</label><input name="new_password" type="password" minlength="12" required></div>
+      <div class="field"><label>Confirm new password</label><input name="confirm" type="password" minlength="12" required></div>
+      <div><button type="submit">Update password</button></div>
+    </form>
+  </div>
+  <div>
+    <h2>Session</h2>
+    <p class="small">Sessions expire after 12 hours by default. Signing out revokes this session on the server; clearing the browser cookie alone is not treated as a sign-out.</p>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="btn--danger" type="submit">Sign out</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html.j2" %}
+{% block title %}Audit{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Accountability</div>
+    <h1>Audit trail</h1>
+    <p class="lede">Authentication, rights, imports, edits, review decisions, builds and releases are recorded with the acting user and a UTC timestamp.</p>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Object</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for event in events %}
+      <tr>
+        <td class="small">{{ event.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</td>
+        <td class="small">{{ event.actor_id or 'system' }}</td>
+        <td>{{ event.action|status_label }}</td>
+        <td class="small">{{ event.object_type }} {{ event.object_id }}</td>
+        <td class="mono">{{ event.detail_json[:220] }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No audit events.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

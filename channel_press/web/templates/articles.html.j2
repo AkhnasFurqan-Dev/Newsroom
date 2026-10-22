@@ -1,0 +1,59 @@
+{% extends "base.html.j2" %}
+{% block title %}Articles{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Draft desk</div>
+    <h1>Articles</h1>
+    <p class="lede">Drafts, audit state and editorial decisions. Unsupported factual sentences are held for review rather than silently published.</p>
+  </div>
+</div>
+
+<form method="get" action="/articles" class="toolbar">
+  <div class="field">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">All statuses</option>
+      {% for value in ['draft', 'needs_review', 'approved', 'rejected'] %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ value|status_label }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="channel">Channel</label>
+    <select id="channel" name="channel">
+      <option value="">All accessible</option>
+      {% for c in channels %}<option value="{{ c.id }}" {% if channel_id == c.id %}selected{% endif %}>{{ c.title }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="q">Search</label>
+    <input id="q" name="q" type="text" value="{{ q }}" placeholder="Headline or body">
+  </div>
+  <button type="submit" class="btn--ghost">Filter</button>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Article</th><th>Section</th><th>Genre</th><th>Status</th><th>Risk</th><th class="num">Words</th><th>Revision</th><th>Updated</th></tr></thead>
+    <tbody>
+    {% for article in articles %}
+      {% set audit = article.audit_json|json_loads({}) %}
+      <tr>
+        <td><a href="/articles/{{ article.id }}">{{ article.title }}</a>
+          <div class="small">{{ article.deck or article.standfirst or '' }}</div>
+          {% if audit.get('unsupported_count') %}<div class="small error-text">{{ audit.get('unsupported_count') }} unsupported factual sentence(s)</div>{% endif %}
+        </td>
+        <td>{{ section_labels.get(article.section, article.section) }}</td>
+        <td>{{ article.genre|status_label }}</td>
+        <td><span class="badge badge--{{ article.status }}">{{ article.status|status_label }}</span>{% if article.locked %}<div class="small">Locked</div>{% endif %}</td>
+        <td><span class="badge {% if article.risk_level == 'high' %}badge--review{% endif %}">{{ article.risk_level }}</span></td>
+        <td class="num">{{ article.word_count }}</td>
+        <td class="num">{{ article.revision }}</td>
+        <td class="small">{{ article.updated_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">No articles yet. Build an edition to draft from clustered source evidence.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

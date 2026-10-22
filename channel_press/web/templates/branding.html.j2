@@ -1,0 +1,75 @@
+{% extends "base.html.j2" %}
+{% block title %}Branding{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Publication identity</div>
+    <h1>Branding &amp; edition policy</h1>
+    <p class="lede">These values drive the masthead, section order, cartographic convention and source-link policy. Changes apply to the next build; existing editions keep their profile snapshot.</p>
+  </div>
+</div>
+
+{% set order = profile.section_order_json|json_loads([]) %}
+<form method="post" action="/branding" class="stack" style="max-width:960px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="grid grid--2">
+    <div class="field"><label for="name">Publication name</label><input id="name" name="name" type="text" value="{{ profile.name }}" required></div>
+    <div class="field"><label for="channel_handle">Source channel handle</label><input id="channel_handle" name="channel_handle" type="text" value="{{ profile.channel_handle }}"></div>
+    <div class="field"><label for="slogan">Slogan</label><input id="slogan" name="slogan" type="text" value="{{ profile.slogan }}"></div>
+    <div class="field"><label for="city">City</label><input id="city" name="city" type="text" value="{{ profile.city }}"></div>
+    <div class="field"><label for="timezone">Timezone (IANA)</label><input id="timezone" name="timezone" type="text" value="{{ profile.timezone }}" required></div>
+    <div class="field"><label for="accent">Accent colour</label><input id="accent" name="accent" type="text" value="{{ profile.accent }}" pattern="#[0-9a-fA-F]{6}" required></div>
+    <div class="field"><label for="paper_size">Paper size</label>
+      <select id="paper_size" name="paper_size">
+        <option value="tabloid" {% if profile.paper_size == 'tabloid' %}selected{% endif %}>Tabloid 11 × 17 in</option>
+        <option value="a3" {% if profile.paper_size == 'a3' %}selected{% endif %}>A3 297 × 420 mm</option>
+      </select>
+    </div>
+    <div class="field"><label for="issue_volume">Volume number</label><input id="issue_volume" name="issue_volume" type="number" min="1" value="{{ profile.issue_volume }}"></div>
+    <div class="field"><label for="map_profile">Cartographic convention</label>
+      <select id="map_profile" name="map_profile">
+        {% for item in maps %}<option value="{{ item.key }}" {% if profile.map_profile == item.key %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label for="qr_strategy">Source link / QR policy</label>
+      <select id="qr_strategy" name="qr_strategy">
+        <option value="appendix" {% if profile.qr_strategy == 'appendix' %}selected{% endif %}>Appendix links; QR only when verified reachable</option>
+        <option value="verified_only" {% if profile.qr_strategy == 'verified_only' %}selected{% endif %}>Verified public QR only</option>
+        <option value="none" {% if profile.qr_strategy == 'none' %}selected{% endif %}>No QR codes</option>
+      </select>
+    </div>
+    <div class="field"><label for="contact_url">Contact / public URL</label><input id="contact_url" name="contact_url" type="text" value="{{ profile.contact_url }}"></div>
+  </div>
+
+  <div class="field"><label for="footer_text">Footer / provenance text</label><textarea id="footer_text" name="footer_text" style="min-height:90px">{{ profile.footer_text }}</textarea></div>
+
+  <h2>Section order</h2>
+  <p class="help">Sections without articles are omitted. The front page is always first and the source appendix is always last.</p>
+  <div class="field-row">
+    {% for key, label in sections %}{% if key != 'front' %}
+    <label class="field--inline"><input type="checkbox" name="section_order" value="{{ key }}" {% if key in order or not order %}checked{% endif %}> {{ label }}</label>
+    {% endif %}{% endfor %}
+  </div>
+
+  <label class="field--inline"><input type="checkbox" name="allow_closing_light" value="1" {% if profile.allow_closing_light %}checked{% endif %}> Allow closing light only when a documented true source is available</label>
+
+  <div><button type="submit">Save publication profile</button></div>
+</form>
+
+<h2>Current map conventions</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Profile</th><th>Dataset</th><th>License</th><th>Disputed-boundary rule</th></tr></thead>
+    <tbody>
+    {% for item in maps %}
+      <tr>
+        <td><strong>{{ item.name }}</strong><div class="small">{{ item.key }}{% if not item.enabled %} · disabled{% endif %}</div></td>
+        <td>{{ item.dataset }}<div class="small">{{ item.dataset_version }}</div></td>
+        <td>{{ item.license }}</td>
+        <td class="small">{{ item.disputed_rule }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

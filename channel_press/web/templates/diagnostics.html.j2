@@ -1,0 +1,40 @@
+{% extends "base.html.j2" %}
+{% block title %}Diagnostics{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Owner tools</div>
+    <h1>Diagnostics</h1>
+    <p class="lede">Local runtime and integration status. No secret value, session token or API hash is shown here.</p>
+  </div>
+</div>
+
+<div class="grid grid--4">
+  <div class="card"><div class="card__label">Posts</div><div class="card__value">{{ counts.posts }}</div></div>
+  <div class="card"><div class="card__label">Stories</div><div class="card__value">{{ counts.stories }}</div></div>
+  <div class="card"><div class="card__label">Articles</div><div class="card__value">{{ counts.articles }}</div></div>
+  <div class="card"><div class="card__label">Editions</div><div class="card__value">{{ counts.editions }}</div></div>
+</div>
+
+<h2>Checks</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Component</th><th>Status</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for label, result, ok in checks %}
+      <tr>
+        <td><strong>{{ label }}</strong></td>
+        <td>{% if ok %}<span class="badge badge--published">Ready</span>{% else %}<span class="badge badge--review">Attention</span>{% endif %}</td>
+        <td>{{ result }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Data and privacy</h2>
+<div class="notice">
+  <p>The database, media derivatives and published bundles stay under the local <span class="mono">data/</span> and <span class="mono">output/</span> folders. Credentials are optional, stored outside Git, and never rendered into print output or manifests.</p>
+  <p>Use <span class="mono">channel-press backup</span> before upgrades. Restore requires the server and worker to be stopped.</p>
+</div>
+{% endblock %}

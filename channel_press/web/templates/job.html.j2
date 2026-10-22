@@ -1,0 +1,102 @@
+{% extends "base.html.j2" %}
+{% block title %}Job #{{ job.id }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Production job</div>
+    <h1>Job #{{ job.id }}</h1>
+    <p class="lede">{{ job.kind|status_label }} · attempt {{ job.attempt }} of {{ job.max_attempts }}</p>
+  </div>
+  <div class="page-head__actions">
+    <span class="badge badge--{{ job.status }}" id="job-status">{{ job.status|status_label }}</span>
+    {% if edition %}<a class="btn" href="/editions/{{ edition.id }}">Open edition</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid grid--sidebar">
+  <div>
+    <h2>Progress</h2>
+    <div class="card">
+      <div><strong>Stage:</strong> <span id="job-stage">{{ job.stage|status_label }}</span></div>
+      <div><strong>Status:</strong> <span id="job-status-text">{{ job.status|status_label }}</span></div>
+      <div><strong>Scheduled:</strong> {{ job.scheduled_for|localtime(profile.timezone if profile else 'Asia/Karachi') if job.scheduled_for else '—' }}</div>
+      <div><strong>Started:</strong> {{ job.started_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.started_at else '—' }}</div>
+      <div><strong>Heartbeat:</strong> {{ job.heartbeat_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.heartbeat_at else '—' }}</div>
+      <div><strong>Finished:</strong> {{ job.finished_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.finished_at else '—' }}</div>
+      <div><strong>Lease:</strong> <span class="mono">{{ job.lock_owner or '—' }}</span></div>
+      {% if job.error %}<div class="error-text" style="margin-top:8px">{{ job.error }}</div>{% endif %}
+    </div>
+
+    <h2>Steps</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Step</th><th>Status</th><th>Detail</th><th>Finished</th></tr></thead>
+        <tbody>
+        {% for step in steps %}
+          <tr>
+            <td>{{ step.name|status_label }}</td>
+            <td>{{ step.status }}</td>
+            <td>{{ step.detail }}</td>
+            <td class="small">{{ step.finished_at|localtime(profile.timezone if profile else 'Asia/Karachi') if step.finished_at else '—' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted">No completed steps yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Result</h2>
+    <pre>{{ result|tojson(indent=2) if result else '{}' }}</pre>
+  </div>
+
+  <aside>
+    <h2>Actions</h2>
+    {% if can.operate %}
+      <form method="post" action="/jobs/{{ job.id }}/retry" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost">Retry failed job</button>
+      </form>
+      <form method="post" action="/jobs/{{ job.id }}/cancel" class="stack" style="margin-top:8px">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--danger">Cancel queued job</button>
+      </form>
+    {% endif %}
+    <p class="small">A failed layout job leaves no published edition. Retry resumes from a fresh transactional build and cannot create a duplicate release for the same cutoff.</p>
+
+    <h2>Timing</h2>
+    <div class="small">
+      <p>Created {{ job.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</p>
+      {% if job.started_at and job.finished_at %}
+      <p>Worker duration: {{ ((job.finished_at - job.started_at).total_seconds())|round(1) }} seconds</p>
+      {% endif %}
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const id = {{ job.id }};
+  const terminal = new Set(["published", "failed_terminal", "canceled", "awaiting_review"]);
+  const status = document.getElementById("job-status");
+  const statusText = document.getElementById("job-status-text");
+  const stage = document.getElementById("job-stage");
+  if (!status || terminal.has({{ job.status|tojson }})) return;
+  let ticks = 0;
+  const timer = setInterval(async () => {
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {headers: {"Accept": "application/json"}});
+      if (!response.ok) return;
+      const data = await response.json();
+      status.textContent = data.status.replaceAll("_", " ");
+      status.className = "badge badge--" + data.status;
+      if (statusText) statusText.textContent = data.status.replaceAll("_", " ");
+      if (stage) stage.textContent = (data.stage || "").replaceAll("_", " ");
+      if (terminal.has(data.status)) { clearInterval(timer); location.reload(); }
+    } catch (error) { /* offline: keep the server-rendered state */ }
+    if (++ticks > 200) clearInterval(timer);
+  }, 3000);
+})();
+</script>
+{% endblock %}

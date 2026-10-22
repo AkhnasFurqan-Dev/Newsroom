@@ -1,0 +1,37 @@
+{% extends "base.html.j2" %}
+{% block title %}Editions{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Archive</div>
+    <h1>Editions</h1>
+    <p class="lede">Every release keeps its PDF, page previews, offline e-paper, manifest and checksums. Re-rendering creates a new version instead of overwriting the record.</p>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Edition</th><th>Date</th><th>Kind</th><th>Status</th><th class="num">Pages</th><th class="num">Version</th><th>Released</th><th>Files</th></tr></thead>
+    <tbody>
+    {% for edition in editions %}
+      {% set manifest = edition.manifest_json|json_loads({}) %}
+      <tr>
+        <td><a href="/editions/{{ edition.id }}">{{ edition.title }}</a><div class="small">#{{ edition.issue_number }}</div></td>
+        <td class="small">{{ edition.window_end|shortdate(edition.timezone) }}</td>
+        <td>{{ edition.kind|status_label }}</td>
+        <td><span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span></td>
+        <td class="num">{{ manifest.get('pdf', {}).get('page_count', '—') }}</td>
+        <td class="num">{{ edition.version }}</td>
+        <td class="small">{{ edition.published_at|localtime(edition.timezone) if edition.published_at else '—' }}</td>
+        <td class="small">
+          {% if edition.pdf_path %}<a href="/editions/{{ edition.id }}/pdf">PDF</a>{% endif %}
+          {% if edition.epaper_dir %} · <a href="/editions/{{ edition.id }}/epaper">E-paper</a>{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="muted">No editions yet. <a href="/build">Build the first edition</a>.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
