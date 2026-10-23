@@ -12,7 +12,8 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir ("worker-" + (Get-Date -Format "yyyyMMdd") + ".log")
 
 "[{0}] worker pass start" -f (Get-Date -Format "s") | Out-File -FilePath $log -Append -Encoding utf8
-& $python -m channel_press.cli worker --once *>> $log
+$out = & $python -m channel_press.cli worker --once 2>> (Join-Path $logDir ("worker-err-" + (Get-Date -Format "yyyyMMdd") + ".log")) | Out-String
 $code = $LASTEXITCODE
+Add-Content -Path $log -Value $out.TrimEnd() -Encoding utf8
 "[{0}] worker pass exit {1}" -f (Get-Date -Format "s"), $code | Out-File -FilePath $log -Append -Encoding utf8
 exit $code
