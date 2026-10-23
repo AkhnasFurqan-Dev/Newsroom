@@ -228,66 +228,25 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
         ):
             section_rows[section] = [chunks[i : i + 2] for i in range(0, len(chunks), 2)]
 
-    def story_height(chunk: StoryChunk, *, half_width: bool) -> float:
-        height = 0.95 + _words(chunk.paragraphs) / (200.0 if half_width else 210.0)
-        if chunk.package.media_path:
-            height += 2.4 if half_width else 3.6
-        if chunk.package.map_result is not None:
-            height += 2.7 if half_width else 4.2
-        if chunk.package.chart_svg and not chunk.package.media_path:
-            height += 2.0 if half_width else 2.4
-        if chunk.package.timeline_html:
-            height += 1.4 if half_width else 1.8
-        return height
-
-    def estimate(section: str) -> float:
-        """Conservative height estimate in inches for page-packing decisions."""
-        chunks = section_chunks.get(section, [])
-        rows = section_rows.get(section)
-        height = 0.62  # section head and rule
-        if rows:
-            for row in rows:
-                height += max(story_height(chunk, half_width=len(row) > 1) for chunk in row) + 0.24
-            return height
-        compact_media = section in {"defence", "conflict"} and len(chunks) > 1
-        for chunk in chunks:
-            part = 0.95 + _words(chunk.paragraphs) / 210.0
-            if chunk.package.media_path:
-                part += 2.5 if compact_media else 3.6
-            if chunk.package.map_result is not None:
-                part += 2.5 if compact_media else 4.2
-            if chunk.package.chart_svg and not chunk.package.media_path:
-                part += 2.4
-            if chunk.package.timeline_html:
-                part += 1.8
-            height += part + 0.18
-        return height
-
     # Sections that must open their own page: the two feature/opinion families
     # carry a distinctive layout and the brief grid is a fixed four-column page.
     standalone = {"analysis", "opinion", "briefs"}
-    used = 0.0
     previous = ""
     for index, (section, _) in enumerate(ordered):
-        this_height = estimate(section)
         if index == 0:
             section_break[section] = True
-            used = this_height
             previous = section
             continue
         if section in standalone or previous in standalone:
             section_break[section] = True
-            used = this_height
             previous = section
             continue
-        # Fill the current page while the next section still fits inside the
-        # tabloid text block (about 15.9in tall, kept conservative at 13.6in).
-        if used + this_height <= 13.6:
-            section_break[section] = False
-            used += this_height
-        else:
-            section_break[section] = True
-            used = this_height
+        # Let Paged.js fill the real page. Estimating section heights here used
+        # to force a page break that the rendered rows did not need, leaving
+        # pages holding only a section record or the last report of a section.
+        # Non-standalone sections flow; their heads carry ``break-after: avoid``
+        # so a head never sits alone at the foot of a page.
+        section_break[section] = False
         previous = section
     return PageChunkPlan(
         lead=lead,
@@ -693,9 +652,20 @@ def inspect_pdf(pdf_path: Path, meta: dict | None = None) -> dict:
             if report.get("blank"):
                 warnings.append(f"Browser layout reported blank page {report.get('page')}.")
             if report.get("overflow"):
-                kinds = sorted({item.get("kind", "unknown") for item in report["overflow"]})
+                details = []
+                for item in report["overflow"]:
+                    label = str(item.get("tag") or item.get("kind") or "element")
+                    if item.get("cls"):
+                        label += f".{str(item['cls']).split()[0]}"
+                    if item.get("text"):
+                        label += f' "{str(item["text"])[:40]}"'
+                    over = item.get("over_px")
+                    if isinstance(over, (int, float)):
+                        label += f" (+{int(over)}px)"
+                    details.append(label)
                 warnings.append(
-                    f"Browser layout reported overflow on page {report.get('page')}: {', '.join(kinds)}."
+                    f"Browser layout reported overflow on page {report.get('page')}: "
+                    f"{'; '.join(sorted(set(details)))}."
                 )
     return {
         "page_count": page_count,

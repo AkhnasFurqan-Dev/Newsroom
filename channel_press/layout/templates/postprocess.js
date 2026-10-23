@@ -76,6 +76,14 @@
       all.forEach(function (el) {
         const tag = (el.tagName || "").toLowerCase();
         if (tag === "script" || tag === "style" || tag === "svg" || tag === "path") { return; }
+        // Paged.js wraps split flow content in an anonymous div whose width is
+        // the full multi-column measure rather than the printed column. The
+        // visible children are measured on their own below, so the wrapper must
+        // not be reported as page overflow.
+        if (!(el.className || "").toString().trim() && !el.id && el.children.length === 1) {
+          const only = el.firstElementChild;
+          if (only && (only.hasAttribute("data-ref") || only.hasAttribute("data-split-from") || only.hasAttribute("data-split-to"))) { return; }
+        }
         const hasText = el.children.length === 0 && textOf(el).length > 0;
         if (hasText) {
           const fs = parseFloat(window.getComputedStyle(el).fontSize || "0");
@@ -87,14 +95,31 @@
         if (el.scrollWidth > el.clientWidth + 2 && el.clientWidth > 0) {
           const style = window.getComputedStyle(el);
           if (style.overflowX === "visible") {
-            record.overflow.push({ kind: "horizontal", tag: tag, cls: el.className && el.className.toString().slice(0, 60) });
+            record.overflow.push({
+              kind: "horizontal",
+              tag: tag,
+              cls: el.className && el.className.toString().slice(0, 60),
+              text: textOf(el).slice(0, 60),
+              over_px: Math.round(el.scrollWidth - el.clientWidth)
+            });
           }
         }
         const r = el.getBoundingClientRect();
         if (r.width > 0 && r.height > 0) {
           if (r.right > contentRect.right + 3 || r.left < contentRect.left - 3 ||
               r.bottom > contentRect.bottom + 3 || r.top < contentRect.top - 3) {
-            record.overflow.push({ kind: "outside", tag: tag, cls: (el.className || "").toString().slice(0, 60) });
+            record.overflow.push({
+              kind: "outside",
+              tag: tag,
+              cls: (el.className || "").toString().slice(0, 60),
+              text: textOf(el).slice(0, 60),
+              over_px: Math.round(Math.max(
+                r.right - contentRect.right,
+                contentRect.left - r.left,
+                r.bottom - contentRect.bottom,
+                contentRect.top - r.top
+              ))
+            });
           }
         }
       });
