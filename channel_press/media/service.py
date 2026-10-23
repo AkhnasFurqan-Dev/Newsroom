@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import PostFragment, PostMedia, SourcePost, StoryCluster
+from ..models import Channel, PostFragment, PostMedia, SourcePost, StoryCluster
 from ..timeutil import utcnow
 
 
@@ -125,6 +125,86 @@ def _story_posts(db: Session, story: StoryCluster) -> list[SourcePost]:
     return list(posts.values())
 
 
+def _declared_bytes(post: SourcePost, file_id: str) -> int:
+    try:
+        raw = json.loads(post.raw_json or "{}")
+    except (TypeError, ValueError):
+        return 0
+    for item in raw.get("media", []) or []:
+        if str(item.get("telegram_file_id") or "") == str(file_id):
+            try:
+                return int(item.get("bytes") or 0)
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def ensure_media_files(db: Session, story: StoryCluster) -> int:
+    """Lazily fetch remote media only for a story that reached the layout.
+
+    Telegram delivery stores metadata first. The full file is downloaded here,
+    once, within the configured video budget. A failure leaves the story
+    text-only rather than inventing an image.
+    """
+    if not settings.telegram_download_media:
+        return 0
+    posts = {post.id: post for post in _story_posts(db, story)}
+    if not posts:
+        return 0
+    media_rows = list(
+        db.scalars(select(PostMedia).where(PostMedia.post_id.in_(list(posts.keys()))))
+    )
+    if not media_rows:
+        return 0
+    from ..telegram.service import telegram_service
+
+    downloaded = 0
+    for media in media_rows:
+        if media.original_path and Path(media.original_path).exists():
+            continue
+        if not media.telegram_file_id:
+            continue
+        post = posts.get(media.post_id)
+        if post is None or not post.telegram_message_id:
+            continue
+        channel = db.get(Channel, post.channel_id)
+        handle = (channel.handle if channel else "") or settings.telegram_source_username
+        if channel is None or channel.is_demo or not handle:
+            continue
+        if not telegram_service.credentials_configured():
+            continue
+        if media.kind in {"video", "animation"}:
+            declared = _declared_bytes(post, media.telegram_file_id) / (1024 * 1024)
+            if declared > settings.telegram_max_video_mb:
+                continue
+        suffix = (
+            ".jpg"
+            if media.kind in {"photo", "image"}
+            else ".mp4"
+            if media.kind in {"video", "animation"}
+            else ".bin"
+        )
+        target = settings.media_dir / channel.slug / str(post.id) / f"telegram_{media.id}{suffix}"
+        try:
+            telegram_service.download_media(handle, post.telegram_message_id, target)
+        except Exception:  # noqa: BLE001 - an unavailable photo must not fail the edition
+            continue
+        if not target.exists() or target.stat().st_size == 0:
+            continue
+        media.original_path = str(target)
+        media.sha256 = _checksum(target)
+        if media.kind in {"photo", "image"}:
+            try:
+                with Image.open(target) as image:
+                    media.width, media.height = image.size
+            except Exception:  # noqa: BLE001
+                pass
+        downloaded += 1
+    if downloaded:
+        db.flush()
+    return downloaded
+
+
 def rank_media(db: Session, story: StoryCluster) -> list[MediaChoice]:
     posts = _story_posts(db, story)
     if not posts:
@@ -181,6 +261,7 @@ def select_lead_media(
 ) -> MediaChoice | None:
     from ..models import ArticleMedia
 
+    ensure_media_files(db, story)
     excluded = exclude_media_ids or set()
     choices = [choice for choice in rank_media(db, story) if choice.media.id not in excluded]
     for choice in choices:

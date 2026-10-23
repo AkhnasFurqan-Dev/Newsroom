@@ -135,11 +135,14 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
             fallback=True,
         )
     lon, lat = PLACE_COORDS[place]
-    span_x = 6.5
-    span_y = 5.0
+    span_x = 10.5
+    span_y = 4.0
     view = (lon - span_x, lat - span_y, lon + span_x, lat + span_y)
-    width, height = 1200, 760
+    # A 2.6:1 locator band reads well at both full width (10in) and in a
+    # two-up row (5in), where a squarer map would swallow a fifth of the page.
+    width, height = 1200, 458
     datasets = _load()
+    px, py = _project(lon, lat, view, width, height)
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="Locator map of {place}">',
@@ -165,7 +168,10 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
             if name in {"Pakistan", "Iran", "Afghanistan", "India", "China", "Tajikistan", "Turkmenistan"}:
                 cx = sum(x for x, _ in projected) / len(projected)
                 cy = sum(y for _, y in projected) / len(projected)
-                if 60 < cx < width - 60 and 50 < cy < height - 140:
+                # Never let a country label collide with the place label.
+                if math.hypot(cx - px, cy - py) < 170:
+                    continue
+                if 60 < cx < width - 60 and 50 < cy < height - 60:
                     svg.append(
                         f'<text x="{cx:.0f}" y="{cy:.0f}" font-family="Georgia,serif" font-size="30" '
                         f'fill="#4a4842" text-anchor="middle" letter-spacing="2">{name.upper()}</text>'
@@ -184,34 +190,23 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
             svg.append(
                 f'<path d="{path}" fill="none" stroke="#7b1f24" stroke-width="2" stroke-dasharray="7 5"/>'
             )
-    px, py = _project(lon, lat, view, width, height)
+    # Attribution is printed by the HTML figure caption below the map, not
+    # inside the SVG: type drawn inside the frame either overlays coastlines or
+    # forces an opaque band that wastes a sixth of the map area.
     svg.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="10" fill="#7b1f24" stroke="#fff" stroke-width="3"/>')
     svg.append(
         f'<text x="{px + 18:.0f}" y="{py - 12:.0f}" font-family="Arial,sans-serif" font-size="35" '
         f'font-weight="bold" fill="#211f1d">{place}</text>'
     )
-    # Scale bar.
+    # Scale bar in the lower-left corner, clear of the place label.
     km_per_degree = 111.32 * math.cos(math.radians(lat))
     map_km = (view[2] - view[0]) * km_per_degree
     scale_km = 200 if map_km > 900 else (100 if map_km > 450 else 50)
     scale_px = scale_km / map_km * width
-    svg.append(f'<rect x="40" y="{height - 118}" width="{scale_px:.0f}" height="7" fill="#211f1d"/>')
+    svg.append(f'<rect x="40" y="{height - 34}" width="{scale_px:.0f}" height="7" fill="#211f1d"/>')
     svg.append(
-        f'<text x="40" y="{height - 132}" font-family="Arial,sans-serif" font-size="30" fill="#211f1d">'
+        f'<text x="40" y="{height - 48}" font-family="Arial,sans-serif" font-size="30" fill="#211f1d">'
         f'{scale_km} km</text>'
-    )
-    note = f"Locator map: {place}. Projection: local equirectangular. Geometry: Natural Earth."
-    svg.append(
-        f'<text x="40" y="{height - 72}" font-family="Arial,sans-serif" font-size="28" fill="#3e3c38">'
-        f'{_escape(note)}</text>'
-    )
-    svg.append(
-        f'<text x="40" y="{height - 44}" font-family="Arial,sans-serif" font-size="28" fill="#7b1f24">'
-        f'{_escape(profile.legend[:130])}</text>'
-    )
-    svg.append(
-        f'<text x="40" y="{height - 14}" font-family="Arial,sans-serif" font-size="26" fill="#5b5852">'
-        f'{_escape(profile.attribution)}. Disputed areas: dashed outline. Not a legal determination.</text>'
     )
     svg.append("</svg>")
     return MapResult(
@@ -219,8 +214,8 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
         title=f"Locator map: {place}",
         place=place,
         source_note=(
-            f"Source: {profile.dataset} ({profile.dataset_version}); {profile.license}. "
-            f"{profile.disputed_rule}"
+            f"Source: {profile.dataset.split(' ne_')[0]}; {profile.license}. "
+            f"Projection: local equirectangular. {profile.disputed_rule}"
         ),
         legend=profile.legend,
         fallback=drawn == 0,

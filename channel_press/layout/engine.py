@@ -78,6 +78,9 @@ class PageChunkPlan:
     templates: dict[str, str] = field(default_factory=dict)
     section_break: dict[str, bool] = field(default_factory=dict)
     pair_sections: set[str] = field(default_factory=set)
+    # Multi-story sections are laid out two reports to a row so a section with
+    # four reports fills a tabloid page instead of leaving most of it blank.
+    section_rows: dict[str, list[list[StoryChunk]]] = field(default_factory=dict)
 
 
 def _words(paragraphs: list[str]) -> int:
@@ -130,9 +133,9 @@ def _max_words(package: StoryPackage, *, front: bool = False) -> int:
     if front:
         return 310 if (package.media_path or package.map_result) else 380
     if package.section == "analysis":
-        return 620
+        return 580
     if package.section == "opinion":
-        return 560
+        return 500
     if package.section == "conflict":
         return 430
     return 470
@@ -205,9 +208,9 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
     }
     for section, _ in ordered:
         templates[section] = SECTION_TEMPLATES.get(section, "national")
-    present = {section for section, _ in ordered}
     section_break: dict[str, bool] = {}
     pair_sections: set[str] = set()
+    section_rows: dict[str, list[list[StoryChunk]]] = {}
     for section, _ in ordered:
         chunks = section_chunks.get(section, [])
         if (
@@ -215,23 +218,38 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
             and len({chunk.package.article.id for chunk in chunks}) == 2
         ):
             pair_sections.add(section)
+        # A section whose reports each fit on one page can run two to a row.
+        # Sections carrying a split report (count > 1) or the brief grid keep
+        # the single-column flow.
+        if (
+            section != "briefs"
+            and len(chunks) >= 2
+            and all(chunk.count == 1 for chunk in chunks)
+        ):
+            section_rows[section] = [chunks[i : i + 2] for i in range(0, len(chunks), 2)]
+
+    def story_height(chunk: StoryChunk, *, half_width: bool) -> float:
+        height = 0.95 + _words(chunk.paragraphs) / (200.0 if half_width else 210.0)
+        if chunk.package.media_path:
+            height += 2.4 if half_width else 3.6
+        if chunk.package.map_result is not None:
+            height += 2.7 if half_width else 4.2
+        if chunk.package.chart_svg and not chunk.package.media_path:
+            height += 2.0 if half_width else 2.4
+        if chunk.package.timeline_html:
+            height += 1.4 if half_width else 1.8
+        return height
 
     def estimate(section: str) -> float:
         """Conservative height estimate in inches for page-packing decisions."""
         chunks = section_chunks.get(section, [])
-        count = len(chunks)
+        rows = section_rows.get(section)
         height = 0.62  # section head and rule
-        if section in pair_sections:
-            per_story = []
-            for chunk in chunks:
-                story_height = 0.95 + _words(chunk.paragraphs) / 170.0
-                if chunk.package.media_path:
-                    story_height += 2.75
-                if chunk.package.map_result is not None:
-                    story_height += 3.1
-                per_story.append(story_height)
-            return height + max(per_story, default=0) + 0.2
-        compact_media = section in {"defence", "conflict"} and count > 1
+        if rows:
+            for row in rows:
+                height += max(story_height(chunk, half_width=len(row) > 1) for chunk in row) + 0.24
+            return height
+        compact_media = section in {"defence", "conflict"} and len(chunks) > 1
         for chunk in chunks:
             part = 0.95 + _words(chunk.paragraphs) / 210.0
             if chunk.package.media_path:
@@ -245,6 +263,9 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
             height += part + 0.18
         return height
 
+    # Sections that must open their own page: the two feature/opinion families
+    # carry a distinctive layout and the brief grid is a fixed four-column page.
+    standalone = {"analysis", "opinion", "briefs"}
     used = 0.0
     previous = ""
     for index, (section, _) in enumerate(ordered):
@@ -254,18 +275,14 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
             used = this_height
             previous = section
             continue
-        if section in {"opinion", "briefs"} and ({"analysis", "opinion"} & present):
-            section_break[section] = False
-            used += this_height
+        if section in standalone or previous in standalone:
+            section_break[section] = True
+            used = this_height
             previous = section
             continue
-        # The two security sections form one coherent spread when both are
-        # short; regional copy may also share the defence opening page.
-        if (
-            section in {"defence", "conflict"}
-            and previous in {"regional", "defence"}
-            and used + this_height <= 13.8
-        ):
+        # Fill the current page while the next section still fits inside the
+        # tabloid text block (about 15.9in tall, kept conservative at 13.6in).
+        if used + this_height <= 13.6:
             section_break[section] = False
             used += this_height
         else:
@@ -282,6 +299,7 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
         templates=templates,
         section_break=section_break,
         pair_sections=pair_sections,
+        section_rows=section_rows,
     )
 
 
@@ -322,6 +340,7 @@ def _media_html(package: StoryPackage) -> Markup:
             + result.svg
             + f'<figcaption><strong>{html.escape(result.title)}.</strong> '
             + html.escape(result.source_note)
+            + f" {html.escape(result.legend)}"
             + "</figcaption></figure>"
         )
     return Markup("".join(parts))
@@ -542,6 +561,7 @@ def build_print_html(
         front_digest=chunk_plan.front_digest,
         sections=chunk_plan.sections,
         section_chunks=chunk_plan.section_chunks,
+        section_rows=chunk_plan.section_rows,
         templates=chunk_plan.templates,
         section_break=chunk_plan.section_break,
         pair_sections=chunk_plan.pair_sections,

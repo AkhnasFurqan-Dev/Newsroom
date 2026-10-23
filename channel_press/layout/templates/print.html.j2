@@ -9,6 +9,29 @@
 </style>
 </head>
 <body class="{% if demo_edition %}is-demo{% endif %}">
+{% macro story_article(chunk, section, tmpl) -%}
+<article class="story story--{{ tmpl }}" data-story-id="{{ chunk.package.story.id }}" data-article-id="{{ chunk.package.article.id }}" data-chunk="{{ chunk.index }}" data-chunk-count="{{ chunk.count }}" data-template="{{ tmpl }}">
+  {% if chunk.index == 1 %}
+  <div class="kicker">{{ section_label(section) }}{% if chunk.package.genre != 'news' and chunk.package.genre != section %} · {{ genre_label(chunk.package.genre) }}{% endif %}</div>
+  <h2 class="story__headline">{{ chunk.package.article.title }}</h2>
+  {% if chunk.package.article.deck %}<p class="story__deck">{{ chunk.package.article.deck }}</p>{% endif %}
+  {% if chunk.package.article.standfirst %}<p class="story__standfirst">{{ chunk.package.article.standfirst }}</p>{% endif %}
+  {% if tmpl == 'analysis_feature' %}<div class="genre-label">Analysis · interpretation of verified reporting</div>{% endif %}
+  {% if tmpl == 'opinion' %}<div class="genre-label">Opinion · the publication's view</div>{% endif %}
+  {% if media_html(chunk.package) %}{{ media_html(chunk.package) }}{% endif %}
+  {% else %}
+  <div class="continuation-head">{{ chunk.package.article.title }}</div>
+  {% endif %}
+  <div class="story__body">{{ paragraphs_html(chunk.paragraphs) }}</div>
+  {% if chunk.index == chunk.count %}
+    {% if chunk.package.chart_svg and not chunk.package.media_path %}<figure class="story__graphic">{{ chunk.package.chart_svg|safe }}<figcaption>{{ chunk.package.chart_spec.title }} — figures tabulated from the source report; see appendix.</figcaption></figure>{% endif %}
+    {% if chunk.package.timeline_html %}{{ chunk.package.timeline_html|safe }}{% endif %}
+    <div class="source-line" data-story-id="{{ chunk.package.story.id }}">Sources: {{ source_refs(chunk.package) }}{% if chunk.package.source_count %} · appendix p. <span class="appendix-page">?</span>{% endif %}</div>
+    {% if chunk.package.correction_note %}<p class="correction-note">{{ chunk.package.correction_note }}</p>{% endif %}
+  {% endif %}
+  {% if chunk.index < chunk.count %}<div class="continues" data-story-id="{{ chunk.package.story.id }}" data-next-chunk="{{ chunk.index + 1 }}">Continued on page <span class="page-ref">?</span></div>{% endif %}
+</article>
+{%- endmacro %}
 <main id="source">
   {% if demo_edition %}
   {% endif %}
@@ -95,7 +118,7 @@
   </section>
 
   {% for section, items in sections %}
-  <section class="page-section template-{{ templates[section] }}{% if not section_break[section] %} page-section--continue{% endif %}{% if section_chunks[section]|length > 1 %} section--multi{% endif %}" data-template="{{ templates[section] }}" data-section="{{ section }}">
+  <section class="page-section template-{{ templates[section] }}{% if not section_break[section] %} page-section--continue{% endif %}{% if section_chunks[section]|length > 1 %} section--multi{% endif %}{% if section_chunks[section]|length == 1 %} section--solo{% endif %}" data-template="{{ templates[section] }}" data-section="{{ section }}">
     <header class="section-head">
       <div class="section-head__label">{{ section_label(section) }}</div>
       <div class="section-head__rule"></div>
@@ -124,31 +147,21 @@
       <p class="evidence-box__note">Figures describe this edition only. A zero correction count means no correction was recorded in the window; it is not a claim that none exists.</p>
     </aside>
     {% else %}
-    <div class="story-flow{% if section in pair_sections %} story-flow--pair{% endif %}">
-      {% for chunk in section_chunks[section] %}
-      <article class="story story--{{ templates[section] }}" data-story-id="{{ chunk.package.story.id }}" data-article-id="{{ chunk.package.article.id }}" data-chunk="{{ chunk.index }}" data-chunk-count="{{ chunk.count }}" data-template="{{ templates[section] }}">
-        {% if chunk.index == 1 %}
-        <div class="kicker">{{ section_label(section) }}{% if chunk.package.genre != 'news' and chunk.package.genre != section %} · {{ genre_label(chunk.package.genre) }}{% endif %}</div>
-        <h2 class="story__headline">{{ chunk.package.article.title }}</h2>
-        {% if chunk.package.article.deck %}<p class="story__deck">{{ chunk.package.article.deck }}</p>{% endif %}
-        {% if chunk.package.article.standfirst %}<p class="story__standfirst">{{ chunk.package.article.standfirst }}</p>{% endif %}
-        {% if templates[section] == 'analysis_feature' %}<div class="genre-label">Analysis · interpretation of verified reporting</div>{% endif %}
-        {% if templates[section] == 'opinion' %}<div class="genre-label">Opinion · the publication's view</div>{% endif %}
-        {% if media_html(chunk.package) %}{{ media_html(chunk.package) }}{% endif %}
-        {% else %}
-        <div class="continuation-head">{{ chunk.package.article.title }}</div>
-        {% endif %}
-        <div class="story__body">{{ paragraphs_html(chunk.paragraphs) }}</div>
-        {% if chunk.index == chunk.count %}
-          {% if chunk.package.chart_svg and not chunk.package.media_path %}<figure class="story__graphic">{{ chunk.package.chart_svg|safe }}<figcaption>{{ chunk.package.chart_spec.title }} — figures tabulated from the source report; see appendix.</figcaption></figure>{% endif %}
-          {% if chunk.package.timeline_html %}{{ chunk.package.timeline_html|safe }}{% endif %}
-          <div class="source-line" data-story-id="{{ chunk.package.story.id }}">Sources: {{ source_refs(chunk.package) }}{% if chunk.package.source_count %} · appendix p. <span class="appendix-page">?</span>{% endif %}</div>
-          {% if chunk.package.correction_note %}<p class="correction-note">{{ chunk.package.correction_note }}</p>{% endif %}
-        {% endif %}
-        {% if chunk.index < chunk.count %}<div class="continues" data-story-id="{{ chunk.package.story.id }}" data-next-chunk="{{ chunk.index + 1 }}">Continued on page <span class="page-ref">?</span></div>{% endif %}
-      </article>
+    {% if section_rows.get(section) %}
+    <div class="story-flow story-flow--rows">
+      {% for row in section_rows[section] %}
+      <div class="story-row{% if row|length == 1 %} story-row--single{% endif %}">
+        {% for chunk in row %}{{ story_article(chunk, section, templates[section]) }}{% endfor %}
+      </div>
       {% endfor %}
     </div>
+    {% else %}
+    <div class="story-flow{% if section in pair_sections %} story-flow--pair{% endif %}">
+      {% for chunk in section_chunks[section] %}
+      {{ story_article(chunk, section, templates[section]) }}
+      {% endfor %}
+    </div>
+    {% endif %}
     {% if section in ['conflict', 'regional', 'defence', 'national', 'international'] and section_context.get(section) and section_chunks[section]|length <= 2 %}
     {% set ctx = section_context[section] %}
     <aside class="section-record">

@@ -112,7 +112,9 @@ def test_locator_map_draws_real_geometry_with_profile_disclosure(db):
     assert result.fallback is False
     assert result.place == "Chaman"
     assert "<svg" in result.svg and "<path" in result.svg
-    assert "Natural Earth" in result.svg
+    # Attribution is printed by the figure caption, never drawn over the map.
+    assert "Natural Earth" in result.source_note
+    assert "Natural Earth" not in result.svg
     assert "disputed" in result.source_note.lower()
     assert "Chaman" in result.svg
 

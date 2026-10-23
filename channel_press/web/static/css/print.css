@@ -199,7 +199,7 @@ a { color: inherit; text-decoration: none; }
 .story--front { padding-bottom: 0.05in; }
 
 /* ---------- Section pages ---------- */
-.section-head { display: flex; align-items: baseline; gap: 0.12in; border-bottom: 3px solid var(--rule); margin-bottom: 0.13in; padding-bottom: 4pt; }
+.section-head { display: flex; align-items: baseline; gap: 0.12in; border-bottom: 3px solid var(--rule); margin-bottom: 0.13in; padding-bottom: 4pt; break-after: avoid; }
 .section-head__label { font-family: var(--serif); font-size: 25pt; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; }
 .section-head__rule { flex: 1; border-top: 1px solid var(--rule); margin-bottom: 4pt; }
 .section-head__meta { font-family: var(--sans); font-size: 7.4pt; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-soft); white-space: nowrap; }
@@ -207,6 +207,45 @@ a { color: inherit; text-decoration: none; }
 .story { break-inside: avoid; margin-bottom: 0.2in; padding-bottom: 0.14in; border-bottom: 1px solid #c9c3b6; }
 .story:last-child { border-bottom: 0; }
 .story-flow { column-count: 1; }
+/* Two reports to a row: a section with four reports fills the tabloid page
+   instead of stacking one report per page with half the page left blank. */
+.story-flow--rows { column-count: 1; }
+.story-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.3in;
+  align-items: start;
+  break-inside: avoid;
+  margin-bottom: 0.14in;
+  padding-bottom: 0.1in;
+  border-bottom: 1px solid #c9c3b6;
+}
+.story-row:last-child { border-bottom: 0; margin-bottom: 0; }
+.story-row--single { grid-template-columns: minmax(0, 1fr); }
+.story-row .story { break-inside: avoid; margin: 0; padding: 0; border: 0; }
+.story-row:not(.story-row--single) .story + .story { border-left: 1px solid #c9c3b6; padding-left: 0.28in; }
+.story-row .story__headline { font-size: 18.5pt; line-height: 1.04; }
+.story-row .story__deck { font-size: 9.2pt; line-height: 1.26; }
+.story-row .story__standfirst { font-size: 8.8pt; line-height: 1.32; }
+.story-row .story__body { columns: 2; column-gap: 0.18in; column-rule: 1px solid #ddd8cc; font-size: 8.4pt; line-height: 1.3; }
+.story-row .story__media { margin-bottom: 0.06in; }
+.story-row .story__media img { max-height: 2.4in; }
+.story-row .story__map svg { display: block; width: 100%; height: auto; }
+.story-row .timeline li { font-size: 7pt; }
+.story-row .source-line { font-size: 7pt; }
+.story-row .story__graphic figcaption { font-size: 7pt; }
+.story-row--single .story__headline { font-size: 24pt; }
+.story-row--single .story__body { columns: 3; font-size: 9.4pt; line-height: 1.4; }
+.story-row--single .story__media img { max-height: 3.4in; }
+/* A section carrying a single report is set as a feature page, not a report
+   stranded on an otherwise blank tabloid page. */
+.section--solo .story-row--single .story__headline { font-size: 30pt; }
+.section--solo .story-row--single .story__body { columns: 2; font-size: 10.4pt; line-height: 1.46; }
+.section--solo .story-row--single .story__media img { max-height: 4.4in; }
+.section--solo .story-row--single .story__map svg { width: 100%; }
+.section--solo .story-flow > .story .story__headline { font-size: 30pt; }
+.section--solo .story-flow > .story .story__body { columns: 2; font-size: 10.4pt; line-height: 1.46; }
+.section--solo .story-flow > .story .story__media img { max-height: 4.4in; }
 .story-flow--pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.26in; align-items: start; }
 .story-flow--pair .story { border-bottom: 0; border-right: 1px solid #c9c3b6; padding-right: 0.22in; margin-bottom: 0; }
 .story-flow--pair .story:nth-child(2n) { border-right: 0; padding-right: 0; }

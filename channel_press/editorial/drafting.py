@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import date
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -36,23 +38,109 @@ def _snapshot(article: Article) -> str:
     )
 
 
+_MESSAGE_WITH_TIME = re.compile(
+    r"(?:[,\s]+(?:according to|as per)\s+)?(?:[,\s]+from\s+)?\bmessage\s+\d+"
+    r"(?:\s+(?:at|from|on))?\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+    re.I,
+)
+_MESSAGE_REF = re.compile(
+    r"(?:[,\s]+(?:according to|as per)\s+)?(?:[,\s]+from\s+)?\bmessage\s+\d+\b",
+    re.I,
+)
+_EVIDENCE_MARKER = re.compile(r"\[(?:S|C)\d+\]")
+_ISO_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
+# A bare ISO calendar date also leaks out of the evidence bundle; print the
+# newspaper form ("20 October 2026") instead.
+_ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+
+
+def _human_date(match: re.Match[str]) -> str:
+    try:
+        day = date.fromisoformat(match.group(0)[:10])
+    except ValueError:
+        return match.group(0)
+    return f"{day.day} {day.strftime('%B %Y')}"
+
+
+def _normalise(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _clean_paragraph(text: str) -> str:
+    """Strip model-echoed source plumbing without touching the facts."""
+    text = _EVIDENCE_MARKER.sub("", text)
+    text = _MESSAGE_WITH_TIME.sub("", text)
+    text = _MESSAGE_REF.sub("", text)
+    text = _ISO_TIMESTAMP.sub(_human_date, text)
+    text = _ISO_DATE.sub(_human_date, text)
+    text = re.sub(r"\s+([.,;:])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text).strip()
+    sentences: list[str] = []
+    seen: set[str] = set()
+    for sentence in _SENTENCE_BOUNDARY.split(text):
+        sentence = sentence.strip()
+        key = _normalise(sentence)
+        if sentence and key and key not in seen:
+            seen.add(key)
+            sentences.append(sentence)
+    return " ".join(sentences).strip()
+
+
+def _similar(a: str, b: str) -> bool:
+    aw = set(_normalise(a).split())
+    bw = set(_normalise(b).split())
+    if not aw or not bw:
+        return False
+    return len(aw & bw) / len(aw | bw) >= 0.7
+
+
+def _containment(short: str, long: str) -> float:
+    """Share of the short text's words that also appear in the long text."""
+    sw = set(_normalise(short).split())
+    lw = set(_normalise(long).split())
+    if not sw:
+        return 0.0
+    return len(sw & lw) / len(sw)
+
+
 def _clean_draft(result: DraftResult) -> DraftResult:
     title = result.title.strip()
     if contains_injection(title):
         title, _ = strip_injection(title)
+    standfirst = result.standfirst.strip()
+    deck = result.deck.strip()[:300]
+    if deck and standfirst and _similar(deck, standfirst):
+        deck = ""
+    seen_paragraphs: set[str] = set()
     body = []
     for paragraph in result.body:
-        text = paragraph.strip()
+        text = _clean_paragraph(paragraph)
         if not text:
             continue
         if contains_injection(text):
             text, _ = strip_injection(text)
-        if text:
-            body.append(text)
+        key = _normalise(text)
+        if not key or key in seen_paragraphs:
+            continue
+        seen_paragraphs.add(key)
+        body.append(text)
+    # A final paragraph with no terminal punctuation is a truncated generation,
+    # not a deliberate newspaper fragment. Never print half a sentence.
+    if body and not re.search(r"[.!?\u2026\"'\u201d\u2019)]$", body[-1]):
+        body.pop()
+    # A standfirst that restates the lead adds nothing: print the attributed
+    # lead only, rather than the same development twice in a row.
+    if standfirst and body and _containment(standfirst, body[0]) >= 0.75:
+        standfirst = ""
+    # Same rule for the deck: a deck that repeats the opening sentence is
+    # printed twice in the same block.
+    if deck and body and _containment(deck, body[0]) >= 0.8:
+        deck = ""
     return DraftResult(
         title=title[:300] or "Untitled report",
-        deck=result.deck.strip()[:300],
-        standfirst=result.standfirst.strip(),
+        deck=deck,
+        standfirst=standfirst,
         body=body,
         provider=result.provider,
         model=result.model,

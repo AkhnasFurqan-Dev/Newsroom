@@ -8,6 +8,7 @@ from pathlib import Path
 import fitz
 import pytest
 
+from channel_press.ai.providers import FixtureDraftProvider
 from channel_press.models import (
     ArticleMedia,
     Channel,
@@ -146,6 +147,47 @@ def test_capacity_fixture_sets_build_within_a_reasonable_time(
         f"{result.stats['articles']} articles, {manifest['pdf']['page_count']} pages, "
         f"{result.duration_seconds}s"
     )
+
+
+def test_pipeline_unloads_the_local_provider_after_drafting(db, demo_channel, owner, tmp_path):
+    """A local model must not stay resident in VRAM after the drafting loop."""
+
+    class TrackingProvider:
+        name = "fixture"
+
+        def __init__(self):
+            self.inner = FixtureDraftProvider()
+            self.calls = 0
+            self.unloaded = 0
+
+        def draft(self, bundle):
+            self.calls += 1
+            return self.inner.draft(bundle)
+
+        def unload(self):
+            self.unloaded += 1
+
+    import_fixture(db, demo_channel, owner, "telegram_export_sample.json")
+    provider = TrackingProvider()
+    result = run_pipeline(
+        db,
+        PipelineRequest(
+            channel=demo_channel,
+            window_start=datetime(2026, 10, 18, tzinfo=UTC),
+            window_end=datetime(2026, 10, 22, tzinfo=UTC),
+            cutoff_at=datetime(2026, 10, 21, tzinfo=UTC),
+            target_release_at=utcnow(),
+            kind="manual",
+            title="Unload test",
+            actor_id=owner.id,
+            provider=provider,
+            publish=False,
+            output_root=tmp_path,
+        ),
+    )
+    assert result.stats["articles"] >= 1
+    assert provider.calls >= 1
+    assert provider.unloaded == 1
 
 
 def test_live_channel_without_rights_cannot_build(db, owner, tmp_path):
