@@ -97,6 +97,61 @@ In the channel's **Source posts** table, choose a reason (**Rights withdrawn**,
 **Deleted at source**, **Duplicate**, **Promotion only**) and select **Withdraw**.
 The post is excluded from future builds without deleting the evidence record.
 
+### Connecting the live Telegram account
+
+This is a one-time owner setup. The API id and hash are edited in `.env` by the
+owner; the login code and two-step password are typed only into the local form
+and are never stored.
+
+Before you start:
+
+- the owner has registered an application at <https://my.telegram.org> and filled
+  `CHANNEL_PRESS_TELEGRAM_API_ID` and `CHANNEL_PRESS_TELEGRAM_API_HASH` in `.env`;
+- `pip install -e ".[telegram]"` has been run and the server restarted;
+- an active rights declaration covers **Ingest**, **AI processing** and
+  **Publication** for the scopes you hold.
+
+Then:
+
+1. Open **Sources** → the channel → **Open Telegram connection**.
+2. In **1 · Source handle**, enter `@username`, `t.me/username` or the full URL and
+   select **Save handle**. Tick the public-address box only if the channel really
+   has a public username.
+3. Select **Test source connection**. The app resolves the mutable username to a
+   stable numeric channel id and reports **Signed in: Yes** or a readable error.
+4. If no session exists, enter the phone number in international format and
+   select **Request login code**. Enter the code Telegram sends. If two-step
+   verification is enabled, enter that password on the next form.
+5. The **Login stage** card shows the current step and expiry. **Cancel login**
+   discards a pending attempt; it does not delete a working session.
+6. **Sign out** (inside the collapsed panel) deletes the local session file and
+   requires a new login. Do this if the laptop is lost, then revoke the session in
+   Telegram as well.
+
+The page never prints the API hash, the session string, the code or the
+two-step password. Errors such as an inaccessible username, a revoked session or
+a flood wait appear as text on this page.
+
+### Context backfill and the cutoff window
+
+After login, **3 · Cutoff-to-cutoff window** shows:
+
+- **Effective window** — start inclusive, end exclusive, in the publication
+  timezone;
+- **Committed watermark** — the last cutoff already committed;
+- **Stored included posts in window** — counted from this computer's source store.
+
+**Import last 30 days (context only)** fills story memory and is labelled
+`context`. It never enters the next daily edition and never moves the watermark.
+
+**Sync window** retrieves and stores exactly the effective window without building
+an edition. Media downloads lazily when an edition actually needs it.
+
+The **4 · Window and retrieval history** table lists each window with status,
+included/excluded/duplicate/reply/album counts and the retrieval checkpoint. A
+`no_content` window is a verified empty window: it commits so no source date
+silently disappears.
+
 ## 4. Importing authorized content
 
 1. Open the channel and find **Import authorized content**.
@@ -166,6 +221,15 @@ open item, enter a **Decision note** and choose:
 Rejecting does not delete the original source evidence; it records an editorial
 decision. A high-risk article still requires an explicit status decision.
 
+### Why a real-model draft may be held
+
+The independent audit compares every name, place, date, number and quotation with
+the claim ledger. A local model sometimes adds context the source did not state,
+for example naming a country for a city. The audit holds that article as **Needs
+review** and lists the unsupported sentence. This is expected behaviour: either
+remove the unsupported detail, or approve it with a note only when the source
+evidence actually supports it. Do not click through a flag just to publish.
+
 ### Status and locking
 
 In **Status decision**, set **Article status** to one of **Draft**, **Needs
@@ -189,13 +253,21 @@ from a video. Synthetic fixture media is marked as non-documentary test data.
 
 Open **Build**.
 
-1. Choose the **Source channel**.
+1. Choose the **Source channel**. The **Next scheduled window** card shows the
+   window that the current schedule would use; **Open Telegram collection** goes
+   to the connection page.
 2. Set **Window start** and **Window end / cutoff** in the publication timezone.
-   Posts are selected with `posted_at >= start` and `< end`; a later post is never
-   treated as fresh content in this edition.
-3. Choose **Edition kind**: **Manual edition** or **Special edition**.
-4. Optionally enter an **Edition title**.
-5. Select **Queue build**.
+   Posts are selected with `posted_at >= start` and `< end`. A post published at
+   exactly the cutoff belongs to the next normal issue, not this one. A late
+   worker start never moves the cutoff.
+3. Tick **Collect this window from Telegram before building** to fetch the exact
+   window first. Leave it unchecked to build only from posts already stored.
+   Collection failure leaves the watermark where it was; it does not skip a date.
+4. Choose **Edition kind**: **Manual edition** or **Special edition**. A manual or
+   special edition does not advance the daily watermark unless it is the
+   scheduled daily window.
+5. Optionally enter an **Edition title**.
+6. Select **Queue build**.
 
 The build creates a persistent job and starts a detached one-shot worker. You can
 close the browser; the job continues. **Jobs** shows progress, and the job page
@@ -314,6 +386,20 @@ Select **Save schedule** to apply changes. Operators also see:
 
 A missed Windows trigger is caught up from the watermark; it does not silently
 reuse an old edition. Two consecutive cutoffs capture each eligible message once.
+The watermark advances only when a release is committed or a window is verified
+empty, so a failed model, a rejected draft or a delayed approval does not discard
+the next day's intake.
+
+Catch-up is bounded by **Max catch-up windows** (7 by default). The first live
+edition needs an explicit baseline: the 30-day context import does not become
+today's news. If the machine was off for longer than the catch-up limit, the
+**Window and retrieval history** table shows the gap; review it rather than
+assuming the missing dates were published.
+
+A **Special edition** or **Manual edition** with an overlapping window does not
+advance the daily watermark unless it was created as the scheduled daily window.
+A weekly or monthly roundup may reuse stored messages but is counted once inside
+that issue.
 
 ## 11. Jobs
 

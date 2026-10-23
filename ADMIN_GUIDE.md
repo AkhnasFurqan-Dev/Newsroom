@@ -28,8 +28,14 @@ The script:
 4. checks for Chrome and warns if it is missing;
 5. runs `init-db` to create or upgrade the SQLite schema.
 
-Optional local model support is not installed by this script. Install Ollama
-separately if required.
+Optional integrations are installed separately:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[telegram]"   # live MTProto adapter
+```
+
+Local model support is not installed by this script. Install Ollama separately if
+required (see §5).
 
 ### Upgrade
 
@@ -113,20 +119,35 @@ content into a demo edition.
 
 ### Live Telegram credentials
 
-The repository includes an isolated, optional Telethon adapter for authorized
-history access. It requires:
+The application includes a Telethon user-session adapter for authorized history
+access. It requires:
 
 - `CHANNEL_PRESS_TELEGRAM_API_ID` and `CHANNEL_PRESS_TELEGRAM_API_HASH` from the
-  owner's Telegram developer account;
-- `CHANNEL_PRESS_TELEGRAM_SESSION_PATH` pointing outside Git (default
-  `./data/telegram.session`);
-- the optional Telethon package, which is not installed by the baseline script;
+  owner's Telegram developer account (`.env`, never committed);
+- `CHANNEL_PRESS_TELEGRAM_SESSION_PATH` under the ignored data directory
+  (default `./data/telegram.session`);
+- the optional Telethon package (`pip install -e ".[telegram]"`);
 - a recorded rights declaration before any content is processed.
 
-**This path was not tested in this build because no credentials or content rights
-were supplied.** Do not represent it as verified until you have completed an
-authorized end-to-end run. The verified intake route is the rights-cleared JSON
-export.
+The flow is implemented in the app, not a detached script:
+
+- **Sources → Telegram connection** saves the handle and resolves it to a stable
+  numeric channel id with **Test source connection**;
+- the phone login, code and two-step password are accepted only in that local
+  form and are held in memory for the login window, never written to `.env`, the
+  database, logs or the session file;
+- **Import last 30 days (context only)** stores context without committing a
+  daily window;
+- **Sync window** collects exactly the effective `[start, end)` window;
+- **Build** can collect the window first with **Collect this window from Telegram
+  before building**;
+- a session file behaves like a password. **Sign out** deletes it; revoke the
+  session in Telegram if the device is lost.
+
+**Live login and retrieval are still unverified** because no API values, user
+login or content rights were supplied. Fixture and rights-cleared JSON import are
+the verified intake routes. Do not report the live path as working until an
+authorized run is completed.
 
 ## 4. Secrets
 
@@ -142,7 +163,11 @@ Rules:
 
 - `.env`, `data/`, `output/` and session files are gitignored.
 - Secrets are never rendered into HTML, PDFs, manifests or logs.
-- `diagnostics` reports presence/status only, never values.
+- `diagnostics`, preflight and the Telegram page report configured / missing /
+  session-present only, never values. Tests assert the API id and hash do not
+  appear in rendered pages or log output.
+- Login codes and two-step passwords live only in process memory for the login
+  window and are never written to disk.
 - For a managed deployment set `CHANNEL_PRESS_SECRET_KEY` from a protected store
   and `CHANNEL_PRESS_COOKIE_SECURE=true` behind HTTPS. The default is a local
   HTTP server bound to `127.0.0.1`.
@@ -162,12 +187,19 @@ Configuration (`.env`):
 CHANNEL_PRESS_OLLAMA_BASE_URL=http://127.0.0.1:11434
 CHANNEL_PRESS_OLLAMA_MODEL=qwen2.5:3b-instruct
 CHANNEL_PRESS_OLLAMA_KEEP_ALIVE=60s
+CHANNEL_PRESS_OLLAMA_TIMEOUT_SECONDS=240
+CHANNEL_PRESS_OLLAMA_MAX_CONCURRENCY=1
+CHANNEL_PRESS_OLLAMA_UNLOAD_AFTER_JOB=true
 ```
 
 All app settings use the `CHANNEL_PRESS_` prefix. The adapter:
 
 - sends only the story evidence bundle and the versioned prompt;
 - requires a strict schema and retries a limited number of times;
+- extracts fenced JSON, truncates oversized input and matches the model name
+  exactly;
+- serialises model loads with a global gate (`ollama_max_concurrency=1`) and can
+  unload after the job;
 - falls back to the deterministic composer with a recorded reason when the model
   is unavailable or invalid;
 - never treats model output as verified. A separate deterministic audit checks
@@ -175,20 +207,27 @@ All app settings use the `CHANNEL_PRESS_` prefix. The adapter:
 
 ### Choosing a model for 16 GB / RTX 3060 Laptop
 
-Start with a 3–4B instruct model quantized to Q4. Larger models may fit in 8 GB
-VRAM only at low quantization and short context; measure before adopting. Keep
-`OLLAMA_KEEP_ALIVE=60s` so the model unloads between scheduled runs.
+The build machine has **6144 MiB** of VRAM, not 8 GB. Start with a 3–4B instruct
+model quantized to Q4. `qwen2.5:3b-instruct` (1841 MB) is installed and verified.
+Larger models may fit only at low quantization and short context; measure before
+adopting. Keep `OLLAMA_KEEP_ALIVE=60s` so the model unloads between scheduled
+runs.
+
+Verified result on this machine: a 30-post edition with `qwen2.5:3b-instruct`
+produced 17 stories, 17 articles and 8 pages in 57–62 s, with no fixture fallback
+and a peak VRAM of 2213 MiB. A 70- or 150-post real-model run was not performed.
 
 Measure with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m channel_press.cli demo --posts 30
 .\.venv\Scripts\python.exe -m channel_press.cli diagnostics
+nvidia-smi
 ```
 
-Record wall time, peak RAM/VRAM and whether the fallback reason appears. **Ollama
-was not installed on the machine used to build this repository**, so no real
-local-model quality or speed result is claimed.
+Record wall time, peak RAM/VRAM and whether a fallback reason appears. `demo`
+uses the fixture provider; the real-model proof is
+`pytest -m live tests\test_ollama_live.py`.
 
 ## 6. Schedules and the Windows worker
 
@@ -207,10 +246,20 @@ Design guarantees:
 
 - **Deterministic job keys** — channel + kind + cutoff. Repeated triggers cannot
   create a second edition for the same cutoff.
-- **Watermark catch-up** — missed cutoffs are enqueued from the last processed
-  cutoff.
+- **Exact windows** — eligibility is `[previous committed cutoff, current
+  cutoff)` in UTC, derived from the configured IANA timezone. A post at exactly
+  the cutoff belongs to the next issue; a late worker start never moves it.
+- **Watermark catch-up** — missed cutoffs are enqueued in order from the last
+  committed cutoff, bounded by `max_catchup_windows` (7 by default).
+- **Commit boundary** — the watermark advances only when a release is committed
+  or a window is verified empty (`no_content`). Collection start, a failed model
+  or a pending review does not advance it.
+- **Checkpointed retrieval** — pages are staged as JSONL under
+  `data/window-staging` and a retrieval checkpoint records the cursor. A crash on
+  page 4 resumes without duplicating posts or losing the rest of the window.
 - **Lease and file lock** — only one worker processes jobs; a stale lease is
-  reclaimed after the configured window.
+  reclaimed after the configured window. Two workers cannot build the same
+  window.
 - **Review policy** — scheduled builds stage as `awaiting_review`. Auto-release
   happens only when the schedule permits it and the edition has no blocking flags
   or high-risk articles.
@@ -330,9 +379,10 @@ Baseline measurements (fixture composer, no model, Chrome rendering):
 | Workload | Wall time | Output |
 | --- | --- | --- |
 | sample (26 messages) | ~6 s | 15 articles, 5 pages |
-| 30 posts | 5.95 s | 17 articles, 8 pages |
-| 70 posts | 7.97 s | 32 articles, 11 pages |
-| 150 posts | 10.53 s | 49 articles, 15 pages |
+| 30 posts (fixture composer) | 5.95 s | 17 articles, 8 pages |
+| 70 posts (fixture composer) | 7.97 s | 32 articles, 11 pages |
+| 150 posts (fixture composer) | 10.53 s | 49 articles, 15 pages |
+| 30 posts (real Ollama, `qwen2.5:3b-instruct`) | 57–62 s | 17 articles, 8 pages, peak VRAM 2213 MiB |
 
 Peak process-group working set for the 150-post build was about 276 MB, with
 about 0.68 GB system RAM delta including Chrome. The idle web server used about
@@ -349,8 +399,13 @@ Practical guidance:
 
 ## 12. Known administrative limits
 
-- Live Telegram is untested without credentials and rights.
-- Ollama is uninstalled and untested end-to-end on this machine.
+- Live Telegram login and retrieval are implemented but unverified: they need the
+  owner's API values, an interactive login and a rights declaration.
+- The real-model proof covers 30 posts only. 70- and 150-post real-model runs,
+  quality comparisons and sustained GPU thermals were not measured.
+- The real-model audit held 14 of 17 articles for review in that proof because
+  the model added contextual proper nouns. Review capacity is a real operational
+  constraint, not a defect to bypass.
 - FFmpeg is absent; OpenCV handles video frames.
 - Public hosting and QR landing pages are not configured.
 - The SQLite + local-folder design targets one workstation, not concurrent

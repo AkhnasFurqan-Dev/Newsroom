@@ -76,21 +76,36 @@ database.
 
 ## Telegram authentication and history
 
-The live adapter is optional and was not exercised in this build.
+The live flow is implemented but has not been exercised with real credentials in
+this build. Login and codes happen on **Sources → Open Telegram connection**, not
+in chat or `.env`.
 
 - `Telethon is not installed` — install the optional package in the venv:
-  `.\.venv\Scripts\python.exe -m pip install telethon`.
+  `.\.venv\Scripts\python.exe -m pip install -e ".[telegram]"`, then restart the
+  server.
 - `API ID/hash missing` — set `CHANNEL_PRESS_TELEGRAM_API_ID` and
   `CHANNEL_PRESS_TELEGRAM_API_HASH` in `.env`. Create them at
-  <https://my.telegram.org> with the owner's account.
-- `Session password needed` / `unauthorized` — complete the interactive login in a
-  terminal, or recreate the session. Never commit `data/telegram.session`.
+  <https://my.telegram.org> with the owner's account, then restart.
+- `Login code did not arrive` — confirm the phone number is in international
+  format and that the Telegram app is reachable. Use **Cancel login** and start
+  again after the expiry shown on the page; do not request codes repeatedly.
+- `Two-step password` — the password is accepted only in the local form and is
+  not stored. A wrong password does not delete the pending login; retry within the
+  login window.
+- `Session password needed` / `unauthorized` — the local session expired or was
+  revoked. Sign in again on the connection page. Never commit
+  `data/telegram.session`.
 - `FloodWait` — Telegram has rate-limited the account. Wait the stated period; do
-  not retry in a loop.
+  not retry in a loop. The retrieval checkpoint resumes from the last staged page.
 - `Channel private or not accessible` — the account must be a member with the
   rights the owner granted. Public read access is not republication permission.
-- `Could not find the input entity` — resolve the channel by its numeric ID or
-  username after joining it with the authorized account.
+  Record a rights declaration before retrying.
+- `Could not find the input entity` — save the exact `@username` or `t.me` URL on
+  the connection page and use **Test source connection** after joining the channel
+  with the authorized account.
+- **Signed in but Sync window does nothing** — check that a daily schedule exists
+  (the window preview comes from it), that the channel is not the fixture desk,
+  and that the rights declaration is active.
 
 If live access remains blocked, use the rights-cleared JSON import. It is the
 verified path and needs no Telegram credentials.
@@ -115,10 +130,24 @@ Read the fallback reason on the article page or in the job result:
 
 **Out of VRAM / RAM**
 
-- Use a 3–4B Q4 instruct model on an 8 GB laptop GPU.
-- Lower context and batch size in Ollama; keep `OLLAMA_KEEP_ALIVE=60s`.
+- The build machine's GPU has **6144 MiB** of VRAM. Use a 3–4B Q4 instruct model;
+  `qwen2.5:3b-instruct` peaked at 2213 MiB during the verified 30-post run.
+- Lower `CHANNEL_PRESS_OLLAMA_NUM_CTX` (default 4096) and
+  `CHANNEL_PRESS_OLLAMA_NUM_PREDICT` (default 1800) if the model spills.
+- Keep `OLLAMA_KEEP_ALIVE=60s` and `OLLAMA_UNLOAD_AFTER_JOB=true` so the model
+  leaves VRAM between scheduled runs.
 - Do not run the model and a 150-post layout at the same time on 16 GB.
-- Set the model to unload between scheduled runs.
+
+**Model is installed but the app still falls back**
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.cli diagnostics
+```
+
+Check that the configured name matches `ollama list` exactly and that the
+Ollama server is on `127.0.0.1:11434`. A stale `OLLAMA_KEEP_ALIVE` or a model
+still loading can time out; the adapter retries and then records the fallback
+reason rather than silently claiming AI output.
 
 A model fallback is not a publication failure. The deterministic composer still
 passes the independent audit; the edition is labelled with its actual provider.
@@ -126,12 +155,29 @@ passes the independent audit; the edition is labelled with its actual provider.
 ## A job is skipped, stuck or duplicated
 
 **Skipped cutoff** — open **Schedules** and select **Enqueue missed cutoffs**. The
-watermark records the last processed cutoff. Repeated triggers for the same cutoff
-are ignored by design.
+watermark records the last committed cutoff. Repeated triggers for the same cutoff
+are ignored by design. Catch-up is bounded by `max_catchup_windows` (7 by
+default); a longer gap is visible in the window history and must be reviewed, not
+assumed published.
+
+**Collection failed halfway** — the retrieval checkpoint and staged JSONL under
+`data\window-staging` survive a crash. Retry the job; it resumes from the cursor
+and merges by `(channel, message id)`, so posts are not duplicated. The watermark
+does not advance on a failed collection.
+
+**A window says `no_content`** — this is a verified empty window, not a skip. It
+commits so the next cutoff starts in the right place. Check the source channel
+before treating it as an error.
+
+**Draft built but the watermark did not move** — expected. The watermark advances
+only on a committed release or a verified empty window. Approve and release the
+edition, or investigate the review flags. A pending review never discards the next
+day's intake.
 
 **Job stuck in a running stage** — check the heartbeat and lease owner on the job
 page. A worker that died leaves a stale lease; it is reclaimed after the lease
-window. Stop any orphaned worker, then retry.
+window. Stop any orphaned worker, then retry. Two workers cannot claim the same
+window.
 
 **Two editions for one window** — this should not happen for scheduled jobs
 because the job key is channel + kind + cutoff. If it does, record both edition
@@ -151,10 +197,12 @@ directory. The task must point at the repository folder with `.venv` present.
 
 ## Duplicate or overlapping windows
 
-The build selects posts with `posted_at >= start` and `< end`. Overlapping manual
-windows can legitimately produce overlapping editions. For scheduled jobs the
-watermark prevents this. If a special edition must overlap a daily edition, keep
-the daily watermark separate (the job key includes the edition kind).
+The build selects posts with `posted_at >= start` and `< end`. The end instant is
+excluded: a post at exactly the cutoff belongs to the next normal issue.
+Overlapping manual windows can legitimately produce overlapping editions. For
+scheduled jobs the watermark prevents this. If a special edition must overlap a
+daily edition, keep the daily watermark separate (the job key includes the edition
+kind). A manual or special edition does not advance the daily watermark.
 
 When in doubt, compare the **Reporting window** and message IDs in each edition's
 source appendix.
@@ -225,10 +273,17 @@ on a different network before release. A QR that cannot be reached is a defect.
 - The database stores UTC; the UI and schedules use the named timezone
   (`Asia/Karachi` by default).
 - A cutoff is an instant. “Daily 05:00” means 05:00 local on the scheduled day,
-  converted to UTC for storage.
+  converted to UTC for storage. The window is half-open:
+  `[previous committed cutoff, current cutoff)`.
+- A late worker start does not move the cutoff. If the laptop wakes at 11:00, the
+  05:00 window is still the 05:00 window.
 - If an edition includes yesterday's news, check the window fields and the
   schedule's timezone. Do not “fix” it by changing the cutoff after the fact; build
   the correct window and keep both records honest.
+- DST: the default `Asia/Karachi` has no daylight saving. If you choose a zone
+  with DST, verify a transition day in a test or a manual build; an ambiguous
+  local clock time is resolved by the tested policy and should be documented
+  before enabling scheduled release.
 
 ## Backup and restore problems
 
@@ -256,6 +311,9 @@ on a different network before release. A QR that cannot be reached is a defect.
 - Tests run against a temporary database created in `tests\conftest.py`; they do
   not touch your newsroom database.
 - If `playwright` cannot find Chrome, install Chrome or verify the executable path.
+- Live-marked tests skip without credentials or a model:
+  `pytest -m live tests\test_telegram_live.py` and
+  `pytest -m live tests\test_ollama_live.py`. A skip is not a pass.
 - `DeprecationWarning` output from FastAPI/Starlette is noise unless a test fails.
 
 ## Still stuck

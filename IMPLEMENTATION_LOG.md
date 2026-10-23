@@ -3,8 +3,10 @@
 Chronological record of the Channel Press build. Commands are Windows PowerShell
 run from `E:\newsroom`; Python is always `.\.venv\Scripts\python.exe`.
 
-Status: **fixture-to-final-PDF route verified.** Live Telegram and Ollama remain
-unverified integrations, recorded as limits rather than claimed successes.
+Status: **fixture-to-final-PDF route verified, and verified again with a real
+local model.** Live Telegram remains unverified because the owner's API
+credentials and an interactive login are required; it is recorded as a limit,
+not claimed as a success.
 
 ## Environment at build time
 
@@ -12,11 +14,11 @@ unverified integrations, recorded as limits rather than claimed successes.
 | --- | --- |
 | OS | Windows 11 10.0.26200 |
 | CPU / RAM | 12th-gen Intel i7 / 16 GB |
-| GPU | NVIDIA RTX 3060 Laptop (8 GB), unused by the fixture pipeline |
+| GPU | NVIDIA RTX 3060 Laptop (6144 MiB VRAM), used only by local model drafting |
 | Python | 3.12.4 in `.venv` |
 | Browser | Google Chrome via Playwright `channel="chrome"` |
-| Database | SQLite WAL, Alembic revision `54aaea637b58` |
-| Model | Ollama not installed; deterministic fixture composer used |
+| Database | SQLite WAL, Alembic revision `b7c1f2d4e901` |
+| Model | Ollama 0.40.9 at `E:\ollama`, `qwen2.5:3b-instruct` (Q4_K_M) |
 | Video | FFmpeg absent; OpenCV 4.10 fallback used |
 
 ## M00 — Repository and contract
@@ -262,3 +264,133 @@ For a live deployment: record the owner's rights declaration, configure authoriz
 Telegram credentials, run one supervised import and build, compare its claims and
 page proofs against the fixture baseline, then enable the schedule. Do not enable
 auto-release before that supervised run.
+
+## Post-M14 live completion (L00–L09)
+
+Owner instruction: `POST_M14_LIVE_COMPLETION.md`. Phase evidence lives in
+`docs/POST_M14_CHECKLIST.md`; live-only status is in
+`docs/POST_M14_READINESS_REPORT.md`.
+
+### L00 — Baseline audit
+
+- Re-read the contract and re-ran the suite before changing anything: 59 passed.
+- Recorded the real environment: GPU is **6144 MiB**, not the "8 GB" written
+  earlier in this log. Ollama, Telethon and FFmpeg were absent at baseline.
+- **Commit:** included in the L08 docs commit.
+
+### L01 — Secure configuration and preflight
+
+- `channel_press/config.py` gained Telegram, Ollama, collection and worker
+  settings, all read from `CHANNEL_PRESS_*` environment variables.
+- `.env` holds empty placeholders only and stays untracked; `LIVE_ENV_PLACEHOLDERS.env.template`
+  documents every key without values.
+- `channel_press/preflight.py` reports readiness with redaction: it never prints
+  an API hash, phone number, session path or model prompt.
+- **Verification:** `pytest tests/test_preflight.py`; `cli diagnostics`.
+- **Commit:** `4cab3f6` — `feat(config): secure live settings and redacted preflight`
+
+### L02 — Telegram user session, channel resolution
+
+- `channel_press/telegram/transport.py` owns the Telethon client on a dedicated
+  gateway thread; `service.py` implements the login state machine, channel
+  resolution, pagination, FloodWait retry and media download.
+- The session file defaults to `data/telegram.session`, is ignored by Git and is
+  never logged.
+- Web routes and `telegram.html.j2` expose connect / code / password / resolve
+  steps without echoing secrets.
+- **Verification:** `pytest tests/test_telegram_live.py` (marked `live`, skipped
+  without credentials). **Live login is not verified** — it needs the owner.
+- **Commit:** `29dc7a4` — `feat(telegram): local user session and channel resolution`
+
+### L03 — Exact cutoff-to-cutoff collection
+
+- Window semantics are exactly `[previous_committed_cutoff_utc, current_cutoff_utc)`.
+- New tables `edition_windows` and `retrieval_checkpoints` (migration
+  `b7c1f2d4e901`). The watermark advances only on a committed/approved release or
+  a verified zero-content window.
+- Collection stages per-page JSONL under `data/window-staging`, resumes from the
+  checkpoint cursor, merges by message id, and deletes staging only on success.
+- Telegram-native forwards and link-only promotions are excluded; posts are
+  stored as untrusted data.
+- **Verification:** `pytest tests/test_collection.py tests/test_cutoff_windows.py`.
+- **Commit:** `4691145` — `feat(collection): exact cutoff windows, checkpoints and watermark`
+
+### L04 — Real local AI
+
+- Ollama installed at `E:\ollama` (0.40.9); models under `data/ollama-models`;
+  `qwen2.5:3b-instruct` pulled. Server bound to `127.0.0.1:11434`.
+- `OllamaDraftProvider` hardened: one global gate (no concurrent model loads),
+  fenced-JSON extraction, input truncation, exact model-name match, `unload()`
+  after drafting, `num_ctx` 4096 / `num_predict` 1800.
+- Prompts versioned; `news_article` is now `news-article-v3` and forbids adding a
+  country, province or region the source does not name.
+- **Verification:** `pytest tests/test_ollama_live.py -m live`. A 30-post edition
+  produced 17 stories / 17 articles / 8 pages in **57 s**, provider `ollama`, zero
+  fixture fallbacks, peak VRAM **2213 MiB**.
+- **Commit:** `d02167c` — `feat(ai): hardened Ollama drafting for real local models`
+
+### L05 — Editorial desk and publication fidelity
+
+- Lazy live-media download: imports store metadata only; bytes are fetched when a
+  story actually reaches layout.
+- Draft cleanup drops model-echoed `message N … timestamp` plumbing, `[S#]/[C#]`
+  markers, bare ISO dates, duplicate lead/standfirst/deck, repeated sentences and
+  truncated tails.
+- Layout rebuilt for density: two reports per row in multi-story sections, wide
+  2.6:1 locator bands with attribution moved to the figure caption, and
+  single-report sections set as feature pages. The same 17-story edition fell from
+  15 half-empty pages to **8 full pages**.
+- All 8 pages were rendered to PNG and inspected: no clipping, overlap, blank
+  pages or text below 7 pt; map captions no longer sit on coastlines.
+- **Verification:** `pytest -q` (125 passed), `ruff check` clean.
+- **Commit:** `49991fe` — `fix(layout): two-up rows, lazy media and caption-safe maps`
+
+### L06 — Windows scheduling and recovery
+
+- `scripts/install-task.ps1` registers a per-user Task Scheduler job that calls
+  `scripts/run-worker.ps1` every 15 minutes; the worker is short-lived and
+  file-locked, so no process or model stays resident.
+- **Verification:** registered `ChannelPressWorkerTest`, started it, observed
+  `LastTaskResult 0` and a clean `data/logs/worker-YYYYMMDD.log`
+  (`enqueued=0 processed=0 … exit 0`), then unregistered the test task. The run
+  also applied migration `b7c1f2d4e901` to the real `data/channel_press.db`
+  without touching existing rows (26 posts, 1 edition, 1 user, 15 articles).
+- **Commit:** `14b2e48` — `chore(scheduling): readable worker logs and verified task run`
+
+### L07 — Security
+
+- Argon2id, CSRF, session expiry, login throttle, audit log and role checks were
+  re-verified; preflight and diagnostics redact secrets; `.env`, sessions, model
+  weights, PDFs and generated media stay out of Git.
+- **Verification:** `pytest tests/test_security_time.py tests/test_preflight.py`.
+
+### L08 — Documentation
+
+- README, USER_MANUAL, ADMIN_GUIDE and TROUBLESHOOTING updated for live setup,
+  collection windows, review flags, local models and scheduling.
+- Added `docs/POST_M14_READINESS_REPORT.md` with separate `fixture`, `local AI`,
+  `Telegram live`, `supervised end-to-end` and `automatic scheduled publication`
+  statuses.
+- **Commit:** `docs: post-M14 live setup, collection and readiness evidence`
+
+### L09 — Supervised live acceptance
+
+- **Blocked on the owner:** `CHANNEL_PRESS_TELEGRAM_API_ID`/`_API_HASH`, an
+  interactive user login, the source-rights declaration, and approval to publish.
+- Everything independent of those secrets is built and tested; see
+  `docs/POST_M14_READINESS_REPORT.md` for the exact remaining steps.
+
+### Post-M14 verification snapshot (2026-10-23)
+
+- `ruff check channel_press tests` → `All checks passed!` (exit 0).
+- `pytest --collect-only -q` → **125 tests collected**.
+- `pytest -q -p no:warnings` → exit 0.
+- Real Ollama 30-post proof → 17 stories, 17 articles, 8 pages, 57–62 s, peak
+  VRAM 2213 MiB, `quality.warnings == []`; all 8 page proofs inspected.
+- Migration `b7c1f2d4e901` applied to the real database without data loss.
+- Windows task test run → `LastTaskResult 0`, clean worker log.
+- 14 of 17 real-model articles were held as `needs_review` for model-added
+  contextual proper nouns. The proof edition therefore stayed `awaiting_review`
+  and was not published; an editor must clear the flags first.
+- Live Telegram, a supervised live edition and automatic scheduled publication
+  remain unverified. Auto-release is off.

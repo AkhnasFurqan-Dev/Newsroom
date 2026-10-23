@@ -14,7 +14,10 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
 
 - **Authorized intake.** Owner import of Telegram Desktop JSON or the owner-format
   export, albums, edits, replies, deletions and rights withdrawal. A live MTProto
-  adapter exists but was not exercised without credentials; see
+  user-session adapter performs the local login, resolves `@handle` to a stable
+  channel id, and collects an exact cutoff window with checkpointed resume. Live
+  login and retrieval still need the owner's Telegram API values and consent; see
+  [Live Telegram setup](#live-telegram-setup-owner-only) and
   [Limitations](#limitations).
 - **Story memory.** Post splitting, duplicate clustering, reply linking,
   correction reconciliation, a claim ledger with chronology and a separate
@@ -32,9 +35,13 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
 - **Newsroom UI.** Source desk, rights declarations, stories, article editing and
   review, edition page studio, schedules, jobs, branding, users, audit and
   diagnostics.
-- **Scheduling and publication.** Deterministic job keys, watermark catch-up,
-  leases and a single-worker file lock, atomic release, manifest and checksums,
-  immutable numbered versions and a fully offline e-paper bundle.
+- **Scheduling and publication.** Deterministic job keys, exact
+  `[previous cutoff, current cutoff)` windows, watermark catch-up, leases and a
+  single-worker file lock, atomic release, manifest and checksums, immutable
+  numbered versions and a fully offline e-paper bundle.
+- **Verified local AI.** The pipeline ran a real Ollama model
+  (`qwen2.5:3b-instruct`) over a 30-post fixture set: 17 stories, 17 articles,
+  8 tabloid pages, no fixture fallback, peak VRAM 2213 MiB.
 
 ![Edition detail](docs/images/edition-detail.png)
 
@@ -93,6 +100,45 @@ output\the-channel-dispatch\2026-10-21-manual-001-v1\
 Open `epaper\index.html` directly from disk to confirm the offline bundle works
 without the server. The in-app viewer lives at `/editions/1/epaper/`.
 
+## Live Telegram setup (owner only)
+
+The application never asks for credentials in chat and never stores a login code
+or two-step password. `.env` is untracked and already contains empty
+placeholders; only the owner fills it in.
+
+1. Register a Telegram application at <https://my.telegram.org> and edit `.env`:
+
+   ```text
+   CHANNEL_PRESS_TELEGRAM_API_ID=<your numeric app id>
+   CHANNEL_PRESS_TELEGRAM_API_HASH=<your app hash>
+   CHANNEL_PRESS_TELEGRAM_SESSION_PATH=./data/telegram.session
+   ```
+
+2. Install the optional adapter and restart the server:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m pip install -e ".[telegram]"
+   .\.venv\Scripts\python.exe -m channel_press.cli serve
+   ```
+
+3. In **Sources**, register the channel and record a rights declaration covering
+   **Ingest**, **AI processing** and **Publication** for the scopes you actually
+   hold. API access alone is not permission to republish.
+4. Open the channel's **Telegram connection** page. Save the `@handle`, select
+   **Test source connection**, then request a login code with the account that may
+   read the channel. Enter the code and any two-step password only in that local
+   form.
+5. Use **Import last 30 days (context only)** for story memory. It is labelled
+   `context` and never enters the next daily edition.
+6. Create a daily schedule, then check the **Effective window** card: start is
+   inclusive, end is exclusive. A post at exactly the cutoff belongs to the next
+   issue. Use **Sync window** to store the posts without building.
+7. Build from **Build** with **Collect this window from Telegram before building**
+   ticked, or let the Windows task do it at the cutoff.
+
+`diagnostics` and the **Diagnostics** page report configured / missing /
+session-present states without printing any secret value.
+
 ## Everyday commands
 
 | Task | Command |
@@ -149,6 +195,8 @@ Key modules live under `channel_press/`:
 | Package | Responsibility |
 | --- | --- |
 | `ingestion` | Export formats, normalization, exclusion, media, MTProto adapter |
+| `telegram` | Local user-session login, handle resolution, windowed history fetch |
+| `collection` | Exact cutoff windows, durable staging, checkpoints, watermark |
 | `editorial` | Story clustering, claims, correction, review rules |
 | `ai` | Prompt templates, fixture/Ollama providers, audit, style lint |
 | `media` | Asset cache, ranking, derivatives, frame extraction |
@@ -186,8 +234,8 @@ secret key, logs) and `output/` (published editions). Both are gitignored.
 
 ## Measured performance on the build machine
 
-12th-gen Intel i7, 16 GB RAM, RTX 3060 Laptop GPU, Windows 11, Chrome installed,
-no Ollama model running.
+12th-gen Intel i7, 16 GB RAM, RTX 3060 Laptop GPU (**6144 MiB**), Windows 11,
+Chrome installed, Ollama 0.40.9 with `qwen2.5:3b-instruct` (1841 MB).
 
 | Scenario | Result |
 | --- | --- |
@@ -195,12 +243,14 @@ no Ollama model running.
 | 30-post fixture build | 5.95 s, 17 stories/articles, 8 pages |
 | 70-post fixture build | 7.97 s, 32 stories/articles, 11 pages |
 | 150-post fixture build | 10.53 s wall (~5.2 s Python CPU), 49 stories/articles, 15 pages, ~276 MB peak process-group working set |
+| 30-post **real Ollama** build | 57–62 s, 17 stories, 17 articles, 8 pages, no fixture fallback, peak VRAM 2213 MiB |
 | PDF page size | exactly 792 × 1224 pt (11 × 17 in) on every page |
-| GPU | not used for fixture composition or layout |
+| GPU | unused for fixture composition and layout; used only while drafting |
 
-These are measurements, not throughput promises. A live Ollama model will be
-substantially slower; run `diagnostics` and a single real build before relying on
-a tight cutoff-to-release window.
+These are measurements, not throughput promises. The 30-post real-model run is
+the only real-model capacity result; 70- and 150-post real-model runs were not
+performed. Run `diagnostics` and one real build before relying on a tight
+cutoff-to-release window.
 
 ## Tests
 
@@ -216,20 +266,34 @@ a tight cutoff-to-release window.
 .\.venv\Scripts\python.exe -m ruff check channel_press tests
 ```
 
-Last recorded run: **59 passed** (54 fast + 5 end-to-end). The slow suite renders
-actual PDFs, checks exact page geometry, verifies searchable text, inspects every
-page proof for blank/overflow defects and confirms the e-paper bundle and
-checksums.
+Last recorded run: **125 passed** (plus live-marked tests that skip without
+credentials). The slow suite renders actual PDFs, checks exact page geometry,
+verifies searchable text, inspects every page proof for blank/overflow defects
+and confirms the e-paper bundle and checksums. Collection tests cover window
+boundaries, pagination resume, duplicate windows, context backfill and watermark
+commits.
+
+```powershell
+# Real local model proof (needs Ollama running with the configured model)
+.\.venv\Scripts\python.exe -m pytest -m live tests\test_ollama_live.py -q
+
+# Live Telegram proof (needs .env values, a completed login and rights)
+.\.venv\Scripts\python.exe -m pytest -m live tests\test_telegram_live.py -q
+```
 
 ## Limitations
 
-- **Live Telegram was not tested.** No credentials or content rights were
-  supplied. The isolated Telethon adapter is optional and untested against a real
-  account; the fixture and rights-cleared import paths are the verified routes.
-- **Ollama was not installed on the build machine.** The adapter passes schema
-  validation and falls back deterministically, but a real local-model run remains
-  an unverified integration. Fixture output is clearly labelled and is never
-  presented as live reporting.
+- **Live Telegram was not tested.** No API values, user login or content rights
+  were supplied. Login, handle resolution, windowed collection and resume are
+  implemented and covered by fixtures; the live path stays `blocked` until the
+  owner completes the steps above.
+- **Real-model coverage is 30 posts only.** A 70- or 150-post real-model build was
+  not run. The deterministic fixture composer remains the fallback and is always
+  labelled as such.
+- **The real-model audit is strict.** In the 30-post proof, 14 of 17 articles were
+  held as **Needs review** because the model introduced contextual proper nouns
+  (for example a country the source did not name). That is the intended gate, not
+  a silent pass; an editor must clear the flags before release.
 - **No public hosting.** E-paper bundles are local folders; the app does not
   promise a public landing page. QR output is disabled unless a reachable public
   URL is configured.
@@ -247,6 +311,8 @@ checksums.
 - [Implementation log](IMPLEMENTATION_LOG.md) — milestone history and test results.
 - [QA report](docs/QA_REPORT.md) — acceptance evidence, page inspection and
   measured limits.
+- [Post-M14 readiness report](docs/POST_M14_READINESS_REPORT.md) — separate
+  `fixture`, `local AI`, `Telegram live` and `scheduled publication` statuses.
 - [Cartography](docs/CARTOGRAPHY.md) and [decision records](docs/decisions/).
 
 ## Licence and source rights
