@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="CHANNEL_PRESS_",
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -41,10 +41,26 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:3b-instruct"
     ollama_keep_alive: str = "60s"
+    ollama_timeout_seconds: int = 240
+    ollama_num_ctx: int = 4096
+    ollama_num_predict: int = 1800
+    ollama_max_concurrency: int = 1
+    ollama_unload_after_job: bool = True
 
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
     telegram_session_path: str = "./data/telegram.session"
+    telegram_source_username: str = ""
+    telegram_login_timeout_seconds: int = 300
+    telegram_history_limit: int = 5000
+    telegram_download_media: bool = True
+    telegram_max_video_mb: int = 120
+
+    cutoff_local_time: str = "05:00"
+    initial_context_lookback_days: int = 30
+    auto_release: bool = False
+    max_catchup_windows: int = 7
+    disk_quota_mb: int = 4096
 
     worker_lock_minutes: int = 120
     login_max_attempts: int = 5
@@ -82,6 +98,16 @@ class Settings(BaseSettings):
     @property
     def media_dir(self) -> Path:
         return self.data_dir / "media"
+
+    @property
+    def telegram_session_file(self) -> Path:
+        """Absolute session path; relative values resolve against the project root."""
+        raw = Path(self.telegram_session_path).expanduser()
+        return raw if raw.is_absolute() else (BASE_DIR / raw).resolve()
+
+    @property
+    def env_file(self) -> Path:
+        return BASE_DIR / ".env"
 
 
 settings = Settings()
