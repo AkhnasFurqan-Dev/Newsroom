@@ -24,7 +24,8 @@
       <div><strong>Heartbeat:</strong> {{ job.heartbeat_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.heartbeat_at else '—' }}</div>
       <div><strong>Finished:</strong> {{ job.finished_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.finished_at else '—' }}</div>
       <div><strong>Lease:</strong> <span class="mono">{{ job.lock_owner or '—' }}</span></div>
-      {% if job.error %}<div class="error-text" style="margin-top:8px">{{ job.error }}</div>{% endif %}
+      {% if job.error %}<div class="error-text" style="margin-top:8px">{{ job.error }}</div>
+      <p class="small">Full traceback: <span class="mono">{{ log_dir }}</span> — search for <span class="mono">"job_id": {{ job.id }}</span>. The job page never displays credentials or session material.</p>{% endif %}
     </div>
 
     <h2>Steps</h2>

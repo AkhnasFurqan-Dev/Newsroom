@@ -2,6 +2,7 @@
 
 from .service import (  # noqa: F401
     DueJob,
+    DuplicateWindowError,
     WorkerBusy,
     WorkerLease,
     WorkerStats,
@@ -24,6 +25,7 @@ from .service import (  # noqa: F401
 
 __all__ = [
     "DueJob",
+    "DuplicateWindowError",
     "WorkerBusy",
     "WorkerLease",
     "WorkerStats",

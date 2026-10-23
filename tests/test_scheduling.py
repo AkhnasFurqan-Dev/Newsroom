@@ -100,7 +100,7 @@ def test_schedule_cutoffs_are_timezone_aware_and_idempotent(db, demo_channel):
     assert json.loads(created[0].payload_json)["cutoff"].startswith("2026-10-23T00:00:00")
 
 
-def test_manual_jobs_are_unique_and_claimable_with_a_lease(db, demo_channel):
+def test_manual_jobs_are_idempotent_and_claimable_with_a_lease(db, demo_channel):
     now = datetime(2026, 10, 22, tzinfo=UTC)
     first = enqueue_manual_job(
         db,
@@ -117,7 +117,11 @@ def test_manual_jobs_are_unique_and_claimable_with_a_lease(db, demo_channel):
         actor_id=1,
     )
     db.commit()
-    assert first.key != second.key
+    # The same channel and window must never queue two jobs or two editions.
+    assert first.key == second.key
+    assert first.id == second.id
+    assert db.query(Job).count() == 1
+    assert second.reused_existing is True
 
     claimed = claim_job(db, worker_id="worker-one", now=datetime.now(UTC))
     db.commit()
@@ -125,11 +129,8 @@ def test_manual_jobs_are_unique_and_claimable_with_a_lease(db, demo_channel):
     assert claimed.attempt == 1
     assert claimed.lock_owner == "worker-one"
 
-    # The second live job is still available, but the claimed job is not.
-    second_claim = claim_job(db, worker_id="worker-two", now=datetime.now(UTC))
-    db.commit()
-    assert second_claim is not None and second_claim.id != claimed.id
-    assert claim_job(db, worker_id="worker-three", now=datetime.now(UTC)) is None
+    # The only job is leased, so a second worker has nothing to claim.
+    assert claim_job(db, worker_id="worker-two", now=datetime.now(UTC)) is None
 
 
 def test_expired_worker_locks_are_recoverable(db, demo_channel):

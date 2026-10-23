@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -39,6 +40,7 @@ from ..collection.service import (
     record_for_edition,
 )
 from ..config import settings
+from ..logging_setup import get_logger
 from ..models import (
     Article,
     Channel,
@@ -46,20 +48,28 @@ from ..models import (
     EditionArticle,
     EditionSchedule,
     EditionWatermark,
+    EditionWindowRecord,
     Job,
     JobStep,
     PublicationAttempt,
     RetryAttempt,
 )
-from ..pipeline import PipelineResult, run_pipeline
+from ..pipeline import PipelineError, PipelineResult, run_pipeline
 from ..timeutil import to_local, utcnow
 from ..publishing.service import PublicationError, edition_review_blockers
 
 JOB_RUNNABLE = {"scheduled", "failed_retryable", "resumable"}
+JOB_ALREADY_DONE = {"awaiting_review", "published", "completed", "no_content"}
+
+logger = get_logger("worker")
 
 
 class WorkerBusy(RuntimeError):
     pass
+
+
+class DuplicateWindowError(RuntimeError):
+    """A window already has a built edition and no job that can be reused."""
 
 
 @dataclass
@@ -228,12 +238,20 @@ def enqueue_manual_job(
     window_start: datetime,
     window_end: datetime,
     kind: str = "manual",
+    title: str = "",
     actor_id: int | None = None,
     release_at: datetime | None = None,
     collect: bool | None = None,
     timezone: str | None = None,
     cutoff_local: str = "05:00",
 ) -> Job:
+    """Queue exactly one durable job for a manual cutoff window.
+
+    The job key is deterministic (channel + kind + exact half-open interval), so
+    a double-click, a refreshed form or a retried POST cannot create a second
+    job or a duplicate edition. A failed or cancelled job for the same window is
+    re-armed in place instead of duplicated.
+    """
     now = utcnow()
     tz_name = timezone or settings.timezone
     window = EditionWindow(
@@ -244,7 +262,65 @@ def enqueue_manual_job(
         timezone=tz_name,
         cutoff_local=cutoff_local,
     )
-    key = f"manual:{channel.id}:{kind}:{window_start.isoformat()}:{window_end.isoformat()}:{uuid.uuid4().hex[:8]}"
+    key = f"manual:{channel.id}:{kind}:{window.start.isoformat()}:{window.end.isoformat()}"
+    payload = json.dumps(
+        {
+            "manual": True,
+            "actor_id": actor_id,
+            "title": title,
+            "cutoff": window.end.isoformat(),
+            "release_at": (release_at or now).isoformat(),
+            "window_start": window.start.isoformat(),
+            "window_end": window.end.isoformat(),
+            "window_key": window.key,
+            "timezone": tz_name,
+            "cutoff_local": cutoff_local,
+            "collect": (not channel.is_demo) if collect is None else bool(collect),
+            # A manual build is always staged for editorial review. Only an
+            # explicit release action may publish it.
+            "requires_review": True,
+            "auto_publish_nonrisk": False,
+            "edition_kind": kind,
+        },
+        ensure_ascii=False,
+    )
+    record = db.scalar(
+        select(EditionWindowRecord).where(EditionWindowRecord.window_key == window.key)
+    )
+    existing = db.scalar(select(Job).where(Job.key == key))
+    if existing is None and record is not None and record.job_id:
+        existing = db.get(Job, record.job_id)
+    if existing is not None:
+        if existing.status in JOB_RUNNABLE or existing.status in JOB_ALREADY_DONE:
+            existing.reused_existing = True  # type: ignore[attr-defined]
+            return existing
+        # failed_terminal / failed_retryable / canceled: reuse the same row so
+        # the window keeps one job and one edition at most.
+        existing.status = "scheduled"
+        existing.stage = "queued"
+        existing.attempt = 0
+        existing.error = ""
+        existing.result_json = "{}"
+        existing.scheduled_for = now
+        existing.started_at = None
+        existing.finished_at = None
+        existing.heartbeat_at = None
+        existing.lock_owner = ""
+        existing.lock_expires_at = None
+        existing.channel_id = channel.id
+        existing.payload_json = payload
+        get_or_create_window(db, window, job_id=existing.id)
+        db.flush()
+        existing.requeued_existing = True  # type: ignore[attr-defined]
+        audit(db, None, "job.manual_requeue", "job", existing.id, {"channel": channel.id})
+        return existing
+    if record is not None and (
+        record.edition_id or record.status in {"committed", "awaiting_review"}
+    ):
+        raise DuplicateWindowError(
+            f"This window was already built (edition #{record.edition_id}). "
+            "Open that edition instead of queueing a duplicate."
+        )
     job = Job(
         key=key,
         kind="edition",
@@ -252,29 +328,13 @@ def enqueue_manual_job(
         status="scheduled",
         stage="queued",
         scheduled_for=now,
-        max_attempts=1,
-        payload_json=json.dumps(
-            {
-                "manual": True,
-                "actor_id": actor_id,
-                "cutoff": window_end.isoformat(),
-                "release_at": (release_at or now).isoformat(),
-                "window_start": window_start.isoformat(),
-                "window_end": window_end.isoformat(),
-                "window_key": window.key,
-                "timezone": tz_name,
-                "cutoff_local": cutoff_local,
-                "collect": (not channel.is_demo) if collect is None else bool(collect),
-                "requires_review": False,
-                "auto_publish_nonrisk": False,
-                "edition_kind": kind,
-            },
-            ensure_ascii=False,
-        ),
+        max_attempts=2,
+        payload_json=payload,
     )
     db.add(job)
     db.flush()
-    audit(db, None, "job.manual", "job", job.id, {"channel": channel.id})
+    get_or_create_window(db, window, job_id=job.id)
+    audit(db, None, "job.manual", "job", job.id, {"channel": channel.id, "window": window.key})
     return job
 
 
@@ -651,6 +711,7 @@ def process_job(
         cutoff_at=datetime.fromisoformat(payload.get("cutoff") or payload["window_end"]),
         target_release_at=datetime.fromisoformat(payload.get("release_at") or payload["window_end"]),
         kind=edition_kind,
+        title=str(payload.get("title") or ""),
         actor_id=payload.get("actor_id"),
         job_id=job.id,
         publish=True,
@@ -855,8 +916,26 @@ def worker_once(
         except Exception as exc:
             db.rollback()
             fresh = db.get(Job, job.id)
+            logger.error(
+                "job_failed",
+                extra={
+                    "event": "job_failed",
+                    "job_id": job.id,
+                    "kind": job.kind,
+                    "channel_id": job.channel_id,
+                },
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
             if fresh is not None:
-                fail_job(db, fresh, f"{type(exc).__name__}: {str(exc)[:1800]}")
+                detail = f"{type(exc).__name__}: {str(exc)[:1800]}"
+                frames = traceback.extract_tb(exc.__traceback__)
+                if frames:
+                    last = frames[-1]
+                    detail += f" [at {Path(last.filename).name}:{last.lineno} in {last.name}]"
+                # A deterministic pipeline/rights/publication refusal will not
+                # fix itself in five minutes; only unexpected errors retry.
+                retryable = not isinstance(exc, (PipelineError, PublicationError))
+                fail_job(db, fresh, detail, retryable=retryable)
                 audit(db, None, "job.failed", "job", fresh.id, {"error": str(exc)[:500]})
                 db.commit()
             stats.failed += 1

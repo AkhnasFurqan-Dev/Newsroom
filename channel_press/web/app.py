@@ -60,7 +60,9 @@ from ..collection.service import (
     preview_window,
     window_summary,
 )
+from ..collection.window import local_cutoff_utc, parse_clock, window_for_cutoff
 from ..db import SessionLocal, session_dependency
+from ..logging_setup import configure_logging, get_logger
 from ..editorial.audit import publish_gate
 from ..editorial.drafting import reaudit_article, save_editor_edit
 from ..ingestion.adapters import ImportFormatError, normalize_messages
@@ -99,6 +101,7 @@ from ..publishing.service import (
     record_manifest_release,
 )
 from ..scheduling.service import (
+    DuplicateWindowError,
     WorkerBusy,
     WorkerLease,
     enqueue_collect_job,
@@ -116,6 +119,9 @@ from ..timeutil import as_utc, human_local, iso_utc, local_boundary_utc, to_loca
 WEB_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
+
+configure_logging("web")
+logger = get_logger("web")
 
 app = FastAPI(title="Channel Press", docs_url=None, redoc_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1200)
@@ -218,8 +224,49 @@ def _parse_local(value: str, tz_name: str) -> datetime | None:
     if not value:
         return None
     value = value.replace("T", " ").strip()
-    parsed = datetime.strptime(value, "%Y-%m-%d %H:%M" if " " in value else "%Y-%m-%d")
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M" if " " in value else "%Y-%m-%d")
+    except ValueError:
+        return None
     return local_boundary_utc(parsed.date(), parsed.time(), tz_name)
+
+
+def _latest_cutoff(tz_name: str, cutoff_clock: str, now: datetime | None = None) -> datetime:
+    """Most recent local cutoff instant at or before ``now``."""
+    now = now or utcnow()
+    clock = parse_clock(cutoff_clock)
+    local_today = to_local(now, tz_name).date()
+    cutoff = local_cutoff_utc(local_today, clock, tz_name)
+    if cutoff > now:
+        cutoff = local_cutoff_utc(local_today - timedelta(days=1), clock, tz_name)
+    return cutoff
+
+
+def _cutoff_window(
+    channel: Channel,
+    tz_name: str,
+    cutoff_clock: str,
+    kind: str,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime]:
+    """The last complete ``[previous_cutoff, current_cutoff)`` interval."""
+    cutoff = _latest_cutoff(tz_name, cutoff_clock, now)
+    window = window_for_cutoff(
+        channel_id=channel.id,
+        kind=kind,
+        timezone=tz_name,
+        cutoff_clock=cutoff_clock,
+        weekdays="0,1,2,3,4,5,6",
+        cutoff=cutoff,
+    )
+    return window.start, window.end
+
+
+def _default_channel(channels: list[Channel]) -> Channel | None:
+    """Prefer a live source channel over the synthetic fixture desk."""
+    if not channels:
+        return None
+    return next((channel for channel in channels if not channel.is_demo), channels[0])
 
 
 def _window_for_channel(db: Session, channel: Channel, tz_name: str) -> tuple[datetime, datetime]:
@@ -250,6 +297,7 @@ def _launch_worker(background: bool = True) -> str:
         except WorkerBusy:
             return "Worker is already running."
         except Exception as exc:  # noqa: BLE001
+            logger.exception("worker_launch_failed", extra={"kind": "sync"})
             return f"Worker error: {type(exc).__name__}: {str(exc)[:200]}"
     log_dir = settings.data_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -269,6 +317,15 @@ def _launch_worker(background: bool = True) -> str:
             stdin=subprocess.DEVNULL,
             creationflags=flags,
             close_fds=True,
+        )
+    except OSError as exc:
+        # The job is already committed. A failed launch must not lose it: the
+        # scheduled worker will pick it up, and the operator gets a warning
+        # instead of a bare 500 page.
+        logger.exception("worker_launch_failed", extra={"kind": "detached"})
+        return (
+            f"Worker could not start ({type(exc).__name__}: {str(exc)[:160]}). "
+            "The job stays queued; the scheduled worker will run it."
         )
     finally:
         handle.close()
@@ -1448,13 +1505,28 @@ def build_page(
     db: Session = Depends(session_dependency),
 ):
     channels = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c, "operator")]
-    selected = db.get(Channel, channel) if channel else (channels[0] if channels else None)
+    selected = db.get(Channel, channel) if channel else _default_channel(channels)
     profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
     tz_name = _timezone(profile)
-    window = _window_for_channel(db, selected, tz_name) if selected else (utcnow() - timedelta(days=1), utcnow())
-    rights = active_rights(db, selected.id) if selected else None
     schedule = _daily_schedule(db, selected) if selected else None
-    preview = preview_window(db, schedule) if schedule else None
+    cutoff_clock = schedule.cutoff_time if schedule else settings.cutoff_local_time
+    preview = preview_window(db, schedule) if schedule and selected and not selected.is_demo else None
+    if selected is None:
+        window = (utcnow() - timedelta(days=1), utcnow())
+        window_source = "none"
+    elif selected.is_demo:
+        window = _window_for_channel(db, selected, tz_name)
+        window_source = "fixture"
+    elif preview:
+        window = (
+            datetime.fromisoformat(preview["window"]["start_utc"]),
+            datetime.fromisoformat(preview["window"]["end_utc"]),
+        )
+        window_source = "schedule"
+    else:
+        window = _cutoff_window(selected, tz_name, cutoff_clock, "manual")
+        window_source = "default_cutoff"
+    rights = active_rights(db, selected.id) if selected else None
     return render(
         request,
         "build.html",
@@ -1471,6 +1543,8 @@ def build_page(
             is_demo=bool(selected and selected.is_demo),
             schedule=schedule,
             preview=preview,
+            cutoff_clock=cutoff_clock,
+            window_source=window_source,
         ),
     )
 
@@ -1492,36 +1566,61 @@ def build_submit(
     channel = _channel_or_404(db, channel_id, user, "operator")
     profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
     tz_name = _timezone(profile)
+    schedule = _daily_schedule(db, channel)
+    cutoff_clock = schedule.cutoff_time if schedule else settings.cutoff_local_time
     start = _parse_local(window_start, tz_name)
     end = _parse_local(window_end, tz_name)
     if not start or not end or start >= end:
-        return _redirect(f"/build?channel={channel.id}", error="The reporting window is invalid.")
+        return _redirect(
+            f"/build?channel={channel.id}",
+            error="The reporting window is invalid: enter a start before the cutoff.",
+        )
+    if end - start > timedelta(days=31):
+        return _redirect(
+            f"/build?channel={channel.id}",
+            error="The reporting window is longer than 31 days. Use a cutoff-to-cutoff window.",
+        )
     if not channel.is_demo and active_rights(db, channel.id) is None:
         return _redirect(
             f"/build?channel={channel.id}",
             error="Build blocked: this channel has no active rights declaration.",
         )
-    job = enqueue_manual_job(
-        db,
-        channel,
-        window_start=start,
-        window_end=end,
-        kind=kind if kind in {"manual", "special"} else "manual",
-        actor_id=user.id,
-        collect=(not channel.is_demo) and collect == "1",
-        timezone=tz_name,
-        cutoff_local=(profile.cutoff_local if profile else "05:00"),
-    )
+    try:
+        job = enqueue_manual_job(
+            db,
+            channel,
+            window_start=start,
+            window_end=end,
+            kind=kind if kind in {"manual", "special"} else "manual",
+            actor_id=user.id,
+            title=title.strip()[:240],
+            collect=(not channel.is_demo) and collect == "1",
+            timezone=tz_name,
+            cutoff_local=cutoff_clock,
+        )
+    except DuplicateWindowError as exc:
+        db.rollback()
+        return _redirect(f"/build?channel={channel.id}", error=str(exc))
+    reused = bool(getattr(job, "reused_existing", False))
     audit(
         db,
         user,
-        "job.manual_ui",
+        "job.manual_ui_reused" if reused else "job.manual_ui",
         "job",
         job.id,
-        {"channel": channel.id, "window_end": end.isoformat(), "collect": collect == "1"},
+        {
+            "channel": channel.id,
+            "window_start": start.isoformat(),
+            "window_end": end.isoformat(),
+            "collect": collect == "1",
+            "cutoff_local": cutoff_clock,
+        },
     )
     db.commit()
-    launched = _launch_worker()
+    if reused:
+        launched = f"This window already has job #{job.id} ({job.status.replace('_', ' ')}); no duplicate was created."
+    else:
+        launched = _launch_worker()
     return _redirect(f"/jobs/{job.id}", f"Build queued. {launched}")
 
 
@@ -1882,6 +1981,9 @@ def schedule_run(
         window_end=cutoff,
         kind=schedule.kind if schedule.kind in {"daily", "special"} else "manual",
         actor_id=user.id,
+        collect=not channel.is_demo,
+        timezone=schedule.timezone,
+        cutoff_local=schedule.cutoff_time,
     )
     audit(db, user, "schedule.run_now", "schedule", schedule.id, {"job": job.id})
     db.commit()
@@ -1921,7 +2023,17 @@ def job_detail(
     return render(
         request,
         "job.html",
-        _ctx(db, request, user, "jobs", job=job, steps=steps, result=result, edition=edition),
+        _ctx(
+            db,
+            request,
+            user,
+            "jobs",
+            job=job,
+            steps=steps,
+            result=result,
+            edition=edition,
+            log_dir=str(settings.data_dir / "logs"),
+        ),
     )
 
 
@@ -2242,4 +2354,56 @@ def http_error(request: Request, exc: HTTPException):
         "error.html",
         {**context, "code": exc.status_code, "detail": exc.detail},
         status_code=exc.status_code,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    """Log the full traceback and return a safe page with a reference id.
+
+    The operator-facing message never contains exception text, form values or
+    session material; the traceback goes to ``data/logs/web-YYYYMMDD.log``.
+    """
+    reference = uuid.uuid4().hex[:12]
+    log_path = configure_logging("web")
+    user_id = None
+    context: dict = {
+        "request": request,
+        "user": None,
+        "csrf": "",
+        "active": "",
+        "profile": None,
+        "can": {"operate": False, "edit": False, "own": False},
+    }
+    try:
+        with SessionLocal() as db:
+            user = get_session_user(request, db)
+            user_id = user.id if user else None
+            if user:
+                context = _ctx(db, request, user, "")
+    except Exception:  # noqa: BLE001 - the error page must render even if the DB is down
+        pass
+    logger.error(
+        "unhandled_exception",
+        extra={
+            "event": "unhandled_exception",
+            "request_id": reference,
+            "method": request.method,
+            "path": request.url.path,
+            "user_id": user_id,
+        },
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    return render(
+        request,
+        "error.html",
+        {
+            **context,
+            "code": 500,
+            "detail": (
+                "An unexpected error occurred. Reference "
+                f"{reference}. The full traceback was written to {log_path}."
+            ),
+        },
+        status_code=500,
     )

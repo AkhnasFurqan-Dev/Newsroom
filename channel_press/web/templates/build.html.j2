@@ -30,6 +30,17 @@
       {% if not is_demo and not rights %}
       <div class="notice notice--danger"><h3>Rights declaration missing</h3><p>This channel cannot be built until an owner records an active grant. <a href="/sources/{{ selected.id if selected else '' }}">Open source desk</a>.</p></div>
       {% endif %}
+      {% if window_source == 'default_cutoff' %}
+      <div class="notice notice--warn">
+        <h3>No daily schedule for this channel</h3>
+        <p class="small">The window below is the last complete {{ cutoff_clock }} cutoff-to-cutoff interval, not an arbitrary span of stored posts. <a href="/schedules">Create a daily schedule</a> to pin the cutoff and the committed watermark.</p>
+      </div>
+      {% elif window_source == 'fixture' %}
+      <div class="notice">
+        <h3>Fixture window</h3>
+        <p class="small">The synthetic fixture desk uses the span of its imported sample posts. Live channels use the cutoff-to-cutoff interval.</p>
+      </div>
+      {% endif %}
       {% if preview %}
       <div class="notice">
         <h3>Next scheduled window</h3>
@@ -56,7 +67,7 @@
           <input id="window_end" name="window_end" type="datetime-local" value="{{ window_end_local }}" required>
         </div>
       </div>
-      <p class="help">Posts are selected with <span class="mono">posted_at &gt;= start</span> and <span class="mono">&lt; end</span>. The upper bound is the cutoff; a later post is never treated as fresh content in this edition.</p>
+      <p class="help">Posts are selected with <span class="mono">posted_at &gt;= start</span> and <span class="mono">&lt; end</span>. The upper bound is the cutoff; a later post is never treated as fresh content in this edition. Submitting the same channel and window twice reuses the existing job instead of creating a duplicate edition.</p>
       {% if not is_demo %}
       <div class="field">
         <label for="collect"><input id="collect" name="collect" type="checkbox" value="1" checked> Collect this window from Telegram before building</label>

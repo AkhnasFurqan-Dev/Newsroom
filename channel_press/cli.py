@@ -463,8 +463,11 @@ def cmd_run_now(args: argparse.Namespace) -> int:
 
 
 def cmd_worker(args: argparse.Namespace) -> int:
+    from .logging_setup import configure_logging
+
     settings.ensure_dirs()
     upgrade_database()
+    configure_logging("worker", console=False)
     try:
         with WorkerLease():
             with SessionLocal() as db:
@@ -499,8 +502,11 @@ def cmd_worker(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
+    from .logging_setup import configure_logging
+
     settings.ensure_dirs()
     upgrade_database()
+    configure_logging("web")
     _print(f"Channel Press at http://{args.host}:{args.port}")
     uvicorn.run("channel_press.web.app:app", host=args.host, port=args.port, reload=args.reload)
     return 0
