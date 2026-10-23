@@ -394,3 +394,86 @@ Owner instruction: `POST_M14_LIVE_COMPLETION.md`. Phase evidence lives in
   and was not published; an editor must clear the flags first.
 - Live Telegram, a supervised live edition and automatic scheduled publication
   remain unverified. Auto-release is off.
+
+### Queue Build 500 and layout QA (2026-10-23)
+
+**Root cause.** `POST /build` read the cutoff clock from
+`profile.cutoff_local`, but `PublicationProfile` has no such column. After
+`enqueue_manual_job` had flushed a job row, the attribute access raised
+`AttributeError: 'PublicationProfile' object has no attribute 'cutoff_local'` in
+`channel_press/web/app.py` (`build_submit`, line 1513 before the fix). The request
+rolled back and returned a bare HTTP 500: no job, no edition, no audit row and no
+traceback on disk. The cutoff belongs to the channel's daily
+`EditionSchedule.cutoff_time` (fallback `CHANNEL_PRESS_CUTOFF_LOCAL_TIME`).
+
+**Changes**
+
+- Build route and page: cutoff comes from the channel schedule; the default channel
+  is the first non-demo channel; a live channel with a schedule previews
+  `[previous_cutoff, current_cutoff)`, a live channel without a schedule uses the
+  last complete cutoff window, and the fixture channel keeps its data-derived
+  window.
+- Manual jobs use a deterministic key
+  (`manual:<channel>:<kind>:<start>:<end>`): runnable/completed/awaiting-review
+  jobs are reused, failed/cancelled jobs are re-armed in place, and a window that
+  already has an edition raises `DuplicateWindowError` shown as a form message, not
+  a 500. Manual jobs are review-only (`requires_review=True`, no auto-publish),
+  `max_attempts=2`, create an `EditionWindowRecord`, pass the optional title and
+  reject windows longer than 31 days.
+- Logging: new `channel_press/logging_setup.py` writes JSON lines to
+  `data/logs/web-YYYYMMDD.log` / `worker-YYYYMMDD.log`; a global 500 page shows a
+  safe reference id and the log path; the worker records `job_failed` with a full
+  traceback and `[at file.py:N in func]`. Alembic's `fileConfig` was disabling the
+  already-created `channel_press.*` loggers
+  (`disable_existing_loggers=True`), so worker failures never reached disk; fixed
+  with `disable_existing_loggers=False`, a namespace re-enable in
+  `configure_logging`, and configuring logging after `upgrade_database()` in
+  `serve`/`worker`. Deterministic `PipelineError`/`PublicationError` failures are
+  terminal; only unexpected exceptions retry.
+- Layout: removed the conservative section-height page packing that produced
+  near-empty pages; non-standalone sections flow and Paged.js packs the actual
+  rows, while standalone `analysis`/`opinion`/`briefs` still force a page. The
+  section record is unbreakable (`break-inside: avoid`). Layout QA skips Paged.js
+  anonymous split wrappers (false 3016 px overflow) and reports tag, class, text
+  excerpt and `+Npx` for real overflow.
+- Templates: the build page explains the window source and what a duplicate
+  re-submit does; the job page shows the worker log path and a `"job_id"` hint.
+
+**Verification**
+
+- `ruff check channel_press tests` → `All checks passed!` (exit 0).
+- `pytest -p no:warnings` → **141 passed** in ~3.5 min (16 new tests in
+  `tests/test_build_queue.py`, including duplicate-window protection).
+- Supervised HTTP run against an exact copy of the live database (`uvicorn`
+  127.0.0.1:8799, real Ollama, stored posts, media downloads off, throwaway
+  session path): login succeeded; `GET /build` selected channel 2
+  (`@ThePakistanNews`) with `2026-10-22T05:00 → 2026-10-23T05:00`;
+  `POST /build` returned `303 /jobs/4`. The detached worker completed: job 4
+  `awaiting_review`, edition 2 `awaiting_review`, `published_at: None`; a 7-page
+  792 × 1224 pt PDF, manifest `demo_edition: false`, `quality.warnings == []`, and
+  4610–9186 characters on every page (no blank page). Output folder, e-paper
+  bundle, manifest and checksums exist. No real Telegram session was used, the
+  real database was not written, and nothing was published.
+- Real database untouched: revision `b7c1f2d4e901`; 26 posts on channel 1 and
+  1587 on channel 2; 15 articles; 1 edition; 1 user; 2 rights grants; 828
+  metadata-only media rows.
+
+**Known configuration issue.** The live publication profile still carries the
+seeded demo identity (`channel_handle='@fixture_newsroom'`, footer "... Demonstration
+edition produced from synthetic fixtures."). The edition is correctly
+`demo_edition: false` and built from the live channel, but the masthead/footer text
+is stale. Update **Branding** (publication name, handle, footer) and re-render
+before release; the draft is not published. Documented in `TROUBLESHOOTING.md`.
+
+**Files:** `channel_press/web/app.py`, `channel_press/scheduling/service.py`,
+`channel_press/scheduling/__init__.py`, `channel_press/logging_setup.py`,
+`channel_press/cli.py`, `alembic/env.py`, `channel_press/layout/engine.py`,
+`channel_press/layout/templates/postprocess.js`,
+`channel_press/web/static/css/print.css`,
+`channel_press/web/templates/build.html.j2`,
+`channel_press/web/templates/job.html.j2`, `tests/test_build_queue.py`,
+`tests/test_scheduling.py`, `TROUBLESHOOTING.md`, `IMPLEMENTATION_LOG.md`.
+
+**Commits:** `2d00f22` (build, scheduling, logging and tests), `b5d44a5`
+(layout flow and QA noise), plus the documentation commit that contains this
+entry.

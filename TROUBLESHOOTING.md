@@ -195,6 +195,46 @@ Get-Content .\data\logs\worker-$(Get-Date -Format yyyyMMdd).log -Tail 50
 -TaskName ChannelPressWorker`, the “Start when available” setting and the working
 directory. The task must point at the repository folder with `.venv` present.
 
+**A failure has no useful message** — every web and worker error is now written as
+a JSON line to `data\logs\web-YYYYMMDD.log` or `data\logs\worker-YYYYMMDD.log`.
+The job page shows the log file and a `"job_id": N` hint. Search the file for that
+job id, or for `unhandled_exception` / `job_failed`; the line carries the exception
+type, message, full traceback and `[at file.py:N in function]` location. If the
+folder is empty, the process was started before logging was configured or Alembic
+disabled the loggers; restart `python -m channel_press serve` or the worker once.
+Logs never contain Telegram session contents, `.env` values or credentials; redact
+paths before posting a log publicly.
+
+## Queue Build returns Internal Server Error
+
+The old build route read a cutoff clock from
+`PublicationProfile.cutoff_local`, a column that never existed; the resulting
+`AttributeError` rolled the queued job back and returned a bare HTTP 500. The route
+now uses the channel's daily `EditionSchedule.cutoff_time` (falling back to
+`CHANNEL_PRESS_CUTOFF_LOCAL_TIME`) and the failure is recorded.
+
+If you still see **Internal Server Error** after a build submit:
+
+1. Note the reference id shown on the error page.
+2. Open `data\logs\web-YYYYMMDD.log` and read the matching
+   `unhandled_exception` line; it names the file, line and function.
+3. Reload **Build**. A failure before the commit creates no job or edition; if it
+   happened after the commit, a job may remain queued, so check **Jobs** before
+   re-submitting. Re-submitting the same window reuses that job rather than
+   creating a duplicate.
+4. If a job was created but stayed `scheduled`, the worker did not start or died.
+   Open the job page and follow **Worker does nothing** above.
+
+The 500 page deliberately omits credentials, stack traces and environment values.
+Do not replace it with a silent redirect: the log is the diagnostic, the page is
+only a safe reference.
+
+**The same window will not queue twice** — manual jobs use a deterministic key
+(`manual:<channel>:<kind>:<start>:<end>`). An existing scheduled or running job is
+reused; a failed or cancelled one is re-armed in place; a window that already has
+an edition returns **This window was already built (edition #N)**. Open that
+edition, or choose a different window. This is duplicate protection, not an error.
+
 ## Duplicate or overlapping windows
 
 The build selects posts with `posted_at >= start` and `< end`. The end instant is
@@ -226,6 +266,29 @@ font below the configured minimum to force a fit.
 
 **Blank trailing page** — a blank page is a defect. It usually means a forced page
 break or an empty section container. Check the edition plan and re-render.
+
+**“Browser layout reported overflow”** — the job page now names the element (tag,
+class, a short text excerpt and how many pixels it exceeds the page). The most
+common real causes are an unbroken URL, a very long proper name, a wide table or a
+headline that cannot hyphenate. Paged.js also wraps split multi-column flow in an
+anonymous `div` whose width is the full measure rather than the printed column;
+those wrappers are excluded from the check, so an overflow message always refers to
+a real visible element. Fix the copy or the chunking and re-render; do not reduce
+the font below the configured minimum.
+
+**A page holds only a source record or one short report** — non-standalone
+sections now continue on the same page, and the source record is kept unbreakable.
+A section record that does not fit moves whole to the next page and the following
+section fills the rest. If a page is still mostly empty, re-render; if the record
+itself is unusually long, trim the message list in the plan or move the section to
+a standalone family.
+
+**The masthead handle or footer still says “demonstration” or “synthetic
+fixtures”** — the edition is built from live posts but the publication profile
+still carries the seeded demo text. The edition manifest's `demo_edition` flag and
+the profile text are separate: update **Branding** (publication name, handle,
+footer) and re-render before release. The draft remains `awaiting_review` until an
+owner approves it.
 
 **Overflow warnings block release** — the publisher raises `LayoutQualityError`
 when QA warnings exist. Only an owner should override with code-level
