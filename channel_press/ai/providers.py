@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..config import settings
 from ..models import SourcePost, StoryClaim, StoryCluster, StoryTimelineEvent
@@ -17,12 +18,44 @@ from ..editorial.entities import sentence_split
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
+# One local model request at a time unless the owner deliberately raises the
+# configured concurrency. A global gate protects the GPU from two jobs.
+_OLLAMA_GATE = threading.BoundedSemaphore(
+    max(1, min(4, int(getattr(settings, "ollama_max_concurrency", 1) or 1)))
+)
+
 
 class DraftSchema(BaseModel):
     title: str = Field(min_length=8, max_length=300)
     deck: str = Field(default="", max_length=300)
     standfirst: str = Field(default="", max_length=1200)
     body: list[str] = Field(min_length=1, max_length=18)
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def _coerce_paragraphs(cls, value):
+        """Accept the small structural variations local models actually emit.
+
+        The factual checks downstream are unchanged; this only normalises the
+        shape of the paragraph list so a valid draft is not discarded because a
+        model wrapped each paragraph in ``{"paragraph": "..."}`` or returned a
+        single string instead of an array.
+        """
+        if isinstance(value, str):
+            return [part.strip() for part in re.split(r"\n\s*\n", value) if part.strip()]
+        if isinstance(value, list):
+            paragraphs: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    paragraphs.append(item)
+                elif isinstance(item, dict):
+                    for key in ("paragraph", "text", "content", "body"):
+                        candidate = item.get(key)
+                        if isinstance(candidate, str) and candidate.strip():
+                            paragraphs.append(candidate)
+                            break
+            return paragraphs
+        return value
 
 
 @dataclass
@@ -186,6 +219,16 @@ class OllamaDraftProvider:
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
         self.model = model or settings.ollama_model
         self.keep_alive = keep_alive or settings.ollama_keep_alive
+        self.timeout = max(30, int(settings.ollama_timeout_seconds))
+        self.num_ctx = max(2048, int(settings.ollama_num_ctx))
+        self.num_predict = max(256, int(settings.ollama_num_predict))
+
+    def _wanted_names(self) -> set[str]:
+        wanted = self.model.strip()
+        names = {wanted}
+        if ":" not in wanted:
+            names.add(f"{wanted}:latest")
+        return names
 
     def available(self) -> tuple[bool, str]:
         try:
@@ -193,12 +236,25 @@ class OllamaDraftProvider:
                 response = client.get(f"{self.base_url}/api/tags")
             if response.status_code != 200:
                 return False, f"Ollama returned HTTP {response.status_code}."
-            models = [m.get("name") for m in response.json().get("models", [])]
-            if self.model not in models and not any(str(m).split(":")[0] == self.model.split(":")[0] for m in models):
-                return False, f"Model {self.model} is not installed."
+            models = {str(m.get("name") or "") for m in response.json().get("models", [])}
+            if not (models & self._wanted_names()):
+                return False, f"Model {self.model} is not installed (ollama pull {self.model})."
             return True, "ready"
         except Exception as exc:  # network errors are expected when Ollama is off
             return False, f"Ollama is not reachable at {self.base_url}: {type(exc).__name__}"
+
+    @staticmethod
+    def _parse_json(content: str) -> dict:
+        text = (content or "").strip()
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+        text = re.sub(r"\s*```$", "", text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            start, end = text.find("{"), text.rfind("}")
+            if start >= 0 and end > start:
+                return json.loads(text[start : end + 1])
+            raise
 
     def _chat(self, system: str, user: str) -> dict:
         payload = {
@@ -210,14 +266,21 @@ class OllamaDraftProvider:
             "stream": False,
             "format": "json",
             "keep_alive": self.keep_alive,
-            "options": {"temperature": 0.2, "num_ctx": 4096, "num_predict": 1400},
+            "options": {
+                "temperature": 0.2,
+                "num_ctx": self.num_ctx,
+                "num_predict": self.num_predict,
+            },
         }
-        with httpx.Client(timeout=240) as client:
-            response = client.post(f"{self.base_url}/api/chat", json=payload)
+        with _OLLAMA_GATE:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(f"{self.base_url}/api/chat", json=payload)
+        if response.status_code == 404:
+            raise RuntimeError(f"Ollama does not have the model {self.model}.")
         if response.status_code != 200:
             raise RuntimeError(f"Ollama HTTP {response.status_code}")
         content = response.json().get("message", {}).get("content", "")
-        return json.loads(content)
+        return self._parse_json(content)
 
     def draft(self, bundle: StoryBundle) -> DraftResult:
         started = time.monotonic()
@@ -227,9 +290,18 @@ class OllamaDraftProvider:
         if bundle.story.genre == "opinion":
             task = "analysis_article"
         system = prompt_text(task)
-        evidence = []
+        # Keep the prompt inside the configured context. Source evidence is
+        # truncated with an explicit marker rather than silently omitted.
+        budget = max(4000, self.num_ctx * 3)
+        evidence: list[str] = []
+        used = 0
         for index, source in enumerate(bundle.sources, start=1):
-            evidence.append(f"[S{index}] message {source.message_id} at {source.posted_at}: {source.text}")
+            line = f"[S{index}] message {source.message_id} at {source.posted_at}: {source.text}"
+            if used + len(line) > budget:
+                evidence.append("[additional source evidence truncated to fit the local context]")
+                break
+            evidence.append(line)
+            used += len(line)
         claim_lines = [f"[C{i}] {c.text} (certainty={c.certainty}, status={c.verification_status})" for i, c in enumerate(bundle.claims, start=1)]
         user = (
             f"STORY: {bundle.story.canonical_title}\nGENRE: {bundle.story.genre}\n"
@@ -261,7 +333,7 @@ class OllamaDraftProvider:
 
     def unload(self) -> None:
         try:
-            with httpx.Client(timeout=5) as client:
+            with httpx.Client(timeout=10) as client:
                 client.post(
                     f"{self.base_url}/api/generate",
                     json={"model": self.model, "keep_alive": 0, "prompt": ""},
