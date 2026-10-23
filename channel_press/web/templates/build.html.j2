@@ -30,6 +30,22 @@
       {% if not is_demo and not rights %}
       <div class="notice notice--danger"><h3>Rights declaration missing</h3><p>This channel cannot be built until an owner records an active grant. <a href="/sources/{{ selected.id if selected else '' }}">Open source desk</a>.</p></div>
       {% endif %}
+      {% if preview %}
+      <div class="notice">
+        <h3>Next scheduled window</h3>
+        <p class="small">
+          {{ preview.window.start_local }} → <strong>{{ preview.window.end_local }}</strong>
+          ({{ profile.timezone if profile else 'Asia/Karachi' }}).
+          {% if preview.first_of_series %}
+          No committed cutoff yet; the first live run also backfills up to {{ preview.context_lookback_days }} days of context.
+          {% else %}
+          Starts at the last committed cutoff {{ preview.watermark }}.
+          {% endif %}
+          {{ preview.stored_included_posts }} stored included post{{ '' if preview.stored_included_posts == 1 else 's' }} in this window.
+        </p>
+        <p class="small"><a href="/sources/{{ selected.id }}/telegram">Open Telegram collection</a></p>
+      </div>
+      {% endif %}
       <div class="grid grid--2">
         <div class="field">
           <label for="window_start">Window start ({{ profile.timezone if profile else 'Asia/Karachi' }})</label>
@@ -41,6 +57,12 @@
         </div>
       </div>
       <p class="help">Posts are selected with <span class="mono">posted_at &gt;= start</span> and <span class="mono">&lt; end</span>. The upper bound is the cutoff; a later post is never treated as fresh content in this edition.</p>
+      {% if not is_demo %}
+      <div class="field">
+        <label for="collect"><input id="collect" name="collect" type="checkbox" value="1" checked> Collect this window from Telegram before building</label>
+        <p class="help">Uses the saved user session to fetch exactly this window. Leave unchecked to build only from posts already stored. The cutoff watermark advances only when a release is committed, not when collection starts.</p>
+      </div>
+      {% endif %}
       <div class="field">
         <label for="kind">Edition kind</label>
         <select id="kind" name="kind">

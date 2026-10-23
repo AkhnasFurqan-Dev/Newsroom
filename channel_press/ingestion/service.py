@@ -70,7 +70,8 @@ def _copy_media(
         if candidate.is_file():
             checksum = sha256_bytes(candidate.read_bytes())
             path = str(candidate)
-    if not path and not filename:
+    if not path and not filename and not str(media.get("telegram_file_id") or "").strip():
+        # Nothing to render and no remote handle: do not invent a media record.
         return None
     if path and kind == "photo" and (not width or not height):
         try:
@@ -111,6 +112,7 @@ def import_payload(
     source_kind: str = "json",
     original_name: str = "",
     rights_grant: RightsGrant | None = None,
+    window_key: str = "",
 ) -> ImportStats:
     messages = normalize_messages(payload)
     if not messages:
@@ -124,6 +126,7 @@ def import_payload(
         imported_by=imported_by,
         raw_count=len(messages),
         rights_grant_id=rights_grant.id if rights_grant else None,
+        window_key=window_key[:200],
     )
     db.add(import_record)
     db.flush()

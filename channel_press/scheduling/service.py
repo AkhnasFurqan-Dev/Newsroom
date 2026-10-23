@@ -25,7 +25,19 @@ from typing import Callable
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from ..auth import audit
+from ..auth import active_rights, audit
+from ..collection import window as window_math
+from ..collection.service import (
+    EditionWindow,
+    LiveTelegramSource,
+    claim_window,
+    collect_window,
+    commit_edition_window,
+    get_or_create_window,
+    mark_no_content,
+    mark_window_built,
+    record_for_edition,
+)
 from ..config import settings
 from ..models import (
     Article,
@@ -40,7 +52,7 @@ from ..models import (
     RetryAttempt,
 )
 from ..pipeline import PipelineResult, run_pipeline
-from ..timeutil import local_boundary_utc, to_local, utcnow
+from ..timeutil import to_local, utcnow
 from ..publishing.service import PublicationError, edition_review_blockers
 
 JOB_RUNNABLE = {"scheduled", "failed_retryable", "resumable"}
@@ -59,41 +71,23 @@ class DueJob:
 
 
 def _weekdays(schedule: EditionSchedule) -> set[int]:
-    result: set[int] = set()
-    for part in (schedule.weekdays or "").split(","):
-        try:
-            value = int(part.strip())
-        except ValueError:
-            continue
-        if 0 <= value <= 6:
-            result.add(value)
-    return result or {0, 1, 2, 3, 4, 5, 6}
+    return window_math.enabled_weekdays(schedule.weekdays)
 
 
-def _clock(value: str, fallback: time) -> time:
-    try:
-        hour, minute = value.split(":", 1)
-        return time(int(hour), int(minute))
-    except (ValueError, AttributeError):
-        return fallback
+def _clock(value: str, fallback: time) -> time:  # noqa: F821 - time imported below for typing
+    return window_math.parse_clock(value, fallback)
 
 
 def cutoff_for_day(schedule: EditionSchedule, day: date) -> datetime:
-    return local_boundary_utc(day, _clock(schedule.cutoff_time, time(5, 0)), schedule.timezone)
+    return window_math.cutoff_for_day(schedule, day)
 
 
 def release_for_day(schedule: EditionSchedule, day: date) -> datetime:
-    return local_boundary_utc(day, _clock(schedule.release_time, time(8, 0)), schedule.timezone)
+    return window_math.release_for_day(schedule, day)
 
 
 def previous_enabled_day(schedule: EditionSchedule, day: date) -> date:
-    enabled = _weekdays(schedule)
-    cursor = day - timedelta(days=1)
-    for _ in range(14):
-        if cursor.weekday() in enabled:
-            return cursor
-        cursor -= timedelta(days=1)
-    return cursor
+    return window_math.previous_enabled_day(schedule.weekdays, day)
 
 
 def latest_due_cutoff(schedule: EditionSchedule, now: datetime | None = None) -> datetime | None:
@@ -124,26 +118,13 @@ def due_cutoffs(
             EditionWatermark.kind == schedule.kind,
         )
     )
-    earliest = watermark.last_cutoff_at if watermark else None
-    local_today = to_local(now, schedule.timezone).date()
-    candidates: list[datetime] = []
-    enabled = _weekdays(schedule)
-    for offset in range(0, 31):
-        day = local_today - timedelta(days=offset)
-        if day.weekday() not in enabled:
-            continue
-        cutoff = cutoff_for_day(schedule, day)
-        if cutoff > now:
-            continue
-        if earliest is not None and cutoff <= earliest:
-            if offset > 0:
-                break
-            continue
-        candidates.append(cutoff)
-    candidates.sort()
-    if not candidates:
-        return []
-    return candidates[-max_catchup:]
+    to_enqueue, _skipped = window_math.due_cutoffs(
+        schedule,
+        watermark=watermark.last_cutoff_at if watermark else None,
+        now=now,
+        max_catchup=max_catchup,
+    )
+    return to_enqueue
 
 
 def enqueue_due_jobs(
@@ -153,23 +134,47 @@ def enqueue_due_jobs(
     max_catchup: int = 3,
 ) -> list[Job]:
     now = now or utcnow()
+    max_catchup = max(1, int(max_catchup))
     created: list[Job] = []
     for schedule in db.scalars(select(EditionSchedule).where(EditionSchedule.enabled.is_(True))):
         channel = db.get(Channel, schedule.channel_id)
         if channel is None:
             continue
-        cutoffs = due_cutoffs(db, schedule, now=now, max_catchup=max_catchup)
-        if not cutoffs:
-            continue
-        for cutoff in cutoffs:
-            key = f"edition:{schedule.channel_id}:{schedule.kind}:{cutoff.isoformat()}"
-            existing = db.scalar(select(Job).where(Job.key == key))
-            if existing is not None:
-                continue
-            window_start = cutoff_for_day(
-                schedule, previous_enabled_day(schedule, to_local(cutoff, schedule.timezone).date())
+        watermark = db.scalar(
+            select(EditionWatermark).where(
+                EditionWatermark.channel_id == schedule.channel_id,
+                EditionWatermark.kind == schedule.kind,
             )
-            release_at = release_for_day(schedule, to_local(cutoff, schedule.timezone).date())
+        )
+        cutoffs, skipped = window_math.due_cutoffs(
+            schedule,
+            watermark=watermark.last_cutoff_at if watermark else None,
+            now=now,
+            max_catchup=max_catchup,
+        )
+        # Record every skipped date explicitly; a workstation that was off for
+        # weeks must not leave an invisible gap in the record.
+        for missed in skipped:
+            missed_window = window_math.window_for_schedule(schedule, missed)
+            get_or_create_window(
+                db,
+                missed_window,
+                status="skipped",
+                skip_reason=(
+                    "Older than the configured catch-up limit; not built automatically. "
+                    "Run a manual edition for this date if it is still needed."
+                ),
+            )
+        for cutoff in cutoffs:
+            window = window_math.window_for_schedule(schedule, cutoff)
+            key = f"edition:{schedule.channel_id}:{schedule.kind}:{window.end.isoformat()}"
+            existing = db.scalar(select(Job).where(Job.key == key))
+            record = get_or_create_window(db, window)
+            if existing is not None:
+                if not record.job_id:
+                    record.job_id = existing.id
+                continue
+            release_at = release_for_day(schedule, to_local(window.end, schedule.timezone).date())
             job = Job(
                 key=key,
                 kind="edition",
@@ -183,8 +188,12 @@ def enqueue_due_jobs(
                         "schedule_id": schedule.id,
                         "cutoff": cutoff.isoformat(),
                         "release_at": release_at.isoformat(),
-                        "window_start": window_start.isoformat(),
-                        "window_end": cutoff.isoformat(),
+                        "window_start": window.start.isoformat(),
+                        "window_end": window.end.isoformat(),
+                        "window_key": window.key,
+                        "timezone": schedule.timezone,
+                        "cutoff_local": schedule.cutoff_time,
+                        "collect": not channel.is_demo,
                         "requires_review": bool(schedule.requires_review),
                         "auto_publish_nonrisk": bool(schedule.auto_publish_nonrisk),
                         "edition_kind": schedule.kind,
@@ -194,6 +203,8 @@ def enqueue_due_jobs(
             )
             db.add(job)
             db.flush()
+            record.job_id = job.id
+            record.status = "pending"
             created.append(job)
             audit(
                 db,
@@ -203,26 +214,9 @@ def enqueue_due_jobs(
                 job.id,
                 {"channel": schedule.channel_id, "cutoff": cutoff.isoformat()},
             )
-        # Advance the watermark to the newest cutoff that now has a job. This
-        # is safe because the unique job key remains the idempotency record.
-        newest = max(cutoffs)
-        watermark = db.scalar(
-            select(EditionWatermark).where(
-                EditionWatermark.channel_id == schedule.channel_id,
-                EditionWatermark.kind == schedule.kind,
-            )
-        )
-        if watermark is None:
-            db.add(
-                EditionWatermark(
-                    channel_id=schedule.channel_id,
-                    kind=schedule.kind,
-                    last_cutoff_at=newest,
-                )
-            )
-        elif watermark.last_cutoff_at < newest:
-            watermark.last_cutoff_at = newest
-            watermark.updated_at = utcnow()
+        # NOTE: the committed watermark is intentionally *not* advanced here.
+        # It moves only when a window is committed (released edition or a
+        # verified zero-content window), see collection.service.commit_window.
     db.flush()
     return created
 
@@ -236,8 +230,20 @@ def enqueue_manual_job(
     kind: str = "manual",
     actor_id: int | None = None,
     release_at: datetime | None = None,
+    collect: bool | None = None,
+    timezone: str | None = None,
+    cutoff_local: str = "05:00",
 ) -> Job:
     now = utcnow()
+    tz_name = timezone or settings.timezone
+    window = EditionWindow(
+        channel_id=channel.id,
+        kind=kind,
+        start=window_start,
+        end=window_end,
+        timezone=tz_name,
+        cutoff_local=cutoff_local,
+    )
     key = f"manual:{channel.id}:{kind}:{window_start.isoformat()}:{window_end.isoformat()}:{uuid.uuid4().hex[:8]}"
     job = Job(
         key=key,
@@ -255,6 +261,10 @@ def enqueue_manual_job(
                 "release_at": (release_at or now).isoformat(),
                 "window_start": window_start.isoformat(),
                 "window_end": window_end.isoformat(),
+                "window_key": window.key,
+                "timezone": tz_name,
+                "cutoff_local": cutoff_local,
+                "collect": (not channel.is_demo) if collect is None else bool(collect),
                 "requires_review": False,
                 "auto_publish_nonrisk": False,
                 "edition_kind": kind,
@@ -265,6 +275,47 @@ def enqueue_manual_job(
     db.add(job)
     db.flush()
     audit(db, None, "job.manual", "job", job.id, {"channel": channel.id})
+    return job
+
+
+def enqueue_collect_job(
+    db: Session,
+    channel: Channel,
+    *,
+    window: EditionWindow,
+    mode: str,
+    actor_id: int | None = None,
+    limit: int | None = None,
+) -> Job:
+    """Queue a collection-only job: ``sync_window`` or ``collect_context``."""
+    if mode not in {"sync_window", "collect_context"}:
+        raise ValueError("Unknown collection job mode.")
+    job = Job(
+        key=f"{mode}:{channel.id}:{uuid.uuid4().hex[:10]}",
+        kind=mode,
+        channel_id=channel.id,
+        status="scheduled",
+        stage="queued",
+        scheduled_for=utcnow(),
+        max_attempts=2,
+        payload_json=json.dumps(
+            {
+                "mode": mode,
+                "actor_id": actor_id,
+                "window_start": window.start.isoformat(),
+                "window_end": window.end.isoformat(),
+                "window_key": window.key,
+                "timezone": window.timezone,
+                "cutoff_local": window.cutoff_local,
+                "edition_kind": window.kind,
+                "limit": limit,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add(job)
+    db.flush()
+    audit(db, None, f"job.{mode}", "job", job.id, {"channel": channel.id, "window": window.key})
     return job
 
 
@@ -403,6 +454,7 @@ def finalize_auto_publish(db: Session, edition: Edition, *, actor_id: int | None
     from ..publishing.service import record_manifest_release
 
     record_manifest_release(edition)
+    commit_edition_window(db, edition)
     db.add(
         PublicationAttempt(
             edition_id=edition.id,
@@ -425,6 +477,60 @@ def process_job(
     progress: Callable[[str, str], None] | None = None,
 ) -> dict:
     payload = json.loads(job.payload_json or "{}")
+    if job.kind in {"sync_window", "collect_context"}:
+        channel = db.get(Channel, job.channel_id) if job.channel_id else None
+        if channel is None:
+            raise PublicationError("Collection job has no valid channel.")
+        window = EditionWindow(
+            channel_id=channel.id,
+            kind=str(payload.get("edition_kind") or "manual"),
+            start=datetime.fromisoformat(payload["window_start"]),
+            end=datetime.fromisoformat(payload["window_end"]),
+            timezone=str(payload.get("timezone") or settings.timezone),
+            cutoff_local=str(payload.get("cutoff_local") or settings.cutoff_local_time),
+        )
+        record = get_or_create_window(db, window, job_id=job.id)
+        if not claim_window(db, record, owner=worker_id):
+            raise PublicationError("Another worker already collected this window.")
+        # Commit the claim before retrieval: the gateway thread checkpoints each
+        # page through its own connection and must not be blocked by our lock.
+        db.commit()
+        job.stage = "collection"
+        job.heartbeat_at = utcnow()
+        if progress:
+            progress("collection", f"Collecting {window.label()}")
+        rights = active_rights(db, channel.id)
+        source = LiveTelegramSource(
+            channel.handle or settings.telegram_source_username,
+            limit=payload.get("limit"),
+        )
+        stats = collect_window(
+            db,
+            channel,
+            window,
+            source,
+            rights=rights,
+            actor_id=payload.get("actor_id"),
+            job_id=job.id,
+            record=record,
+        )
+        if job.kind == "collect_context":
+            # Context-only backfill never commits a normal edition window.
+            record.status = "context"
+            record.committed_at = None
+            record.stats_json = json.dumps(stats.as_dict(), ensure_ascii=False)
+        job.status = "completed"
+        job.stage = "collected"
+        job.finished_at = utcnow()
+        job.heartbeat_at = job.finished_at
+        job.lock_owner = ""
+        job.lock_expires_at = None
+        job.result_json = json.dumps(
+            {"collection": stats.as_dict(), "window": window.as_dict(), "mode": job.kind},
+            ensure_ascii=False,
+        )
+        db.flush()
+        return json.loads(job.result_json)
     if job.kind == "republish_edition":
         from ..publishing.service import publish_edition
 
@@ -470,6 +576,17 @@ def process_job(
     from ..pipeline import PipelineRequest
 
     stages: list[tuple[str, str]] = []
+    collection_stats: dict = {}
+    window_start = datetime.fromisoformat(payload["window_start"])
+    window_end = datetime.fromisoformat(payload["window_end"])
+    window = EditionWindow(
+        channel_id=channel.id,
+        kind=edition_kind,
+        start=window_start,
+        end=window_end,
+        timezone=str(payload.get("timezone") or settings.timezone),
+        cutoff_local=str(payload.get("cutoff_local") or settings.cutoff_local_time),
+    )
 
     def on_progress(stage: str, detail: str) -> None:
         job.stage = stage
@@ -478,10 +595,59 @@ def process_job(
         if progress:
             progress(stage, detail)
 
+    want_collect = bool(payload.get("collect")) and not channel.is_demo
+    if want_collect:
+        record = get_or_create_window(db, window, job_id=job.id)
+        if not claim_window(db, record, owner=worker_id):
+            raise PublicationError(
+                "Another worker is already collecting this window. It will not be built twice."
+            )
+        db.commit()
+        on_progress("collection", f"Retrieving {window.label()}")
+        rights = active_rights(db, channel.id)
+        source = LiveTelegramSource(channel.handle or settings.telegram_source_username)
+        stats = collect_window(
+            db,
+            channel,
+            window,
+            source,
+            rights=rights,
+            actor_id=payload.get("actor_id"),
+            job_id=job.id,
+            record=record,
+        )
+        collection_stats = stats.as_dict()
+        db.flush()
+        job.result_json = json.dumps({"collection": collection_stats}, ensure_ascii=False)
+        db.commit()
+        if stats.fetched == 0 or stats.included == 0:
+            mark_no_content(db, record, stats)
+            job.status = "no_content"
+            job.stage = "completed"
+            job.finished_at = utcnow()
+            job.heartbeat_at = job.finished_at
+            job.lock_owner = ""
+            job.lock_expires_at = None
+            job.result_json = json.dumps(
+                {
+                    "collection": collection_stats,
+                    "status": "no_content",
+                    "message": (
+                        "No includable source posts were published in this window."
+                        if stats.fetched
+                        else "The source channel published nothing in this window."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+            _job_steps(db, job, stages + [("collection", "Verified empty window")])
+            db.flush()
+            return json.loads(job.result_json)
+
     request = PipelineRequest(
         channel=channel,
-        window_start=datetime.fromisoformat(payload["window_start"]),
-        window_end=datetime.fromisoformat(payload["window_end"]),
+        window_start=window_start,
+        window_end=window_end,
         cutoff_at=datetime.fromisoformat(payload.get("cutoff") or payload["window_end"]),
         target_release_at=datetime.fromisoformat(payload.get("release_at") or payload["window_end"]),
         kind=edition_kind,
@@ -505,6 +671,17 @@ def process_job(
     else:
         job.status = "awaiting_review"
         job.stage = "review"
+        mark_window_built(db, edition, status="awaiting_review")
+    if record_for_edition(db, edition) is None:
+        # Manual/one-off editions still get a window record for traceability.
+        get_or_create_window(
+            db,
+            window,
+            job_id=job.id,
+            status="committed" if auto_ok else "awaiting_review",
+        )
+        if not auto_ok:
+            mark_window_built(db, edition, status="awaiting_review")
     job.edition_id = edition.id
     job.finished_at = utcnow()
     job.heartbeat_at = job.finished_at
@@ -515,6 +692,7 @@ def process_job(
             "edition_id": edition.id,
             "status": edition.status,
             "output_dir": edition.output_dir,
+            "collection": collection_stats,
             "pages": (result.publish_result and result.publish_result.warnings is not None)
             and json.loads(edition.manifest_json or "{}").get("pdf", {}).get("page_count"),
             "stories": result.stats.get("stories"),
@@ -636,6 +814,8 @@ class WorkerStats:
     failed: int = 0
     released: int = 0
     stale_locks: int = 0
+    collected: int = 0
+    no_content: int = 0
 
 
 def worker_once(
@@ -648,7 +828,9 @@ def worker_once(
     now = now or utcnow()
     stats = WorkerStats()
     stats.stale_locks = release_expired_locks(db, now=now)
-    stats.enqueued = len(enqueue_due_jobs(db, now=now))
+    stats.enqueued = len(
+        enqueue_due_jobs(db, now=now, max_catchup=settings.max_catchup_windows)
+    )
     stats.released = len(release_due_editions(db, now=now))
     db.commit()
     worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
@@ -664,6 +846,10 @@ def worker_once(
             stats.processed += 1
             if outcome.get("status") == "published":
                 stats.published += 1
+            elif outcome.get("status") == "no_content":
+                stats.no_content += 1
+            elif job.kind in {"sync_window", "collect_context"}:
+                stats.collected += 1
             else:
                 stats.awaiting_review += 1
         except Exception as exc:

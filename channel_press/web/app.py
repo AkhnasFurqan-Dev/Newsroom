@@ -53,12 +53,20 @@ from ..bootstrap import (
 )
 from ..config import BASE_DIR, settings
 from ..constants import EXCLUSION_REASONS, ROLE_RANK, SECTION_LABELS, SECTIONS
+from ..collection.service import (
+    EditionWindow,
+    checkpoint_for,
+    commit_edition_window,
+    preview_window,
+    window_summary,
+)
 from ..db import SessionLocal, session_dependency
 from ..editorial.audit import publish_gate
 from ..editorial.drafting import reaudit_article, save_editor_edit
 from ..ingestion.adapters import ImportFormatError, normalize_messages
 from ..ingestion.service import ensure_import_media_dir, import_payload
-from ..migrations import current_revision, upgrade_database
+from ..migrations import upgrade_database
+from ..preflight import build_preflight
 from ..models import (
     Article,
     ArticleMedia,
@@ -93,6 +101,7 @@ from ..publishing.service import (
 from ..scheduling.service import (
     WorkerBusy,
     WorkerLease,
+    enqueue_collect_job,
     enqueue_due_jobs,
     enqueue_manual_job,
     enqueue_republish_job,
@@ -100,6 +109,8 @@ from ..scheduling.service import (
     worker_once,
 )
 from ..security import hash_password, redact, verify_password
+from ..telegram.service import telegram_service
+from ..telegram.transport import TelegramTransportError, normalize_handle
 from ..timeutil import as_utc, human_local, iso_utc, local_boundary_utc, to_local, utcnow
 
 WEB_DIR = Path(__file__).resolve().parent
@@ -660,6 +671,9 @@ def source_detail(
             media_counts=media_counts,
             window=_window_for_channel(db, channel, _timezone(db.get(PublicationProfile, 1))),
             channel_permission=channel_role(db, user, channel),
+            live_handle=_live_handle(channel),
+            telegram_status=telegram_service.status(probe=False) if not channel.is_demo else None,
+            windows=window_summary(db, channel.id, limit=8),
         ),
     )
 
@@ -806,6 +820,338 @@ def source_withdraw(
     return _redirect(
         f"/sources/{channel.id}",
         "Source post withdrawn. Rebuild the affected edition before further release.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# authorized Telegram connection and cutoff collection
+# ---------------------------------------------------------------------------
+
+
+def _live_handle(channel: Channel) -> str:
+    return (channel.handle or settings.telegram_source_username or "").strip().lstrip("@")
+
+
+def _telegram_error(exc: Exception) -> str:
+    return redact(f"{type(exc).__name__}: {exc}")[:400]
+
+
+def _daily_schedule(db: Session, channel: Channel) -> EditionSchedule | None:
+    return db.scalar(
+        select(EditionSchedule)
+        .where(EditionSchedule.channel_id == channel.id, EditionSchedule.kind == "daily")
+        .order_by(EditionSchedule.id)
+    )
+
+
+@app.get("/sources/{channel_id}/telegram")
+def telegram_page(
+    channel_id: int,
+    request: Request,
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    schedule = _daily_schedule(db, channel)
+    preview = preview_window(db, schedule) if schedule else None
+    checkpoints = {}
+    for row in window_summary(db, channel.id, limit=20):
+        checkpoint = checkpoint_for(
+            db,
+            EditionWindow(
+                channel_id=channel.id,
+                kind=row["record"].kind,
+                start=row["record"].window_start,
+                end=row["record"].window_end,
+            ),
+        )
+        checkpoints[row["record"].id] = checkpoint
+    return render(
+        request,
+        "telegram.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "sources",
+            channel=channel,
+            schedule=schedule,
+            status=telegram_service.status(probe=False),
+            login=telegram_service.login_state(),
+            handle=_live_handle(channel),
+            preview=preview,
+            windows=window_summary(db, channel.id, limit=20),
+            checkpoints=checkpoints,
+            lookback=settings.initial_context_lookback_days,
+            rights=active_rights(db, channel.id),
+        ),
+    )
+
+
+@app.post("/sources/{channel_id}/telegram/handle")
+def telegram_handle(
+    channel_id: int,
+    request: Request,
+    handle: str = Form(...),
+    public: str = Form(""),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "editor")
+    try:
+        normalized = normalize_handle(handle)
+    except TelegramTransportError as exc:
+        return _redirect(f"/sources/{channel.id}/telegram", error=str(exc))
+    channel.handle = f"@{normalized}"
+    channel.is_public = bool(public)
+    audit(db, user, "channel.handle", "channel", channel.id, {"handle": channel.handle})
+    db.commit()
+    return _redirect(
+        f"/sources/{channel.id}/telegram",
+        "Source handle saved. Run Test source to resolve the stable channel identity.",
+    )
+
+
+@app.post("/sources/{channel_id}/telegram/test")
+def telegram_test(
+    channel_id: int,
+    request: Request,
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    handle = _live_handle(channel)
+    if not handle:
+        return _redirect(f"/sources/{channel.id}/telegram", error="Set the channel handle first.")
+    rights = active_rights(db, channel.id)
+    if rights is None:
+        return _redirect(
+            f"/sources/{channel.id}/telegram",
+            error="Record the rights declaration before connecting to a live source.",
+        )
+    try:
+        info = telegram_service.resolve_channel(handle)
+    except Exception as exc:  # noqa: BLE001 - surfaced to the operator
+        return _redirect(f"/sources/{channel.id}/telegram", error=_telegram_error(exc))
+    channel.telegram_channel_id = int(info["id"])
+    if not channel.title or channel.title.startswith("@"):
+        channel.title = str(info.get("title") or channel.title)[:160]
+    channel.handle = f"@{info.get('username') or handle}"
+    audit(
+        db,
+        user,
+        "telegram.resolve",
+        "channel",
+        channel.id,
+        {"telegram_id": channel.telegram_channel_id, "username": channel.handle},
+    )
+    db.commit()
+    return _redirect(
+        f"/sources/{channel.id}/telegram",
+        f"Resolved {channel.handle} (stable id {channel.telegram_channel_id}).",
+    )
+
+
+@app.post("/sources/{channel_id}/telegram/login")
+def telegram_login(
+    channel_id: int,
+    request: Request,
+    phone: str = Form(...),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    try:
+        telegram_service.start_login(phone)
+    except Exception as exc:  # noqa: BLE001
+        return _redirect(f"/sources/{channel.id}/telegram", error=_telegram_error(exc))
+    audit(db, user, "telegram.login_start", "channel", channel.id)
+    db.commit()
+    return _redirect(
+        f"/sources/{channel.id}/telegram",
+        "Login code requested. Enter the code Telegram sent to the account.",
+    )
+
+
+@app.post("/sources/{channel_id}/telegram/code")
+def telegram_code(
+    channel_id: int,
+    request: Request,
+    code: str = Form(...),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    try:
+        state = telegram_service.submit_code(code)
+    except Exception as exc:  # noqa: BLE001
+        return _redirect(f"/sources/{channel.id}/telegram", error=_telegram_error(exc))
+    audit(db, user, "telegram.login_code", "channel", channel.id, {"stage": state["stage"]})
+    db.commit()
+    message = (
+        "Signed in. Run Test source next."
+        if state["stage"] == "authorized"
+        else "Two-step verification is enabled: enter the account password."
+    )
+    return _redirect(f"/sources/{channel.id}/telegram", message)
+
+
+@app.post("/sources/{channel_id}/telegram/password")
+def telegram_password(
+    channel_id: int,
+    request: Request,
+    password: str = Form(...),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    try:
+        telegram_service.submit_password(password)
+    except Exception as exc:  # noqa: BLE001
+        return _redirect(f"/sources/{channel.id}/telegram", error=_telegram_error(exc))
+    audit(db, user, "telegram.login_2fa", "channel", channel.id)
+    db.commit()
+    return _redirect(f"/sources/{channel.id}/telegram", "Signed in with two-step verification.")
+
+
+@app.post("/sources/{channel_id}/telegram/cancel")
+def telegram_cancel(
+    channel_id: int,
+    request: Request,
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    telegram_service.cancel_login()
+    audit(db, user, "telegram.login_cancel", "channel", channel.id)
+    db.commit()
+    return _redirect(f"/sources/{channel.id}/telegram", "Login cancelled. No session was created.")
+
+
+@app.post("/sources/{channel_id}/telegram/logout")
+def telegram_logout(
+    channel_id: int,
+    request: Request,
+    confirm: str = Form(""),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "owner")
+    if not confirm:
+        return _redirect(
+            f"/sources/{channel.id}/telegram",
+            error="Confirm the sign-out checkbox. This deletes the local session file.",
+        )
+    try:
+        telegram_service.logout()
+    except Exception as exc:  # noqa: BLE001
+        return _redirect(f"/sources/{channel.id}/telegram", error=_telegram_error(exc))
+    audit(db, user, "telegram.logout", "channel", channel.id)
+    db.commit()
+    return _redirect(f"/sources/{channel.id}/telegram", "Signed out; the local session was removed.")
+
+
+@app.post("/sources/{channel_id}/telegram/context")
+def telegram_context(
+    channel_id: int,
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "editor")
+    if channel.is_demo:
+        return _redirect(f"/sources/{channel.id}/telegram", error="Demo channels use fixtures.")
+    if not _live_handle(channel):
+        return _redirect(f"/sources/{channel.id}/telegram", error="Set the channel handle first.")
+    if active_rights(db, channel.id) is None:
+        return _redirect(
+            f"/sources/{channel.id}/telegram",
+            error="Context import blocked: record the content-rights declaration first.",
+        )
+    now = utcnow()
+    window = EditionWindow(
+        channel_id=channel.id,
+        kind="context",
+        start=now - timedelta(days=max(1, settings.initial_context_lookback_days)),
+        end=now,
+        timezone=_timezone(db.get(PublicationProfile, 1)),
+        cutoff_local=settings.cutoff_local_time,
+    )
+    job = enqueue_collect_job(
+        db,
+        channel,
+        window=window,
+        mode="collect_context",
+        actor_id=user.id,
+        limit=settings.telegram_history_limit,
+    )
+    audit(db, user, "telegram.context_import", "channel", channel.id, {"job": job.id})
+    db.commit()
+    launched = _launch_worker()
+    return _redirect(
+        f"/jobs/{job.id}",
+        f"Context backfill queued for the last {settings.initial_context_lookback_days} days; "
+        f"it will not enter the next daily edition. {launched}",
+    )
+
+
+@app.post("/sources/{channel_id}/telegram/sync")
+def telegram_sync(
+    channel_id: int,
+    request: Request,
+    user: User = Depends(require_role("operator")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    channel = _channel_or_404(db, channel_id, user, "operator")
+    if channel.is_demo:
+        return _redirect(f"/sources/{channel.id}/telegram", error="Demo channels use fixtures.")
+    handle = _live_handle(channel)
+    if not handle:
+        return _redirect(f"/sources/{channel.id}/telegram", error="Set the channel handle first.")
+    if active_rights(db, channel.id) is None:
+        return _redirect(
+            f"/sources/{channel.id}/telegram",
+            error="Sync blocked: record the content-rights declaration first.",
+        )
+    schedule = _daily_schedule(db, channel)
+    if schedule is not None:
+        cutoff = latest_due_cutoff(schedule, utcnow()) or utcnow()
+        from ..collection.service import window_for_schedule
+
+        window = window_for_schedule(schedule, cutoff)
+    else:
+        now = utcnow()
+        window = EditionWindow(
+            channel_id=channel.id,
+            kind="daily",
+            start=now - timedelta(days=1),
+            end=now,
+            timezone=_timezone(db.get(PublicationProfile, 1)),
+            cutoff_local=settings.cutoff_local_time,
+        )
+    job = enqueue_collect_job(
+        db,
+        channel,
+        window=window,
+        mode="sync_window",
+        actor_id=user.id,
+        limit=settings.telegram_history_limit,
+    )
+    audit(db, user, "telegram.sync", "channel", channel.id, {"job": job.id, "window": window.key})
+    db.commit()
+    launched = _launch_worker()
+    return _redirect(
+        f"/jobs/{job.id}",
+        f"Sync queued for {window.label()}. This stores source posts only; no edition is built. {launched}",
     )
 
 
@@ -1107,6 +1453,8 @@ def build_page(
     tz_name = _timezone(profile)
     window = _window_for_channel(db, selected, tz_name) if selected else (utcnow() - timedelta(days=1), utcnow())
     rights = active_rights(db, selected.id) if selected else None
+    schedule = _daily_schedule(db, selected) if selected else None
+    preview = preview_window(db, schedule) if schedule else None
     return render(
         request,
         "build.html",
@@ -1121,6 +1469,8 @@ def build_page(
             window_end_local=to_local(window[1], tz_name).strftime("%Y-%m-%dT%H:%M"),
             rights=rights,
             is_demo=bool(selected and selected.is_demo),
+            schedule=schedule,
+            preview=preview,
         ),
     )
 
@@ -1134,6 +1484,7 @@ def build_submit(
     kind: str = Form("manual"),
     title: str = Form(""),
     publish: str = Form("publish"),
+    collect: str = Form(""),
     user: User = Depends(require_role("operator")),
     db: Session = Depends(session_dependency),
     _csrf: None = Depends(require_csrf),
@@ -1157,8 +1508,18 @@ def build_submit(
         window_end=end,
         kind=kind if kind in {"manual", "special"} else "manual",
         actor_id=user.id,
+        collect=(not channel.is_demo) and collect == "1",
+        timezone=tz_name,
+        cutoff_local=(profile.cutoff_local if profile else "05:00"),
     )
-    audit(db, user, "job.manual_ui", "job", job.id, {"channel": channel.id, "window_end": end.isoformat()})
+    audit(
+        db,
+        user,
+        "job.manual_ui",
+        "job",
+        job.id,
+        {"channel": channel.id, "window_end": end.isoformat(), "collect": collect == "1"},
+    )
     db.commit()
     launched = _launch_worker()
     return _redirect(f"/jobs/{job.id}", f"Build queued. {launched}")
@@ -1340,6 +1701,7 @@ def edition_publish(
     edition.status = "published"
     edition.published_at = utcnow()
     record_manifest_release(edition)
+    commit_edition_window(db, edition)
     db.add(
         PublicationAttempt(
             edition_id=edition.id,
@@ -1836,34 +2198,30 @@ def diagnostics_page(request: Request, user: User = Depends(require_role("owner"
         ("flags", ReviewFlag),
     ):
         counts[label] = db.scalar(select(func.count()).select_from(model)) or 0
-    checks = []
-    checks.append(("Database revision", current_revision() or "unmanaged database", True))
-    chrome_paths = [
-        Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
-    ]
-    chrome = next((path for path in chrome_paths if path.exists()), None)
-    checks.append(("Print browser (Chrome)", str(chrome) if chrome else "NOT FOUND — PDF generation will fail", bool(chrome)))
-    checks.append(("FFmpeg", shutil.which("ffmpeg") or "not found; OpenCV fallback for video frames", True))
-    try:
-        import cv2
-
-        checks.append(("OpenCV", cv2.__version__, True))
-    except Exception:
-        checks.append(("OpenCV", "not installed; video still extraction unavailable", False))
-    try:
-        import httpx
-
-        with httpx.Client(timeout=2) as client:
-            response = client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
-        checks.append(("Ollama", f"reachable at {settings.ollama_base_url} (HTTP {response.status_code})", True))
-    except Exception as exc:  # noqa: BLE001
-        checks.append(("Ollama", f"unavailable ({type(exc).__name__}); deterministic composer used", False))
-    checks.append(("Telegram credentials", "not configured (fixture/import mode only)" if not settings.telegram_api_id else "configured", bool(settings.telegram_api_id)))
-    checks.append(("Public base URL", settings.public_base_url or "not configured; QRs stay in the source appendix", bool(settings.public_base_url)))
-    checks.append(("Pending jobs", str(db.scalar(select(func.count()).select_from(Job).where(Job.status.in_(["scheduled", "running", "failed_retryable"]))) or 0), True))
-    return render(request, "diagnostics.html", _ctx(db, request, user, "diagnostics", counts=counts, checks=checks))
+    report = build_preflight(probe_ollama=True)
+    checks = [(check.label, check.detail, check.status == "ok", check.action) for check in report.checks]
+    pending = db.scalar(
+        select(func.count())
+        .select_from(Job)
+        .where(Job.status.in_(["scheduled", "running", "failed_retryable"]))
+    ) or 0
+    return render(
+        request,
+        "diagnostics.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "diagnostics",
+            counts=counts,
+            checks=checks,
+            telegram=report.telegram,
+            ollama=report.ollama,
+            pending_jobs=int(pending),
+            env_file=str(settings.env_file),
+            session_file=str(settings.telegram_session_file),
+        ),
+    )
 
 
 @app.exception_handler(HTTPException)

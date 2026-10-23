@@ -30,6 +30,7 @@ from .ai.providers import (
     OllamaDraftProvider,
 )
 from .auth import active_rights
+from .config import settings
 from .editorial.clustering import build_stories, clear_editorial_drafts
 from .editorial.drafting import draft_story
 from .models import (
@@ -207,18 +208,26 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     _notify(request, "drafting", f"Drafting {len(stories)} stories with {getattr(provider, 'name', 'provider')}")
     articles: list[Article] = []
     draft_errors: list[str] = []
-    for story in stories:
-        try:
-            article = draft_story(
-                db,
-                story,
-                provider,
-                job_id=request.job_id,
-                actor_id=request.actor_id,
-            )
-            articles.append(article)
-        except Exception as exc:  # one bad story must not lose a valid edition
-            draft_errors.append(f"story {story.id}: {type(exc).__name__}: {str(exc)[:200]}")
+    try:
+        for story in stories:
+            try:
+                article = draft_story(
+                    db,
+                    story,
+                    provider,
+                    job_id=request.job_id,
+                    actor_id=request.actor_id,
+                )
+                articles.append(article)
+            except Exception as exc:  # one bad story must not lose a valid edition
+                draft_errors.append(f"story {story.id}: {type(exc).__name__}: {str(exc)[:200]}")
+    finally:
+        # Free the VRAM as soon as drafting is done instead of leaving a local
+        # model resident between scheduled runs on a 6 GB laptop GPU.
+        if settings.ollama_unload_after_job:
+            unload = getattr(provider, "unload", None)
+            if callable(unload):
+                unload()
 
     if not articles:
         raise PipelineError("No articles could be drafted from this window. " + "; ".join(draft_errors[:3]))

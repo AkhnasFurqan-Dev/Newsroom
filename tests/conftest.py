@@ -148,7 +148,7 @@ def csrf_from_html(html: str) -> str:
 
 
 @pytest.fixture
-def auth(client):
+def auth(client, owner):
     """Return (csrf_token) after logging the owner in."""
     return login(client)
 

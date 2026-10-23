@@ -173,6 +173,7 @@ class SourceImport(Base):
     accepted_count: Mapped[int] = mapped_column(Integer, default=0)
     rejected_count: Mapped[int] = mapped_column(Integer, default=0)
     rights_grant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("rights_grants.id"), nullable=True)
+    window_key: Mapped[str] = mapped_column(String(200), default="", index=True)
     notes: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -505,6 +506,58 @@ class EditionWatermark(Base):
     channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"))
     kind: Mapped[str] = mapped_column(String(30), default="daily")
     last_cutoff_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class EditionWindowRecord(Base):
+    """Durable record of one ``[start, end)`` collection window.
+
+    Created when a job is enqueued, before retrieval starts. The committed
+    watermark is derived from these rows, so a failed retrieval or an
+    unapproved draft can never advance it.
+    """
+
+    __tablename__ = "edition_windows"
+    __table_args__ = (UniqueConstraint("window_key", name="uq_edition_window_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    window_key: Mapped[str] = mapped_column(String(200), index=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(30), default="daily")
+    window_start: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    window_end: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    timezone: Mapped[str] = mapped_column(String(80), default="Asia/Karachi")
+    cutoff_local: Mapped[str] = mapped_column(String(5), default="05:00")
+    # pending | collecting | collected | built | awaiting_review | committed |
+    # no_content | skipped | failed | superseded
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    skip_reason: Mapped[str] = mapped_column(String(240), default="")
+    job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    edition_id: Mapped[Optional[int]] = mapped_column(ForeignKey("editions.id"), nullable=True)
+    stats_json: Mapped[str] = mapped_column(Text, default="{}")
+    lock_owner: Mapped[str] = mapped_column(String(120), default="")
+    lock_expires_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    collected_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    committed_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class RetrievalCheckpoint(Base):
+    """Per-window pagination checkpoint, separate from the committed watermark."""
+
+    __tablename__ = "retrieval_checkpoints"
+    __table_args__ = (UniqueConstraint("window_key", name="uq_retrieval_window_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    window_key: Mapped[str] = mapped_column(String(200), index=True)
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), index=True)
+    adapter: Mapped[str] = mapped_column(String(40), default="telegram")
+    cursor_message_id: Mapped[int] = mapped_column(Integer, default=0)
+    pages: Mapped[int] = mapped_column(Integer, default=0)
+    fetched_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="in_progress")
+    last_error: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
 
