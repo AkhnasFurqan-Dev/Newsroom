@@ -36,6 +36,43 @@
   </div>
 </div>
 
+<h2>Live connection</h2>
+<div class="card">
+  {% if channel.is_demo %}
+  <p class="small">This is a synthetic fixture channel. Live Telegram retrieval is disabled; use the fixture demo.</p>
+  {% else %}
+  <p class="small">
+    Handle: <span class="mono">{{ live_handle and ('@' ~ live_handle) or 'not set' }}</span>
+    {% if channel.telegram_channel_id %} · stable id <span class="mono">{{ channel.telegram_channel_id }}</span>{% endif %}
+    · credentials {{ 'configured' if telegram_status and telegram_status.credentials_configured else 'missing' }}
+    · {% if telegram_status and telegram_status.authenticated %}signed in{% else %}not signed in{% endif %}
+  </p>
+  <p class="small">API access is not content permission. The connection page keeps the login in this local UI and never prints secrets.</p>
+  {% endif %}
+  {% if can.own %}<a class="btn" href="/sources/{{ channel.id }}/telegram">Open Telegram connection</a>{% endif %}
+</div>
+
+<h2>Collection windows</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Window (local)</th><th>Status</th><th class="num">Stored posts</th><th class="num">Fetched</th><th class="num">Included</th><th class="num">Excluded</th></tr></thead>
+    <tbody>
+    {% for row in windows %}
+      <tr>
+        <td class="small">{{ row.record.window_start|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }} → {{ row.record.window_end|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</td>
+        <td><span class="badge {% if row.record.status in ['committed', 'no_content'] %}badge--published{% elif row.record.status == 'skipped' %}badge--rejected{% endif %}">{{ row.record.status|status_label }}</span></td>
+        <td class="num">{{ row.stored_posts }}</td>
+        <td class="num">{{ row.stats.get('fetched', '—') }}</td>
+        <td class="num">{{ row.stats.get('included', '—') }}</td>
+        <td class="num">{{ row.stats.get('excluded', '—') }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted">No cutoff windows recorded yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
 <h2>Import authorized content</h2>
 {% if can.edit %}
 <form method="post" action="/sources/{{ channel.id }}/import" enctype="multipart/form-data" class="stack" style="max-width:820px">

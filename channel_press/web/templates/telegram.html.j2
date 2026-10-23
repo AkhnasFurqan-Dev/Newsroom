@@ -1,0 +1,188 @@
+{% extends "base.html.j2" %}
+{% block title %}Telegram connection · {{ channel.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Authorized source connection</div>
+    <h1>{{ channel.title }}</h1>
+    <p class="lede">{{ handle and ('@' ~ handle) or 'No channel handle stored' }} · MTProto user session · credentials stay in <span class="mono">.env</span></p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn" href="/sources/{{ channel.id }}">Back to source desk</a>
+  </div>
+</div>
+
+{% if not rights %}
+<div class="notice notice--danger">
+  <h3>Rights declaration required</h3>
+  <p>Telegram API access does not grant permission to process or republish content. Record an active
+  rights declaration for this channel before any live retrieval.</p>
+</div>
+{% endif %}
+
+<div class="grid grid--3">
+  <div class="card">
+    <div class="card__label">Credentials</div>
+    <div class="card__value" style="font-size:22px">
+      {% if status.credentials_configured and status.session_present %}Session present
+      {% elif status.credentials_configured %}Configured, no session
+      {% else %}Missing{% endif %}
+    </div>
+    <div class="card__hint">
+      API id/hash: {% if status.credentials_configured %}configured{% else %}missing in .env{% endif %}<br>
+      Session file: {% if status.session_present %}present{% else %}not created{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card__label">Signed in</div>
+    <div class="card__value" style="font-size:22px">{% if status.authenticated %}Yes{% else %}No{% endif %}</div>
+    <div class="card__hint">
+      {% if status.account %}{{ status.account.display_name or status.account.username or 'Account' }}{% if status.account.username %} · @{{ status.account.username }}{% endif %}
+      {% else %}{{ status.detail }}{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card__label">Login stage</div>
+    <div class="card__value" style="font-size:22px">{{ login.stage|status_label }}</div>
+    <div class="card__hint">
+      {% if login.phone_masked %}{{ login.phone_masked }}{% endif %}
+      {% if login.expires_in %}<br>Expires in {{ login.expires_in }}s{% endif %}
+      {% if login.message %}<br>{{ login.message }}{% endif %}
+    </div>
+  </div>
+</div>
+
+<h2>1 · Source handle</h2>
+<form method="post" action="/sources/{{ channel.id }}/telegram/handle" class="stack" style="max-width:720px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field">
+    <label for="handle">Channel handle</label>
+    <input id="handle" name="handle" type="text" value="{{ handle and ('@' ~ handle) }}" placeholder="@your_channel" required>
+    <span class="help">Accepts <span class="mono">@username</span>, <span class="mono">t.me/username</span> or a full URL. A mutable username is resolved to a stable numeric channel id by <em>Test source</em>.</span>
+  </div>
+  <label class="field--inline"><input type="checkbox" name="public" value="1" {% if channel.is_public %}checked{% endif %}> The channel has a public username (printed source links use t.me URLs)</label>
+  <div><button type="submit">Save handle</button></div>
+</form>
+{% if channel.telegram_channel_id %}
+<p class="small">Resolved channel id: <span class="mono">{{ channel.telegram_channel_id }}</span></p>
+{% endif %}
+
+<h2>2 · Local Telegram login</h2>
+<p class="small">The login code and two-step password are accepted only in this local form. They are held in memory for the
+login window, never written to <span class="mono">.env</span>, the database, logs or the session file. The session file is
+stored under the ignored data directory and behaves like a password.</p>
+<form method="post" action="/sources/{{ channel.id }}/telegram/test" style="margin-bottom:12px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <button type="submit" class="btn--small">Test source connection</button>
+</form>
+
+{% if login.stage == 'awaiting_code' %}
+<form method="post" action="/sources/{{ channel.id }}/telegram/code" class="stack" style="max-width:520px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="code">Login code</label><input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required></div>
+  <div class="field-row">
+    <button type="submit">Submit code</button>
+  </div>
+</form>
+<form method="post" action="/sources/{{ channel.id }}/telegram/cancel"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="btn--small" type="submit">Cancel login</button></form>
+{% elif login.stage == 'awaiting_password' %}
+<form method="post" action="/sources/{{ channel.id }}/telegram/password" class="stack" style="max-width:520px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="password">Two-step verification password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+  <div><button type="submit">Finish sign-in</button></div>
+</form>
+<form method="post" action="/sources/{{ channel.id }}/telegram/cancel"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="btn--small" type="submit">Cancel login</button></form>
+{% elif login.stage == 'authorized' %}
+<p><span class="badge badge--published">Signed in</span> {{ login.message }}</p>
+{% else %}
+<form method="post" action="/sources/{{ channel.id }}/telegram/login" class="stack" style="max-width:520px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field">
+    <label for="phone">Phone number (international format)</label>
+    <input id="phone" name="phone" type="tel" placeholder="+92300…" autocomplete="tel" required>
+    <span class="help">Use the account that administers or may read the authorized channel. This app never impersonates another account.</span>
+  </div>
+  <div><button type="submit">Request login code</button></div>
+</form>
+{% endif %}
+
+{% if status.authenticated %}
+<details style="margin-top:12px">
+  <summary>Sign out and remove the local session</summary>
+  <form method="post" action="/sources/{{ channel.id }}/telegram/logout" class="stack" style="max-width:520px;margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label class="field--inline"><input type="checkbox" name="confirm" value="1" required> I understand this deletes the session file and requires a new login.</label>
+    <div><button class="btn--danger btn--small" type="submit">Sign out</button></div>
+  </form>
+</details>
+{% endif %}
+
+<h2>3 · Cutoff-to-cutoff window</h2>
+{% if preview %}
+<div class="grid grid--3">
+  <div class="card">
+    <div class="card__label">Effective window (start inclusive, end exclusive)</div>
+    <div class="card__hint" style="margin-top:8px">{{ preview.window.start_local }}<br>→ {{ preview.window.end_local }}<br><span class="mono small">{{ preview.window.timezone }}</span></div>
+  </div>
+  <div class="card">
+    <div class="card__label">Committed watermark</div>
+    <div class="card__value" style="font-size:18px">{{ preview.watermark or 'not set' }}</div>
+    <div class="card__hint">The first live edition uses an explicit baseline; earlier context never floods it.</div>
+  </div>
+  <div class="card">
+    <div class="card__label">Stored included posts in window</div>
+    <div class="card__value">{{ preview.stored_included_posts }}</div>
+    <div class="card__hint">Counted from this computer's source store, not from the download size.</div>
+  </div>
+</div>
+<p class="small">A post published at exactly {{ preview.window.end_local }} belongs to the next normal issue.</p>
+{% else %}
+<p class="muted">Create a daily schedule to preview an exact cutoff window.</p>
+{% endif %}
+
+<div class="grid grid--2" style="margin-top:12px">
+  <form method="post" action="/sources/{{ channel.id }}/telegram/context" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="card">
+      <div class="card__label">Context-only backfill</div>
+      <p class="small">Imports the last {{ lookback }} days as story memory. It is labelled <span class="mono">context</span> and never enters the next daily edition window.</p>
+      <button type="submit" {% if not rights or channel.is_demo %}disabled{% endif %}>Import last {{ lookback }} days (context only)</button>
+    </div>
+  </form>
+  <form method="post" action="/sources/{{ channel.id }}/telegram/sync" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <div class="card">
+      <div class="card__label">Sync the effective window</div>
+      <p class="small">Retrieves and stores the posts for the window above without building an edition. Media files download lazily when an edition actually needs them.</p>
+      <button type="submit" {% if not rights or channel.is_demo %}disabled{% endif %}>Sync window</button>
+    </div>
+  </form>
+</div>
+
+<h2>4 · Window and retrieval history</h2>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Window (local)</th><th>Kind</th><th>Status</th><th class="num">Included</th><th class="num">Excluded</th><th class="num">Duplicates</th><th class="num">Replies</th><th class="num">Albums</th><th>Checkpoint</th></tr></thead>
+    <tbody>
+    {% for row in windows %}
+      {% set stats = row.stats %}
+      <tr>
+        <td class="small">{{ row.record.window_start|localtime(profile.timezone if profile else 'Asia/Karachi') }}<br>→ {{ row.record.window_end|localtime(profile.timezone if profile else 'Asia/Karachi') }}</td>
+        <td>{{ row.record.kind|status_label }}</td>
+        <td><span class="badge {% if row.record.status in ['committed', 'no_content'] %}badge--published{% elif row.record.status == 'skipped' %}badge--rejected{% endif %}">{{ row.record.status|status_label }}</span>
+          {% if row.record.skip_reason %}<div class="small">{{ row.record.skip_reason }}</div>{% endif %}
+        </td>
+        <td class="num">{{ stats.get('included', '—') }}</td>
+        <td class="num">{{ stats.get('excluded', '—') }}</td>
+        <td class="num">{{ stats.get('duplicates', '—') }}</td>
+        <td class="num">{{ stats.get('replies', '—') }}</td>
+        <td class="num">{{ stats.get('albums', '—') }}</td>
+        <td class="small">{% set cp = checkpoints.get(row.record.id) %}{% if cp %}{{ cp.pages }} page(s), cursor {{ cp.cursor_message_id }}, {{ cp.status }}{% else %}—{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="muted">No windows recorded yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

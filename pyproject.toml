@@ -25,6 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+telegram = ["telethon==1.38.1"]
 video = ["opencv-python-headless==4.10.0.84"]
 test = ["pytest==8.3.4", "openpyxl==3.1.5"]
 dev = ["ruff==0.8.4"]
@@ -37,6 +38,7 @@ testpaths = ["tests"]
 addopts = "-q"
 markers = [
   "slow: end-to-end print and large-fixture checks",
+  "live: requires a running local model server or live Telegram credentials",
 ]
 
 [tool.ruff]
