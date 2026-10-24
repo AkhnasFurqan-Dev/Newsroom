@@ -260,10 +260,12 @@ def select_lead_media(
     target_dir: Path,
     *,
     exclude_media_ids: set[int] | None = None,
+    download_missing: bool = True,
 ) -> MediaChoice | None:
     from ..models import ArticleMedia
 
-    ensure_media_files(db, story)
+    if download_missing:
+        ensure_media_files(db, story)
     excluded = exclude_media_ids or set()
     choices = [choice for choice in rank_media(db, story) if choice.media.id not in excluded]
     for choice in choices:

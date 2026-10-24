@@ -73,6 +73,10 @@ _STAGE_BASE = {
     "queued": 0, "source_validation": 3, "collection": 12,
     "normalization": 20, "clustering": 28, "drafting": 35,
     "auditing": 72, "layout": 84, "quality_check": 95,
+    "layout_prepare": 84, "layout_compile_html": 85, "layout_launch_browser": 86,
+    "layout_load_page": 87, "layout_wait_for_pagination": 89,
+    "layout_generate_pdf": 92, "layout_validate_pdf": 94,
+    "layout_generate_epaper": 96, "layout_complete": 97,
     "publishing": 98, "review": 100, "published": 100, "completed": 100,
 }
 

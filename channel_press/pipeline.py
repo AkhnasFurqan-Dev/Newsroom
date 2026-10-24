@@ -117,11 +117,9 @@ def select_provider(channel: Channel, requested: DraftProvider | None = None) ->
     available, message = candidate.available()
     if available:
         return candidate, f"ollama {candidate.model}"
-    # Falling back is safe because every draft still passes the independent
-    # deterministic audit. The reason is recorded in the result and model runs.
-    return (
-        FixtureDraftProvider(),
-        f"Ollama unavailable ({message}); deterministic source composer used",
+    raise PipelineError(
+        f"Real channel drafting cannot continue because Ollama is unavailable: {message}. "
+        "Fixture drafting is disabled for non-demo channels."
     )
 
 
@@ -288,6 +286,7 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
             actor_id=request.actor_id,
             allow_quality_warnings=request.allow_quality_warnings,
             mark_published=request.mark_published,
+            layout_progress=request.progress,
         )
         _notify(request, "quality_check", f"Rendered {publish_result.output_dir.name}")
     else:

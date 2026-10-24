@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import fitz
 from jinja2 import Environment, FileSystemLoader
@@ -12,8 +13,9 @@ from markupsafe import Markup
 from playwright.sync_api import sync_playwright
 from sqlalchemy.orm import Session
 
-from ..config import BASE_DIR
+from ..config import BASE_DIR, settings
 from ..constants import SECTION_LABELS
+from ..logging_setup import get_logger
 from ..models import Edition
 from ..timeutil import human_local
 from .planner import EditionPlan, StoryPackage, create_plan
@@ -21,6 +23,7 @@ from .planner import EditionPlan, StoryPackage, create_plan
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 VENDOR_DIR = BASE_DIR / "channel_press" / "web" / "static" / "vendor"
 CSS_PATH = BASE_DIR / "channel_press" / "web" / "static" / "css" / "print.css"
+logger = get_logger("layout")
 
 SECTION_TEMPLATES = {
     "conflict": "conflict_visual",
@@ -551,16 +554,23 @@ def render_edition_pdf(
     pdf_path: Path,
     preview_dir: Path,
     timeout_ms: int = 180_000,
+    progress: Callable[[str, str], None] | None = None,
 ) -> RenderResult:
+    def notify(stage: str, detail: str) -> None:
+        if progress:
+            progress(stage, detail)
+
     html_path.parent.mkdir(parents=True, exist_ok=True)
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
     html_path = html_path.resolve()
     pdf_path = pdf_path.resolve()
     preview_dir = preview_dir.resolve()
+    notify("layout_compile_html", f"Writing print HTML to {html_path.name}")
     html_path.write_text(html, encoding="utf-8")
 
     with sync_playwright() as playwright:
+        browser_timeout = max(1, int(settings.layout_browser_timeout_seconds * 1000))
         launch_attempts: list[dict[str, str]] = []
         chrome_candidates = [
             Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
@@ -593,21 +603,26 @@ def render_edition_pdf(
         ]
         browser_options = {"headless": True, "args": ["--allow-file-access-from-files", "--disable-gpu"]}
         browser = None
+        notify("layout_launch_browser", "Starting the print browser")
         for candidate in chrome_candidates:
             if candidate.exists():
                 launch_attempts.append({"browser": "chrome", "path": str(candidate)})
-                browser = playwright.chromium.launch(channel="chrome", **browser_options)
+                browser = playwright.chromium.launch(
+                    channel="chrome", timeout=browser_timeout, **browser_options
+                )
                 break
         if browser is None:
             for candidate in edge_candidates:
                 if candidate.exists():
                     launch_attempts.append({"browser": "edge", "path": str(candidate)})
-                    browser = playwright.chromium.launch(channel="msedge", **browser_options)
+                    browser = playwright.chromium.launch(
+                        channel="msedge", timeout=browser_timeout, **browser_options
+                    )
                     break
         if browser is None:
             launch_attempts.append({"browser": "playwright-chromium", "path": ""})
             try:
-                browser = playwright.chromium.launch(**browser_options)
+                browser = playwright.chromium.launch(timeout=browser_timeout, **browser_options)
             except Exception as exc:
                 attempted = ", ".join(item["browser"] for item in launch_attempts)
                 raise RuntimeError(
@@ -615,15 +630,22 @@ def render_edition_pdf(
                     f"Tried {attempted}; install Google Chrome or run "
                     "'playwright install chromium'."
                 ) from exc
+        page = None
         try:
+            notify("layout_load_page", "Opening the local print document")
             page = browser.new_page(viewport={"width": 1056, "height": 1632}, device_scale_factor=1)
+            page.on("console", lambda message: logger.debug("layout_browser_console %s", message.text))
+            page.on("pageerror", lambda error: logger.error("layout_browser_error %s", error))
+            page.set_default_timeout(timeout_ms)
             page.goto(html_path.as_uri(), wait_until="load", timeout=timeout_ms)
+            notify("layout_wait_for_pagination", "Waiting for Paged.js pagination to complete")
             page.wait_for_function("window.__pagedReady === true", timeout=timeout_ms)
             error = page.evaluate("window.__pagedError || ''")
             if error:
                 raise RuntimeError(f"Paged.js failed: {error[:800]}")
             meta = page.evaluate("window.__layoutMeta")
             pages = page.query_selector_all(".pagedjs_page")
+            notify("layout_generate_pdf", f"Exporting {len(pages)} paginated pages to PDF")
             preview_paths: list[Path] = []
             for index, element in enumerate(pages, start=1):
                 target = preview_dir / f"page-{index:02d}.png"
@@ -635,6 +657,15 @@ def render_edition_pdf(
                 print_background=True,
                 margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
             )
+            notify("layout_validate_pdf", "Validating generated PDF geometry and content")
+        except Exception:
+            if page is not None:
+                screenshot = preview_dir / "layout-error.png"
+                try:
+                    page.screenshot(path=str(screenshot), full_page=True, timeout=10_000)
+                except Exception:
+                    pass
+            raise
         finally:
             browser.close()
 
@@ -733,19 +764,33 @@ def compile_edition(
     output_dir: Path,
     demo_edition: bool,
     media_dir: Path | None = None,
+    progress: Callable[[str, str], None] | None = None,
 ) -> RenderResult:
     from ..models import PublicationProfile
 
     profile = db.get(PublicationProfile, 1) or db.query(PublicationProfile).first()
     if profile is None:
         raise RuntimeError("Publication profile is missing; run setup first.")
-    plan = create_plan(db, edition, profile, media_dir=media_dir)
+    if progress:
+        progress("layout_prepare", "Building page plan from the real edition articles")
+    plan = create_plan(
+        db,
+        edition,
+        profile,
+        media_dir=media_dir,
+        download_media=False,
+    )
     html, _ = build_print_html(db, edition, plan, demo_edition=demo_edition)
     if db.info.get("durable_worker"):
         db.commit()
-    return render_edition_pdf(
+    result = render_edition_pdf(
         html,
         html_path=output_dir / "edition.html",
         pdf_path=output_dir / "edition.pdf",
         preview_dir=output_dir / "pages",
+        timeout_ms=max(1, int(settings.layout_pagedjs_timeout_seconds * 1000)),
+        progress=progress,
     )
+    if progress:
+        progress("layout_complete", f"PDF validated with {result.qa.get('page_count', 0)} pages")
+    return result

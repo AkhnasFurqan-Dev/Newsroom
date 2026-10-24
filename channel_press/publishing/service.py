@@ -4,6 +4,7 @@ import hashlib
 import json
 import shutil
 import uuid
+from typing import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -349,6 +350,7 @@ def publish_edition(
     actor_id: int | None = None,
     allow_quality_warnings: bool = False,
     mark_published: bool = True,
+    layout_progress: Callable[[str, str], None] | None = None,
 ) -> PublishResult:
     profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
     if profile is None:
@@ -370,11 +372,20 @@ def publish_edition(
             output_dir=staging,
             demo_edition=demo_edition,
             media_dir=settings.media_dir,
+            progress=layout_progress,
         )
         if render.qa.get("warnings") and not allow_quality_warnings:
             raise LayoutQualityError(list(render.qa["warnings"]))
-        plan = create_plan(db, edition, profile, media_dir=settings.media_dir)
+        plan = create_plan(
+            db,
+            edition,
+            profile,
+            media_dir=settings.media_dir,
+            download_media=False,
+        )
         epaper_dir = staging / "epaper"
+        if layout_progress:
+            layout_progress("layout_generate_epaper", "Generating the e-paper bundle")
         epaper = _write_epaper(
             db=db,
             edition=edition,

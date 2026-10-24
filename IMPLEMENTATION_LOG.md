@@ -23,6 +23,29 @@ not claimed as a success.
 - **Verification:** Ruff passed; scheduling/web/concurrency tests passed after
   fixing launcher stderr capture.
 
+## M16 — Real TPN layout and provider enforcement
+
+- Confirmed Job #5 is the real non-demo **The Pakistan News** channel:
+  1,587 gathered source posts and 24 edition stories.
+- Fixed the root layout hang: layout planning was attempting lazy Telegram
+  media downloads. Missing media caused Telethon reconnects and could block
+  layout indefinitely. Layout now uses already-downloaded media only; missing
+  media leaves the real article text renderable without network I/O.
+- Disabled silent fixture fallback for non-demo channels. Real-channel Ollama
+  failures now surface as job errors; the fixture provider remains available
+  only for demo/test flows.
+- Added layout sub-stage progress, browser launch/page errors, diagnostic
+  screenshot capture, browser timeout configuration, and explicit PDF/e-paper
+  progress.
+- **Real validation:** Job #5 rebuilt with the configured Ollama model
+  `qwen2.5:3b-instruct`; all 24 article audits report `provider=ollama`.
+  Layout pagination completed in approximately 5 seconds; the final v2 output
+  contains 7 tabloid pages, a 1,331,881-byte PDF, and a local e-paper bundle.
+  The edition is correctly left in `awaiting_review`.
+- **Verification:** full pytest suite passed (171 tests); Ruff passed. Final
+  real output:
+  `output/the-pakistan-news/2026-10-23-manual-004-v2/`.
+
 ## Environment at build time
 
 | Item | Value |

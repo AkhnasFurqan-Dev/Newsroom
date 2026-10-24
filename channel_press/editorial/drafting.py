@@ -12,6 +12,7 @@ from ..models import (
     Article,
     ArticleClaimLink,
     ArticleVersion,
+    Channel,
     EditionArticle,
     ModelRun,
     StoryClaim,
@@ -160,10 +161,18 @@ def draft_story(
     actor_id: int | None = None,
 ) -> Article:
     existing = db.scalar(select(Article).where(Article.story_id == story.id).order_by(Article.revision.desc()))
+    existing_audit = json.loads(existing.audit_json or "{}") if existing is not None else {}
+    requires_real_redraft = (
+        provider.name == "ollama"
+        and existing is not None
+        and existing_audit.get("provider") != "ollama"
+    )
     if existing is not None:
         in_edition = db.scalar(select(EditionArticle.id).where(EditionArticle.article_id == existing.id).limit(1))
-        if existing.locked or in_edition or (job_id and db.info.get("durable_worker")):
+        if not requires_real_redraft and (existing.locked or in_edition or (job_id and db.info.get("durable_worker"))):
             return existing
+        if requires_real_redraft:
+            db.execute(delete(EditionArticle).where(EditionArticle.article_id == existing.id))
         db.execute(delete(ArticleClaimLink).where(ArticleClaimLink.article_id == existing.id))
         db.delete(existing)
         db.flush()
@@ -179,6 +188,12 @@ def draft_story(
     try:
         result = provider.draft(bundle)
     except Exception as exc:
+        channel = db.get(Channel, story.channel_id)
+        if channel is not None and not channel.is_demo:
+            raise RuntimeError(
+                f"Ollama drafting failed for real channel story {story.id}: "
+                f"{type(exc).__name__}: {str(exc)[:300]}"
+            ) from exc
         fallback_reason = f"{type(exc).__name__}: {str(exc)[:300]}"
         result = FixtureDraftProvider().draft(bundle)
         result.fallback_reason = fallback_reason

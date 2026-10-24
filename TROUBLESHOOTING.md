@@ -182,6 +182,18 @@ only after a failure; **Restart from beginning** intentionally discards the curr
 draft state. **Cancel job** asks for confirmation and is permanent for that job.
 Two workers cannot claim the same window.
 
+**Real layout hangs while Telegram reconnects** — layout must not download
+missing Telegram media. The renderer uses media that was already downloaded
+during collection and renders text-only when an asset is unavailable. If a real
+channel still shows Telegram `WinError 121` messages during layout, update to
+the current build and retry; do not wait indefinitely for a network media
+download.
+
+**Real channel used fixture text** — this is now blocked. Non-demo channels
+require the configured Ollama model and report a visible drafting failure if it
+is unavailable. The fixture provider is reserved for the demo channel and
+automated fixture tests.
+
 **Two editions for one window** — this should not happen for scheduled jobs
 because the job key is channel + kind + cutoff. If it does, record both edition
 IDs and inspect **Audit** before deleting anything. A manual build with a different

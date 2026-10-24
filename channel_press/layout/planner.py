@@ -135,6 +135,7 @@ def _build_package(
     map_profile: CartographicProfile | None,
     media_dir: Path | None = None,
     exclude_media_ids: set[int] | None = None,
+    download_media: bool = True,
 ) -> StoryPackage:
     story = db.get(StoryCluster, article.story_id)
     paragraphs = _body(article)
@@ -164,7 +165,12 @@ def _build_package(
         )
         if existing is None:
             choice = select_lead_media(
-                db, story, article.id, media_dir, exclude_media_ids=exclude_media_ids
+                db,
+                story,
+                article.id,
+                media_dir,
+                exclude_media_ids=exclude_media_ids,
+                download_missing=download_media,
             )
             if choice:
                 existing = db.scalar(
@@ -225,6 +231,7 @@ def create_plan(
     profile: PublicationProfile,
     *,
     media_dir: Path | None = None,
+    download_media: bool = True,
 ) -> EditionPlan:
     links = list(
         db.scalars(
@@ -287,6 +294,7 @@ def create_plan(
             profile=profile,
             map_profile=map_profile,
             media_dir=media_dir,
+            download_media=download_media,
             exclude_media_ids=used_media_ids,
         )
         if package.media_id is not None:

@@ -65,6 +65,9 @@ class Settings(BaseSettings):
 
     worker_lock_minutes: int = 120
     worker_heartbeat_timeout_seconds: int = 180
+    layout_timeout_seconds: int = 600
+    layout_browser_timeout_seconds: int = 60
+    layout_pagedjs_timeout_seconds: int = 300
     login_max_attempts: int = 5
     login_window_minutes: int = 15
     max_import_bytes: int = 40 * 1024 * 1024
