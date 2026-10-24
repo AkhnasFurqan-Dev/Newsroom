@@ -2068,7 +2068,19 @@ def jobs_page(request: Request, user: User = Depends(current_user), db: Session 
             .limit(100)
         )
     )
-    return render(request, "jobs.html", _ctx(db, request, user, "jobs", jobs=jobs))
+    job_progress = {}
+    for job in jobs:
+        result = json.loads(job.result_json or "{}")
+        progress = result.get("progress") if isinstance(result.get("progress"), dict) else {}
+        job_progress[job.id] = int(
+            progress.get("percent")
+            or (100 if job.status in {"published", "completed", "awaiting_review", "no_content"} else 0)
+        )
+    return render(
+        request,
+        "jobs.html",
+        _ctx(db, request, user, "jobs", jobs=jobs, job_progress=job_progress),
+    )
 
 
 @app.get("/jobs/{job_id}")
@@ -2114,6 +2126,14 @@ def job_api(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user)
+    result = json.loads(job.result_json or "{}")
+    progress = result.get("progress") if isinstance(result.get("progress"), dict) else {}
+    now = utcnow()
+    elapsed = progress.get("elapsed_seconds", 0)
+    if job.started_at:
+        elapsed = max(elapsed, round((now - job.started_at).total_seconds(), 1))
+    terminal_statuses = {"published", "completed", "awaiting_review", "no_content"}
+    percent = int(progress.get("percent") or (100 if job.status in terminal_statuses else 0))
     return JSONResponse(
         {
             "id": job.id,
@@ -2122,7 +2142,14 @@ def job_api(
             "attempt": job.attempt,
             "error": redact(job.error or ""),
             "edition_id": job.edition_id,
-            "result": json.loads(job.result_json or "{}"),
+            "progress": {
+                "percent": min(100, max(0, percent)),
+                "detail": progress.get("detail", ""),
+                "elapsed_seconds": elapsed,
+                "eta_seconds": 0 if percent >= 100 else progress.get("eta_seconds"),
+                "updated_at": progress.get("updated_at"),
+            },
+            "result": result,
         }
     )
 

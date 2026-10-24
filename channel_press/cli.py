@@ -466,11 +466,15 @@ def cmd_worker(args: argparse.Namespace) -> int:
 
     settings.ensure_dirs()
     upgrade_database()
-    configure_logging("worker", console=False)
+    configure_logging("worker", console=True)
+
+    def show_progress(stage: str, detail: str) -> None:
+        _print(f"[{utcnow().strftime('%H:%M:%S')}] {stage.replace('_', ' ')} — {detail}")
+
     try:
         if args.once:
             with SessionLocal() as db:
-                stats = worker_once(db)
+                stats = worker_once(db, progress=show_progress)
                 db.commit()
                 _print(
                     f"enqueued={stats.enqueued} processed={stats.processed} published={stats.published} "
@@ -481,7 +485,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
         _print("Worker running. Press Ctrl+C to stop.")
         while True:
             with SessionLocal() as db:
-                stats = worker_once(db, max_jobs=args.max_jobs)
+                stats = worker_once(db, max_jobs=args.max_jobs, progress=show_progress)
                 db.commit()
             if stats.processed or stats.enqueued or stats.released:
                 _print(

@@ -569,3 +569,15 @@ auto-release off; then mark C17/C18.
   24-story job exceeded the interactive command timeout while rendering; the
   generated staged PDF was 5 pages at 792 × 1224 pt, but it was intentionally
   not promoted because the worker process was interrupted.
+
+## Post-M14 job progress visibility (2026-10-24)
+
+- Jobs now persist stage, percentage, detail, update time, elapsed seconds and
+  estimated remaining seconds in the existing result JSON. Drafting reports
+  story `N/M` progress instead of appearing idle during the model phase.
+- The job detail page polls this record and displays a progress bar, live stage,
+  detail, elapsed time and ETA. The jobs table also shows the latest percentage.
+- Worker CLI output prints stage updates live. `scripts/start.ps1` opens the
+  worker console visibly, while the durable JSON log remains under `data/logs`.
+- **Verification:** focused web/scheduling/queue tests — 28 passed; `ruff check
+  channel_press tests` — passed.

@@ -25,7 +25,7 @@ $url = (& $python -c "from channel_press.config import settings; host = settings
 $worker = Join-Path $Root "scripts\run-worker.ps1"
 Start-Process powershell.exe -ArgumentList @(
     "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $worker, "-Root", $Root
-) -WorkingDirectory $Root -WindowStyle Hidden
+) -WorkingDirectory $Root -WindowStyle Normal
 
 $chrome = @(
     (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe"),

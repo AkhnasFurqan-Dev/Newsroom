@@ -88,7 +88,10 @@ def configure_logging(kind: str = "web", *, console: bool = True) -> Path:
     file_handler = logging.FileHandler(path, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-    if console and not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+    if console and not any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        for h in logger.handlers
+    ):
         stream_handler = logging.StreamHandler(sys.stderr)
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)

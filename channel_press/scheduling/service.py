@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import traceback
 import uuid
@@ -64,6 +65,44 @@ JOB_RUNNABLE = {"scheduled", "failed_retryable", "resumable"}
 JOB_ALREADY_DONE = {"awaiting_review", "published", "completed", "no_content"}
 
 logger = get_logger("worker")
+
+_PROGRESS_RE = re.compile(r"\b(\d+)\s*/\s*(\d+)\b")
+_STAGE_BASE = {
+    "queued": 0, "source_validation": 3, "collection": 12,
+    "normalization": 20, "clustering": 28, "drafting": 35,
+    "auditing": 72, "layout": 84, "quality_check": 95,
+    "publishing": 98, "review": 100, "published": 100, "completed": 100,
+}
+
+
+def _progress_value(stage: str, detail: str) -> int:
+    base = _STAGE_BASE.get(stage, 0)
+    match = _PROGRESS_RE.search(detail or "")
+    if match:
+        current, total = (int(value) for value in match.groups())
+        if total > 0 and stage == "drafting":
+            return min(70, 35 + round(current / total * 35))
+    return base
+
+
+def _save_progress(job: Job, stage: str, detail: str) -> None:
+    payload = json.loads(job.result_json or "{}")
+    progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+    now = utcnow()
+    started = job.started_at or now
+    elapsed = max(0.0, (now - started).total_seconds())
+    percent = _progress_value(stage, detail)
+    progress.update({
+        "stage": stage,
+        "detail": detail[:500],
+        "percent": percent,
+        "updated_at": now.isoformat(),
+        "elapsed_seconds": round(elapsed, 1),
+        "eta_seconds": round(elapsed * (100 - percent) / percent, 1)
+        if percent > 0 and elapsed >= 2 and percent < 100 else None,
+    })
+    payload["progress"] = progress
+    job.result_json = json.dumps(payload, ensure_ascii=False)
 
 
 class WorkerBusy(RuntimeError):
@@ -733,9 +772,11 @@ def process_job(
         check_job_control(job.id)
         job.stage = stage
         job.heartbeat_at = utcnow()
+        _save_progress(job, stage, detail)
         stages.append((stage, detail or ""))
         if progress:
             progress(stage, detail)
+        db.commit()
 
     want_collect = bool(payload.get("collect")) and not channel.is_demo and not job.edition_id
     if want_collect:

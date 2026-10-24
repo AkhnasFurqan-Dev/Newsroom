@@ -17,6 +17,7 @@ from channel_press.models import (
 from channel_press.scheduling.service import (
     WorkerBusy,
     WorkerLease,
+    _progress_value,
     claim_job,
     due_cutoffs,
     enqueue_due_jobs,
@@ -71,6 +72,13 @@ def _story_article(db, channel, suffix="a"):
     db.add(article)
     db.flush()
     return story, article
+
+
+def test_progress_value_reports_stage_and_story_completion():
+    assert _progress_value("queued", "") == 0
+    assert _progress_value("layout", "Composing tabloid pages") == 84
+    assert _progress_value("drafting", "Drafting story 5/10") == 53
+    assert _progress_value("published", "Edition released") == 100
 
 
 def test_schedule_cutoffs_are_timezone_aware_and_idempotent(db, demo_channel):

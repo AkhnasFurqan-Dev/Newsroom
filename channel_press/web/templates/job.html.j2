@@ -17,7 +17,12 @@
   <div>
     <h2>Progress</h2>
     <div class="card">
-      <div><strong>Stage:</strong> <span id="job-stage">{{ job.stage|status_label }}</span></div>
+      {% set initial_progress = result.get('progress', {}) %}
+      {% set initial_percent = initial_progress.get('percent', 100 if job.status in ['published', 'completed', 'awaiting_review', 'no_content'] else 0) %}
+      <div class="job-progress__summary"><strong>Stage:</strong> <span id="job-stage">{{ job.stage|status_label }}</span> <span id="job-percent">{{ initial_percent }}%</span></div>
+      <div class="progress-track" aria-label="Job progress"><div class="progress-track__bar" id="job-progress-bar" style="width:{{ initial_percent }}%"></div></div>
+      <div class="small" id="job-progress-detail">{{ initial_progress.get('detail', 'Waiting for worker progress…') }}</div>
+      <div class="job-progress__timing"><span>Elapsed: <b id="job-elapsed">{{ initial_progress.get('elapsed_seconds', '—') }}</b></span><span>Estimated left: <b id="job-eta">{{ initial_progress.get('eta_seconds', '—') }}</b></span></div>
       <div><strong>Status:</strong> <span id="job-status-text">{{ job.status|status_label }}</span></div>
       <div><strong>Scheduled:</strong> {{ job.scheduled_for|localtime(profile.timezone if profile else 'Asia/Karachi') if job.scheduled_for else '—' }}</div>
       <div><strong>Started:</strong> {{ job.started_at|localtime(profile.timezone if profile else 'Asia/Karachi') if job.started_at else '—' }}</div>
@@ -83,6 +88,28 @@
   const status = document.getElementById("job-status");
   const statusText = document.getElementById("job-status-text");
   const stage = document.getElementById("job-stage");
+  const percent = document.getElementById("job-percent");
+  const bar = document.getElementById("job-progress-bar");
+  const detail = document.getElementById("job-progress-detail");
+  const elapsed = document.getElementById("job-elapsed");
+  const eta = document.getElementById("job-eta");
+  const formatDuration = (seconds) => {
+    if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return "—";
+    const total = Math.max(0, Math.round(Number(seconds)));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    return hours ? `${hours}h ${minutes}m` : (minutes ? `${minutes}m ${secs}s` : `${secs}s`);
+  };
+  const updateProgress = (data) => {
+    const progress = data.progress || {};
+    const value = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+    if (percent) percent.textContent = `${value}%`;
+    if (bar) bar.style.width = `${value}%`;
+    if (detail) detail.textContent = progress.detail || "Worker is active…";
+    if (elapsed) elapsed.textContent = formatDuration(progress.elapsed_seconds);
+    if (eta) eta.textContent = value >= 100 ? "Complete" : formatDuration(progress.eta_seconds);
+  };
   if (!status || terminal.has({{ job.status|tojson }})) return;
   let ticks = 0;
   const timer = setInterval(async () => {
@@ -94,6 +121,7 @@
       status.className = "badge badge--" + data.status;
       if (statusText) statusText.textContent = data.status.replaceAll("_", " ");
       if (stage) stage.textContent = (data.stage || "").replaceAll("_", " ");
+      updateProgress(data);
       if (terminal.has(data.status)) { clearInterval(timer); location.reload(); }
     } catch (error) { /* offline: keep the server-rendered state */ }
     if (++ticks > 200) clearInterval(timer);

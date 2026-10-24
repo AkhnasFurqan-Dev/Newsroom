@@ -220,11 +220,12 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     articles: list[Article] = []
     draft_errors: list[str] = []
     try:
-        for story in stories:
+        for index, story in enumerate(stories, start=1):
             if job:
                 from .operations import check_job_control
                 check_job_control(job.id)
             try:
+                _notify(request, "drafting", f"Drafting story {index}/{len(stories)}")
                 article = draft_story(
                     db,
                     story,
