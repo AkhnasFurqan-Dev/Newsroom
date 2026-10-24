@@ -42,6 +42,8 @@ def check_job_control(job_id):
             status = db.scalar(select(Job.status).where(Job.id == job_id))
             if status in {"cancel_requested", "canceled"}:
                 raise JobCanceled("Job canceled at a safe checkpoint.")
+            if status == "stop_requested":
+                raise StopRequested("Job stopped at a safe checkpoint.")
 
 
 @contextmanager

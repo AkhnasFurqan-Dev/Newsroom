@@ -60,16 +60,38 @@
   <aside>
     <h2>Actions</h2>
     {% if can.operate %}
+      {% if job.status in ['failed_retryable', 'failed_terminal'] %}
       <form method="post" action="/jobs/{{ job.id }}/retry" class="stack">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" class="btn--ghost">Retry / resume job</button>
+        <button type="submit" class="btn--ghost">Retry failed job</button>
       </form>
+      {% endif %}
+      {% if job.status in ['paused', 'resumable'] %}
+      <form method="post" action="/jobs/{{ job.id }}/continue" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost">Continue from checkpoint</button>
+      </form>
+      {% endif %}
+      {% if job.status in ['running', 'scheduled', 'failed_retryable', 'resumable'] %}
+      <form method="post" action="/jobs/{{ job.id }}/stop" class="stack" style="margin-top:8px">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost">Stop safely</button>
+      </form>
+      {% endif %}
+      {% if job.status not in ['running', 'published', 'completed', 'no_content', 'awaiting_review', 'canceled'] %}
+      <form method="post" action="/jobs/{{ job.id }}/restart" class="stack" style="margin-top:8px">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost">Restart from beginning</button>
+      </form>
+      {% endif %}
+      {% if job.status in ['running', 'stop_requested', 'cancel_requested', 'scheduled', 'failed_retryable', 'failed_terminal', 'paused', 'resumable'] %}
       <form method="post" action="/jobs/{{ job.id }}/cancel" class="stack" style="margin-top:8px">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" class="btn--danger">Cancel job</button>
+        <button type="submit" class="btn--danger" onclick="return confirm('Cancel this job? This cannot be undone, but its source checkpoint will be retained for a future manual build.');">Cancel job</button>
       </form>
+      {% endif %}
     {% endif %}
-    <p class="small">Running jobs stop at a safe checkpoint. Paused or failed jobs retain their exact window and saved draft. Retry / resume continues the same edition; it does not release it.</p>
+    <p class="small">Stop pauses safely and preserves the checkpoint. Continue resumes it. Retry reruns a failed attempt. Restart discards the current draft state and starts clean. Cancel is permanent for this job.</p>
 
     <h2>Timing</h2>
     <div class="small">

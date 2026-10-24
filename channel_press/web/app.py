@@ -2152,22 +2152,124 @@ def job_retry(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
-    if job.status not in {"failed_retryable", "failed_terminal", "awaiting_review", "paused"}:
-        return _redirect(f"/jobs/{job.id}", error="Only failed or awaiting-review jobs can be retried.")
-    if job.status == "awaiting_review":
-        return _redirect(f"/jobs/{job.id}", error="Use the edition page to release or re-render a reviewed edition.")
+    if job.status not in {"failed_retryable", "failed_terminal"}:
+        return _redirect(f"/jobs/{job.id}", error="Retry is only for failed jobs. Use Continue for a paused job.")
     job.status = "scheduled"
     job.stage = "queued"
     job.attempt = 0
     job.error = ""
     job.scheduled_for = utcnow()
     job.finished_at = None
+    payload = json.loads(job.result_json or "{}")
+    payload["progress"] = {"stage": "queued", "percent": 0, "detail": "Queued for retry."}
+    job.result_json = json.dumps(payload, ensure_ascii=False)
     job.lock_owner = ""
     job.lock_expires_at = None
     audit(db, user, "job.retry", "job", job.id)
     db.commit()
     launched = _launch_worker()
     return _redirect(f"/jobs/{job.id}", f"Job rescheduled. {launched}")
+
+
+@app.post("/jobs/{job_id}/continue")
+def job_continue(
+    job_id: int,
+    request: Request,
+    user: User = Depends(require_role("operator")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.channel_id:
+        _channel_or_404(db, job.channel_id, user, "operator")
+    if job.status not in {"paused", "resumable"}:
+        return _redirect(f"/jobs/{job.id}", error="Continue is only available for paused jobs.")
+    job.status = "scheduled"
+    job.scheduled_for = utcnow()
+    job.finished_at = None
+    job.error = ""
+    job.lock_owner = ""
+    job.lock_expires_at = None
+    payload = json.loads(job.result_json or "{}")
+    payload["progress"] = {
+        "stage": job.stage,
+        "percent": progress_snapshot(job)["percent"],
+        "detail": "Queued to continue from the saved checkpoint.",
+    }
+    job.result_json = json.dumps(payload, ensure_ascii=False)
+    audit(db, user, "job.continue", "job", job.id)
+    db.commit()
+    launched = _launch_worker()
+    return _redirect(f"/jobs/{job.id}", f"Job continuation queued. {launched}")
+
+
+@app.post("/jobs/{job_id}/stop")
+def job_stop(
+    job_id: int,
+    request: Request,
+    user: User = Depends(require_role("operator")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.channel_id:
+        _channel_or_404(db, job.channel_id, user, "operator")
+    if job.status == "running":
+        job.status = "stop_requested"
+        audit(db, user, "job.stop_requested", "job", job.id)
+        db.commit()
+        return _redirect(f"/jobs/{job.id}", "Stop requested; the worker will pause at the next safe checkpoint.")
+    if job.status in {"scheduled", "failed_retryable", "resumable"}:
+        job.status = "paused"
+        job.stage = "paused"
+        job.finished_at = utcnow()
+        job.scheduled_for = None
+        audit(db, user, "job.stop", "job", job.id)
+        db.commit()
+        return _redirect(f"/jobs/{job.id}", "Job paused.")
+    return _redirect(f"/jobs/{job.id}", error="This job cannot be stopped in its current state.")
+
+
+@app.post("/jobs/{job_id}/restart")
+def job_restart(
+    job_id: int,
+    request: Request,
+    user: User = Depends(require_role("operator")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found.")
+    if job.channel_id:
+        _channel_or_404(db, job.channel_id, user, "operator")
+    if job.status == "running":
+        return _redirect(f"/jobs/{job.id}", error="Stop the running job before restarting it.")
+    if job.status in {"published", "completed", "no_content", "awaiting_review"}:
+        return _redirect(f"/jobs/{job.id}", error="Completed or reviewed jobs cannot be restarted.")
+    job.status = "scheduled"
+    job.stage = "queued"
+    job.attempt = 0
+    job.error = ""
+    job.scheduled_for = utcnow()
+    job.started_at = None
+    job.finished_at = None
+    job.heartbeat_at = None
+    job.edition_id = None
+    job.lock_owner = ""
+    job.lock_expires_at = None
+    job.result_json = json.dumps(
+        {"progress": {"stage": "queued", "percent": 0, "detail": "Queued for a clean restart."}},
+        ensure_ascii=False,
+    )
+    audit(db, user, "job.restart", "job", job.id)
+    db.commit()
+    launched = _launch_worker()
+    return _redirect(f"/jobs/{job.id}", f"Clean restart queued. {launched}")
 
 
 @app.post("/jobs/{job_id}/cancel")
@@ -2188,7 +2290,9 @@ def job_cancel(
         audit(db, user, "job.cancel_requested", "job", job.id)
         db.commit()
         return _redirect(f"/jobs/{job.id}", "Cancellation requested; the worker will stop at a safe checkpoint.")
-    if job.status not in {"scheduled", "failed_retryable", "failed_terminal", "paused"}:
+    if job.status in {"cancel_requested", "canceled"}:
+        return _redirect(f"/jobs/{job.id}", "Cancellation is already in progress.")
+    if job.status not in {"scheduled", "failed_retryable", "failed_terminal", "paused", "resumable", "stop_requested"}:
         return _redirect(f"/jobs/{job.id}", error="This job cannot be cancelled in its current state.")
     job.status = "canceled"
     job.stage = "canceled"

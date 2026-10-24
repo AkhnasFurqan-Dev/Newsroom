@@ -175,20 +175,25 @@ edition, or investigate the review flags. A pending review never discards the ne
 day's intake.
 
 **Job stuck in a running stage** — check the heartbeat and lease owner on the job
-page. A worker that died leaves a stale lease; it is reclaimed after the lease
-window. Stop any orphaned worker, then retry. Two workers cannot claim the same
-window.
+page. Long layout/model operations now emit a watchdog heartbeat and
+`Still working in ...` message about every 15 seconds. If the heartbeat is stale,
+use **Stop safely**, then **Continue from checkpoint**. Use **Retry failed job**
+only after a failure; **Restart from beginning** intentionally discards the current
+draft state. **Cancel job** asks for confirmation and is permanent for that job.
+Two workers cannot claim the same window.
 
 **Two editions for one window** — this should not happen for scheduled jobs
 because the job key is channel + kind + cutoff. If it does, record both edition
 IDs and inspect **Audit** before deleting anything. A manual build with a different
 window or kind is a legitimate separate edition.
 
-**Worker does nothing** — run one pass manually and read the log:
+**Worker does nothing** — run one pass manually and read both the durable log and
+the captured stderr:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\run-worker.ps1
 Get-Content .\data\logs\worker-$(Get-Date -Format yyyyMMdd).log -Tail 50
+Get-ChildItem .\data\logs\worker-err-*.log | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content
 ```
 
 **Task Scheduler does not run** — check `Get-ScheduledTaskInfo

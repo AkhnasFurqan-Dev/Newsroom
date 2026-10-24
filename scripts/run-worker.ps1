@@ -16,12 +16,12 @@ $log = Join-Path $logDir ("worker-" + (Get-Date -Format "yyyyMMdd") + ".log")
 
 "[{0}] worker pass start" -f (Get-Date -Format "s") | Out-File -FilePath $log -Append -Encoding utf8
 $stamp = [guid]::NewGuid().ToString("N")
-$stdout = Join-Path $logDir "worker-$stamp.stdout"
-$stderr = Join-Path $logDir "worker-$stamp.stderr"
-# Keep the worker attached to its console so stage updates are visible while
-# the job runs. The Python logger still writes the durable JSON log.
-$process = Start-Process -FilePath $Python -ArgumentList $WorkerArgs -WorkingDirectory $Root -Wait -PassThru -NoNewWindow
+$stderr = Join-Path $logDir "worker-err-$stamp.log"
+# Keep stdout attached so stage updates are visible while retaining a durable
+# stderr copy for startup failures and diagnostics.
+$process = Start-Process -FilePath $Python -ArgumentList $WorkerArgs `
+    -WorkingDirectory $Root -Wait -PassThru -NoNewWindow `
+    -RedirectStandardError $stderr
 $code = $process.ExitCode
-Remove-Item $stdout, $stderr -ErrorAction SilentlyContinue
 "[{0}] worker pass exit {1}" -f (Get-Date -Format "s"), $code | Out-File -FilePath $log -Append -Encoding utf8
 exit $code

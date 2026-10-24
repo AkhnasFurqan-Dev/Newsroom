@@ -17,6 +17,7 @@ import json
 import os
 import re
 import socket
+import threading
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from ..auth import active_rights, audit
+from ..db import SessionLocal
 from ..collection import window as window_math
 from ..collection.service import (
     CollectionStats,
@@ -567,6 +569,16 @@ def release_expired_locks(db: Session, *, now: datetime | None = None) -> int:
             job.finished_at = now
             db.add(RetryAttempt(job_id=job.id, attempt=job.attempt, reason=job.error))
             stale.append(job)
+    for job in db.scalars(select(Job).where(Job.status == "stop_requested")):
+        if _abandoned(job, now):
+            job.status = "paused"
+            job.stage = "paused"
+            job.error = "Stopped after the worker stopped; continue or restart the job."
+            job.lock_owner = ""
+            job.lock_expires_at = None
+            job.finished_at = now
+            db.add(RetryAttempt(job_id=job.id, attempt=job.attempt, reason=job.error))
+            stale.append(job)
     db.flush()
     return len(stale)
 
@@ -738,6 +750,7 @@ def process_job(
         )
         db.flush()
         return json.loads(job.result_json)
+
     if job.kind == "republish_edition":
         from ..publishing.service import publish_edition
 
@@ -929,6 +942,30 @@ def process_job(
     return json.loads(job.result_json)
 
 
+def _heartbeat_loop(
+    job_id: int,
+    stop_event: threading.Event,
+    progress: Callable[[str, str], None] | None,
+) -> None:
+    """Keep long-running work observable without sharing the worker Session."""
+    interval = max(5.0, min(15.0, settings.worker_heartbeat_timeout_seconds / 3))
+    while not stop_event.wait(interval):
+        try:
+            with SessionLocal() as heartbeat_db:
+                current = heartbeat_db.get(Job, job_id)
+                if current is None or current.status != "running":
+                    return
+                stage = current.stage or "working"
+                detail = f"Still working in {stage.replace('_', ' ')}…"
+                current.heartbeat_at = utcnow()
+                _save_progress(current, stage, detail)
+                heartbeat_db.commit()
+            if progress:
+                progress(stage, detail)
+        except Exception:
+            logger.exception("worker_heartbeat_failed", extra={"job_id": job_id})
+
+
 def fail_job(db: Session, job: Job, error: str, *, retryable: bool | None = None) -> None:
     if retryable is None:
         retryable = job.attempt < job.max_attempts
@@ -1059,6 +1096,14 @@ def _worker_once(
             db.commit()
             break
         db.commit()
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=_heartbeat_loop,
+            args=(job.id, heartbeat_stop, progress),
+            name=f"job-heartbeat-{job.id}",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             outcome = process_job(db, job, worker_id=worker_id, progress=progress)
             db.commit()
@@ -1129,6 +1174,9 @@ def _worker_once(
                 audit(db, None, "job.failed", "job", fresh.id, {"error": str(exc)[:500]})
                 db.commit()
             stats.failed += 1
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=2)
     return stats
 
 

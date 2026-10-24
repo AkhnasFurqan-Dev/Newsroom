@@ -8,6 +8,21 @@ local model.** Live Telegram remains unverified because the owner's API
 credentials and an interactive login are required; it is recorded as a limit,
 not claimed as a success.
 
+## M15 — Explicit job controls and live worker heartbeat
+
+- Separated job actions in the job page: **Retry failed job**, **Continue from
+  checkpoint**, **Stop safely**, **Restart from beginning**, and confirmed
+  **Cancel job**.
+- Added cooperative `stop_requested` handling and recovery to `paused`, while
+  preserving saved checkpoints for Continue.
+- Added a separate worker heartbeat thread using its own database session. Long
+  layout/model operations now refresh the heartbeat and emit a console detail
+  approximately every 15 seconds, preventing false stale-job reports.
+- Worker launcher keeps stdout attached and captures stderr under
+  `data/logs/worker-err-*.log`.
+- **Verification:** Ruff passed; scheduling/web/concurrency tests passed after
+  fixing launcher stderr capture.
+
 ## Environment at build time
 
 | Item | Value |
