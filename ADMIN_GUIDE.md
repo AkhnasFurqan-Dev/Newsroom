@@ -270,7 +270,7 @@ Design guarantees:
   reused instead of fetched twice.
 - **Cancel and resume** — cancelling a running job records a request and stops at a
   checkpoint; a request whose worker died is finalised as `canceled`, never left as
-  a zombie. `paused` jobs resume from **Retry / resume job`.
+  a zombie. `paused` jobs resume from **Retry / resume job**.
 - **Telegram session ownership** — the web app and worker never open the Telethon
   `.session` concurrently. A serialised gateway takes an OS lease on
   `<session>.owner.lock` before Telethon touches the file, disconnects and closes

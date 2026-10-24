@@ -45,7 +45,7 @@ hours (12 by default).
 
 ## 2. The dashboard
 
-Owners also see a compact **System Health** card with **Check Connections** and
+Owners see a compact **System Health** card with **Check Connections** and
 **Restart Channel Press Services**. *Configured* is not the same as *connected and
 tested*: credentials can be present while Telegram is unreachable or not signed in,
 and the card says so. **Check Connections** runs a short, read-only check of the
