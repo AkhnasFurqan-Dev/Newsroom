@@ -108,6 +108,7 @@ from ..scheduling.service import (
     enqueue_manual_job,
     enqueue_republish_job,
     latest_due_cutoff,
+    progress_snapshot,
     worker_once,
 )
 from ..security import hash_password, redact, verify_password
@@ -2070,12 +2071,7 @@ def jobs_page(request: Request, user: User = Depends(current_user), db: Session 
     )
     job_progress = {}
     for job in jobs:
-        result = json.loads(job.result_json or "{}")
-        progress = result.get("progress") if isinstance(result.get("progress"), dict) else {}
-        job_progress[job.id] = int(
-            progress.get("percent")
-            or (100 if job.status in {"published", "completed", "awaiting_review", "no_content"} else 0)
-        )
+        job_progress[job.id] = progress_snapshot(job)
     return render(
         request,
         "jobs.html",
@@ -2107,6 +2103,7 @@ def job_detail(
             user,
             "jobs",
             job=job,
+            progress=progress_snapshot(job),
             steps=steps,
             result=result,
             edition=edition,
@@ -2127,13 +2124,7 @@ def job_api(
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user)
     result = json.loads(job.result_json or "{}")
-    progress = result.get("progress") if isinstance(result.get("progress"), dict) else {}
-    now = utcnow()
-    elapsed = progress.get("elapsed_seconds", 0)
-    if job.started_at:
-        elapsed = max(elapsed, round((now - job.started_at).total_seconds(), 1))
-    terminal_statuses = {"published", "completed", "awaiting_review", "no_content"}
-    percent = int(progress.get("percent") or (100 if job.status in terminal_statuses else 0))
+    progress = progress_snapshot(job)
     return JSONResponse(
         {
             "id": job.id,
@@ -2142,13 +2133,7 @@ def job_api(
             "attempt": job.attempt,
             "error": redact(job.error or ""),
             "edition_id": job.edition_id,
-            "progress": {
-                "percent": min(100, max(0, percent)),
-                "detail": progress.get("detail", ""),
-                "elapsed_seconds": elapsed,
-                "eta_seconds": 0 if percent >= 100 else progress.get("eta_seconds"),
-                "updated_at": progress.get("updated_at"),
-            },
+            "progress": progress,
             "result": result,
         }
     )

@@ -17,11 +17,12 @@
   <div>
     <h2>Progress</h2>
     <div class="card">
-      {% set initial_progress = result.get('progress', {}) %}
-      {% set initial_percent = initial_progress.get('percent', 100 if job.status in ['published', 'completed', 'awaiting_review', 'no_content'] else 0) %}
+      {% set initial_progress = progress %}
+      {% set initial_percent = initial_progress.get('percent', 0) %}
       <div class="job-progress__summary"><strong>Stage:</strong> <span id="job-stage">{{ job.stage|status_label }}</span> <span id="job-percent">{{ initial_percent }}%</span></div>
       <div class="progress-track" aria-label="Job progress"><div class="progress-track__bar" id="job-progress-bar" style="width:{{ initial_percent }}%"></div></div>
       <div class="small" id="job-progress-detail">{{ initial_progress.get('detail', 'Waiting for worker progress…') }}</div>
+      <div class="error-text" id="job-stale" style="display:none">The worker heartbeat is stale. Restart services or retry this job.</div>
       <div class="job-progress__timing"><span>Elapsed: <b id="job-elapsed">{{ initial_progress.get('elapsed_seconds', '—') }}</b></span><span>Estimated left: <b id="job-eta">{{ initial_progress.get('eta_seconds', '—') }}</b></span></div>
       <div><strong>Status:</strong> <span id="job-status-text">{{ job.status|status_label }}</span></div>
       <div><strong>Scheduled:</strong> {{ job.scheduled_for|localtime(profile.timezone if profile else 'Asia/Karachi') if job.scheduled_for else '—' }}</div>
@@ -93,6 +94,7 @@
   const detail = document.getElementById("job-progress-detail");
   const elapsed = document.getElementById("job-elapsed");
   const eta = document.getElementById("job-eta");
+  const stale = document.getElementById("job-stale");
   const formatDuration = (seconds) => {
     if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) return "—";
     const total = Math.max(0, Math.round(Number(seconds)));
@@ -109,6 +111,7 @@
     if (detail) detail.textContent = progress.detail || "Worker is active…";
     if (elapsed) elapsed.textContent = formatDuration(progress.elapsed_seconds);
     if (eta) eta.textContent = value >= 100 ? "Complete" : formatDuration(progress.eta_seconds);
+    if (stale) stale.style.display = progress.stale ? "block" : "none";
   };
   if (!status || terminal.has({{ job.status|tojson }})) return;
   let ticks = 0;

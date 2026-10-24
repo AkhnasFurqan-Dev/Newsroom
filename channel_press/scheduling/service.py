@@ -85,6 +85,34 @@ def _progress_value(stage: str, detail: str) -> int:
     return base
 
 
+def progress_snapshot(job: Job) -> dict:
+    payload = json.loads(job.result_json or "{}")
+    saved = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
+    now = utcnow()
+    elapsed = saved.get("elapsed_seconds", 0)
+    if job.started_at:
+        elapsed = max(float(elapsed or 0), (now - job.started_at).total_seconds())
+    percent = int(saved.get("percent") or _progress_value(job.stage, saved.get("detail", "")))
+    stale = bool(
+        job.status == "running"
+        and job.heartbeat_at
+        and (now - job.heartbeat_at).total_seconds() > settings.worker_heartbeat_timeout_seconds
+        and owner_process_alive(job.lock_owner) is not True
+    )
+    detail = saved.get("detail") or (
+        "Worker heartbeat is stale; restart or retry the job."
+        if stale else f"Worker is active in {job.stage.replace('_', ' ')}…"
+    )
+    return {
+        "percent": min(100, max(0, percent)),
+        "detail": detail,
+        "elapsed_seconds": round(elapsed, 1),
+        "eta_seconds": saved.get("eta_seconds"),
+        "updated_at": saved.get("updated_at"),
+        "stale": stale,
+    }
+
+
 def _save_progress(job: Job, stage: str, detail: str) -> None:
     payload = json.loads(job.result_json or "{}")
     progress = payload.get("progress") if isinstance(payload.get("progress"), dict) else {}
