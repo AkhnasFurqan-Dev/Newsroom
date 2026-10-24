@@ -155,6 +155,9 @@ session-present states without printing any secret value.
 | Back up | `python -m channel_press.cli backup` |
 | Restore (app stopped) | `python -m channel_press.cli restore --archive <zip>` |
 | Environment report | `python -m channel_press.cli diagnostics` |
+| Health (configured vs tested) | `python -m channel_press.operations health` |
+| Graceful stop | `powershell -ExecutionPolicy Bypass -File .\scripts\stop-services.ps1` |
+| Controlled restart | `powershell -ExecutionPolicy Bypass -File .\scripts\restart-services.ps1` |
 
 All Python commands use `.\.venv\Scripts\python.exe` on Windows.
 
@@ -167,6 +170,48 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-task.ps1
 
 The task calls `run-worker.ps1`, which performs one short-lived worker pass and
 exits. No model or server process stays resident while the desk is idle.
+
+`stop-services.ps1` requests a graceful stop and waits; it never kills unrelated
+processes. `restart-services.ps1` validates configuration and the database, stops
+what is managed, resumes, checks the local model, starts the web app detached and
+polls it until it answers. `service-health.ps1 -Validate -Probe` adds a bounded,
+read-only Telegram check. See `docs/CONCURRENCY_RECOVERY_REPORT.md` for verified
+results and `TROUBLESHOOTING.md` for failures.
+
+### Concurrency and live safety
+
+- One SQLite writer, short transactions. Network, model, media and PDF work never
+  run inside an open write transaction; a transient `database is locked` is
+  retried with backoff and then reported as a friendly `503`, never a raw `500`.
+- One Telegram session owner. The web app and the worker share a serialised
+  gateway with a cross-process lease on the `.session` file; rendering a page never
+  contacts Telegram.
+- One collector per channel/window. An edition that finds its window already being
+  collected waits (`waiting_for_collector`) instead of failing or duplicating it.
+- Queue Build performs a bounded, read-only Telegram preflight when live collection
+  is requested and refuses to queue a job with a concrete reason if it fails.
+  Fixture and manual-import builds need no Telegram connection.
+
+`stop-services.ps1` requests a graceful stop and waits; it never kills unrelated
+processes. `restart-services.ps1` validates configuration and the database, stops
+what is managed, resumes, checks the local model, starts the web app detached and
+polls it until it answers. `service-health.ps1 -Validate -Probe` adds a bounded,
+read-only Telegram check. See `docs/CONCURRENCY_RECOVERY_REPORT.md` for verified
+results and `TROUBLESHOOTING.md` for failures.
+
+### Concurrency and live safety
+
+- One SQLite writer, short transactions. Network, model, media and PDF work never
+  run inside an open write transaction; a transient `database is locked` is
+  retried with backoff and then reported as a friendly `503`, never a raw `500`.
+- One Telegram session owner. The web app and the worker share a serialised
+gateway with a cross-process lease on the `.session` file; rendering a page never
+  contacts Telegram.
+- One collector per channel/window. An edition that finds its window already being
+  collected waits (`waiting_for_collector`) instead of failing or duplicating it.
+- Queue Build performs a bounded, read-only Telegram preflight when live collection
+  is requested and refuses to queue a job with a concrete reason if it fails.
+  Fixture and manual-import builds need no Telegram connection.
 
 ## How it works
 

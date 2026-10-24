@@ -45,6 +45,18 @@ hours (12 by default).
 
 ## 2. The dashboard
 
+Owners also see a compact **System Health** card with **Check Connections** and
+**Restart Channel Press Services**. *Configured* is not the same as *connected and
+tested*: credentials can be present while Telegram is unreachable or not signed in,
+and the card says so. **Check Connections** runs a short, read-only check of the
+web server, database, Telegram/source channel, worker, Ollama and the configured
+model, and lists active jobs with their last error.
+
+**Restart Channel Press Services** asks for confirmation, requests a graceful stop,
+keeps every database, session, job and checkpoint, and starts the web app again.
+Jobs that were paused can be resumed from **Jobs**. It is not a repair button for
+wrong credentials or rights.
+
 **Today's desk** summarises:
 
 - **Source posts** — authorized imports in the database.
@@ -407,11 +419,19 @@ that issue.
 stage, heartbeat, lease owner, completed steps and result JSON.
 
 - **Retry failed job** — resumes from a fresh transactional build without
-  duplicating the edition or publication record.
-- **Cancel queued job** — stops work that has not started.
+  duplicating the edition or publication record. It also resumes a job that the
+  shutdown policy paused; the exact window and saved checkpoint are kept.
+- **Cancel** — a queued job is cancelled immediately. A **running** job records a
+  cancellation request and stops at the next safe checkpoint; the page then shows
+  `canceled`. A finished job cannot be cancelled.
+- **Waiting for collector** — another process is already collecting this exact
+  window. The job is not failed; it retries automatically in about 30 seconds.
+- **Paused** — a service stop (or a manual restart) interrupted the job at a
+  checkpoint. Nothing was published; choose **Retry / resume job** after restart.
 
 A failed layout leaves a draft and a clear error; it never marks an incomplete PDF
-as published.
+as published. Every job shows the private log file and its `job_id`; logs never
+contain credentials, session material or post bodies in error text.
 
 ## 12. Branding and edition policy
 

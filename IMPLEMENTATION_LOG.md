@@ -477,3 +477,75 @@ before release; the draft is not published. Documented in `TROUBLESHOOTING.md`.
 **Commits:** `2d00f22` (build, scheduling, logging and tests), `b5d44a5`
 (layout flow and QA noise), plus the documentation commit that contains this
 entry.
+
+---
+
+## Post-M14 corrective milestone — live concurrency recovery (2026-10-24)
+
+**Trigger.** After the Queue Build repair, live use still produced
+`sqlite3.OperationalError: database is locked` on schedule/branding/cancel
+requests, Telethon session SQLite locks, a 45-second `/sources/{id}` render, and
+"Another worker is already collecting this window". The focused contract and
+evidence are `CONCURRENCY_RECOVERY_CONTRACT.md` and
+`CONCURRENCY_FAILURE_EVIDENCE.md`; the owner-facing report is
+`docs/CONCURRENCY_RECOVERY_REPORT.md`.
+
+**Root causes fixed**
+
+1. Application writes were held across retrieval, model, media and PDF work.
+   Transactions now commit before external I/O; page checkpoints use short fresh
+   sessions with a bounded busy retry; an exhausted retry is a friendly `503`.
+2. Web and worker each opened the same Telethon SQLite session. A serialised
+   gateway plus a cross-process `<session>.owner.lock` now guarantees one owner,
+   closes the client after every bounded call, and releases on timeout/exception.
+3. `status(probe=False)` connected to Telegram. It is now memory-only; only the
+   explicit Test/Preflight action connects, within `telegram_preflight_timeout_seconds`.
+4. `sync_window` jobs had random keys and an edition treated a window claim by
+   another worker as a hard failure. One job per window, compare-and-set claims,
+   and a `waiting_for_collector` deferral replace both behaviours.
+5. `release_expired_locks` referenced an unimported symbol (would raise `NameError`
+   on any stale running job). Imported and covered by tests.
+6. `restart-services.ps1` counted the web app as a lingering worker and started it
+   in a way that inherited the caller's stdout, hanging anyone capturing output.
+   It now counts worker owners only and starts the web through
+   `operations start-web` (`DETACHED_PROCESS`, file stdio).
+
+**Verification**
+
+- `ruff check channel_press tests` → `All checks passed!`
+- `pytest` → **168 passed, 2 skipped** in ~96 s. The skips are the two
+  `tests/test_ollama_live.py` cases because Ollama is not running here.
+- 29 new regression tests in `tests/test_concurrency_recovery.py`: cached status,
+  cross-process session ownership, timeout release, preflight failure paths,
+  dirty-writer collection, busy retry, responsive pages, crashed-lease recovery,
+  live-owner protection, cancel zombie, exclusive window claim, job re-arm,
+  duplicate clicks, checkpoint resume, cancel states, launcher stderr/exit codes.
+- Multi-process proof (`tests/concurrency_proof/driver.py`, disposable DB):
+  128 dashboard requests during a real worker run, worst 16 ms, no 5xx; job
+  `scheduled → running → awaiting_review`; 7-page 792 × 1224 pt PDF; a second
+  worker exited 2; session lease blocked a second owner then passed after release;
+  graceful stop left zero owners; controlled restart exited 0 in 14.6 s;
+  `PRAGMA integrity_check` = `ok`, 26 posts before and after, no duplicate editions.
+- Live Telegram: **not verified**. This checkout has API credentials but no
+  `data\telegram.session` and no configured source handle, so no live message was
+  requested and no live job was run. C17/C18 remain owner-supervised steps.
+
+**Files:** `channel_press/db.py`, `channel_press/locking.py` (new),
+`channel_press/operations.py` (new), `channel_press/collection/service.py`,
+`channel_press/scheduling/service.py`, `channel_press/pipeline.py`,
+`channel_press/editorial/drafting.py`, `channel_press/layout/engine.py`,
+`channel_press/media/service.py`, `channel_press/telegram/service.py`,
+`channel_press/telegram/transport.py`, `channel_press/web/app.py`,
+`channel_press/web/templates/{dashboard,job}.html.j2`,
+`channel_press/web/static/js/health.js`, `channel_press/cli.py`,
+`channel_press/config.py`, `scripts/{run-worker,stop-services,restart-services,service-health}.ps1`,
+`tests/test_concurrency_recovery.py`, `tests/concurrency_proof/`,
+`docs/CONCURRENCY_RECOVERY_REPORT.md`, manuals.
+
+**Commits:** `aded3e4` (DB writes, leases, window ownership),
+`bbb5d4c` (Telegram session ownership, cached status, preflight, health UI),
+`ddd0544` (service control scripts), plus the test/documentation commit.
+
+**Next step:** owner completes the local Telegram login on the machine holding the
+session, records rights, and runs one small supervised cutoff edition with
+auto-release off; then mark C17/C18.

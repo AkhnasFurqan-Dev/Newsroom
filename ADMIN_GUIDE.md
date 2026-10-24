@@ -257,9 +257,30 @@ Design guarantees:
 - **Checkpointed retrieval** — pages are staged as JSONL under
   `data/window-staging` and a retrieval checkpoint records the cursor. A crash on
   page 4 resumes without duplicating posts or losing the rest of the window.
-- **Lease and file lock** — only one worker processes jobs; a stale lease is
-  reclaimed after the configured window. Two workers cannot build the same
-  window.
+- **Single worker gate** — every entry point (`worker --once`, the detached web
+  launch, Task Scheduler) acquires one OS file lease in `data/worker.lock`. A
+  second pass exits with code 2 and a message instead of competing.
+- **Lease and stale-owner recovery** — jobs carry an owner, heartbeat and expiry.
+  A crashed local worker is reclaimed only when its recorded PID is provably gone
+  and its heartbeat is older than `worker_heartbeat_timeout_seconds`; a live owner
+  is never stolen. A remote owner is reclaimed after its explicit lease expires.
+- **One collector per window** — `edition_windows` ownership is a compare-and-set
+  claim. An edition that finds the window claimed elsewhere is deferred as
+  `waiting_for_collector` (about 30 s), not failed; a completed collection is
+  reused instead of fetched twice.
+- **Cancel and resume** — cancelling a running job records a request and stops at a
+  checkpoint; a request whose worker died is finalised as `canceled`, never left as
+  a zombie. `paused` jobs resume from **Retry / resume job`.
+- **Telegram session ownership** — the web app and worker never open the Telethon
+  `.session` concurrently. A serialised gateway takes an OS lease on
+  `<session>.owner.lock` before Telethon touches the file, disconnects and closes
+  the session after every bounded operation, and reports
+  "Telegram session currently busy" instead of a lock error. Page rendering never
+  contacts Telegram; use **Test source connection** or **Check Connections**.
+- **Database contention** — application writes are short and never span Telegram,
+  model, media or PDF work. A transient `SQLITE_BUSY` is retried three times in a
+  fresh transaction; if it persists the UI returns `503` with `Retry-After` and
+  "your change was not saved", and the audit trail is intact.
 - **Review policy** — scheduled builds stage as `awaiting_review`. Auto-release
   happens only when the schedule permits it and the edition has no blocking flags
   or high-risk articles.
@@ -277,7 +298,39 @@ Unregister-ScheduledTask -TaskName ChannelPressWorker -Confirm:$false
 ```
 
 `install-task.ps1` uses `MultipleInstances IgnoreNew` and a 2-hour execution
-limit. `run-worker.ps1` keeps a daily log.
+limit. `run-worker.ps1` keeps a daily log. It launches `python.exe` with separate
+stdout/stderr files and exits the real process code, so Alembic `INFO` lines on
+stderr are never mistaken for a failure and a genuine nonzero exit is preserved.
+
+### Service lifecycle and health (Windows)
+
+```powershell
+# Configured vs connected: services, database, Telegram cache, worker, Ollama/model
+powershell -ExecutionPolicy Bypass -File .\scripts\service-health.ps1
+
+# Also validate configuration/storage and run one bounded read-only Telegram check
+powershell -ExecutionPolicy Bypass -File .\scripts\service-health.ps1 -Validate -Probe
+
+# Ask every managed service to pause at a checkpoint, then wait for exit
+powershell -ExecutionPolicy Bypass -File .\scripts\stop-services.ps1
+
+# Validate → stop → resume → model/health → detached web start → readiness poll
+powershell -ExecutionPolicy Bypass -File .\scripts\restart-services.ps1
+```
+
+Stop is cooperative: it creates `data/services.stop`, and the web watcher and the
+worker finish the current bounded step, release leases and exit. A stop request is
+not cleared automatically; `restart-services.ps1` (or
+`python -m channel_press.operations resume`) clears it. Never delete the database,
+WAL/SHM files, `.session`, jobs or checkpoints to "fix" a lock.
+
+Managed services register in `data/services/<pid>.json` under an OS lease on
+`<pid>.lock`. `python -m channel_press.operations owners` lists only live owners.
+On this repository's Windows venv, one `python.exe` invocation shows two PIDs (a
+launcher stub plus the base interpreter); leases record the real PID, so judge by
+`owners`, not by process count. No kill is issued by these scripts; if a managed
+service is genuinely unresponsive, stop its recorded PID only after confirming it
+is Channel Press.
 
 ## 7. Manual overrides
 

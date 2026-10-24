@@ -35,3 +35,6 @@ tmp/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Agent/session transcripts (may contain environment details)
+executing-*.json

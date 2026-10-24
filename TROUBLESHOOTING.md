@@ -205,6 +205,83 @@ disabled the loggers; restart `python -m channel_press serve` or the worker once
 Logs never contain Telegram session contents, `.env` values or credentials; redact
 paths before posting a log publicly.
 
+## “Database temporarily busy. Your change was not saved.” (HTTP 503)
+
+This is the bounded fallback, not a crash. Another Channel Press process held the
+single SQLite writer through three short retries. The request was **not** applied
+and the audit trail is intact.
+
+1. Wait a few seconds and repeat the action; a long collection or edition build
+   only holds the writer for short commits now.
+2. Check `python -m channel_press.operations health` and the Jobs page. If a job is
+   `running` with an old heartbeat, wait for the lease to expire or restart
+   services gracefully.
+3. Inspect `data\logs\web-YYYYMMDD.log` for `transaction_end ... duration_ms=`
+   warnings (over 2000 ms). A repeated long transaction is a defect; record the
+   time, job id and log line.
+
+Do not delete `-wal`/`-shm` files or switch the database while services run.
+
+## “Telegram session currently busy”
+
+Another Channel Press process (usually the worker, or a second web server) owns
+the authenticated Telethon session. This is the safe refusal: it prevents two
+Telethon clients from writing the same `.session` SQLite file.
+
+- Check **Jobs**; a live collection may be in progress. Wait for it, then use
+  **Test source connection**.
+- Run `python -m channel_press.operations owners`. Two `web` entries mean two
+  servers; stop the extra one through `scripts\stop-services.ps1` and start one.
+- `scripts\restart-services.ps1` refuses to start when an unmanaged web already
+  answers on the configured port.
+
+Never delete the session file to clear this message.
+
+## Queue Build is refused with a Telegram reason
+
+Queue Build (and source Sync/Context import) performs a short, read-only preflight
+before creating a live collection job. No job is created if it fails. The message
+is the real cause:
+
+| Message | Action |
+| --- | --- |
+| Telegram connection timed out | Check the network/VPN/proxy, retry |
+| Telegram authenticated session is missing / not signed in | Complete the local login on this machine |
+| Channel not accessible | Verify the handle and that the account is a member |
+| Channel identity changed | Re-test the source; confirm the intended channel |
+| Telegram session currently busy | Wait for the collection or stop the extra process |
+| Source authorization missing | Record the rights declaration first |
+| Collection already active | The window already has a running job; open that job |
+
+A successful preflight shows **Telegram Ready: @handle (UTC timestamp)**. Fixture
+and manual-import builds do not need Telegram.
+
+## Services are paused (stop request)
+
+`data/services.stop` exists. A manually started server prints the paused message
+and exits, and jobs stop at checkpoints as `paused`; nothing is published.
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m channel_press.operations resume
+```
+
+Then restart normally and use **Retry / resume job** for paused jobs. Do not delete
+the stop file while services are still shutting down; `restart-services.ps1` does
+this in the right order.
+
+## Restart or stop script reports a problem
+
+- **“A web server already answers … but is not managed”** — an unmanaged server is
+  running (for example a manual `uvicorn`). Stop that specific process yourself,
+  then re-run the script. This prevents duplicate web processes on one database.
+- **Stop times out** — a bounded operation is still finishing. The stop request
+  stays active and nothing was killed. Inspect `data\logs`; do not blanket-kill
+  `python.exe`.
+- **Two `python.exe` PIDs for one service** — this repository's `.venv` launcher
+  re-executes the base interpreter, so one logical process can show two PIDs. Use
+  `python -m channel_press.operations owners`; it records the real owner PID and is
+  authoritative.
+
 ## Queue Build returns Internal Server Error
 
 The old build route read a cutoff clock from
