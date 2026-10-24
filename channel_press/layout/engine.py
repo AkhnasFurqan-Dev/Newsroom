@@ -691,6 +691,8 @@ def compile_edition(
         raise RuntimeError("Publication profile is missing; run setup first.")
     plan = create_plan(db, edition, profile, media_dir=media_dir)
     html, _ = build_print_html(db, edition, plan, demo_edition=demo_edition)
+    if db.info.get("durable_worker"):
+        db.commit()
     return render_edition_pdf(
         html,
         html_path=output_dir / "edition.html",

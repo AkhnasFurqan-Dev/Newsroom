@@ -59,7 +59,6 @@ from .pipeline import PipelineRequest, run_pipeline
 from .publishing.service import edition_review_blockers
 from .scheduling.service import (
     WorkerBusy,
-    WorkerLease,
     enqueue_manual_job,
     worker_once,
 )
@@ -469,34 +468,36 @@ def cmd_worker(args: argparse.Namespace) -> int:
     upgrade_database()
     configure_logging("worker", console=False)
     try:
-        with WorkerLease():
+        if args.once:
             with SessionLocal() as db:
-                if args.once:
-                    stats = worker_once(db)
-                    db.commit()
-                    _print(
-                        f"enqueued={stats.enqueued} processed={stats.processed} published={stats.published} "
-                        f"awaiting_review={stats.awaiting_review} failed={stats.failed} released={stats.released} "
-                        f"stale_locks={stats.stale_locks}"
-                    )
-                    return 0
-                _print("Worker running. Press Ctrl+C to stop.")
-                while True:
-                    with SessionLocal() as db:
-                        stats = worker_once(db, max_jobs=args.max_jobs)
-                        db.commit()
-                    if stats.processed or stats.enqueued or stats.released:
-                        _print(
-                            f"{utcnow().isoformat()} processed={stats.processed} published={stats.published} "
-                            f"awaiting_review={stats.awaiting_review} failed={stats.failed}"
-                        )
-                    time.sleep(args.interval)
+                stats = worker_once(db)
+                db.commit()
+                _print(
+                    f"enqueued={stats.enqueued} processed={stats.processed} published={stats.published} "
+                    f"awaiting_review={stats.awaiting_review} failed={stats.failed} released={stats.released} "
+                    f"stale_locks={stats.stale_locks}"
+                )
+                return 0
+        _print("Worker running. Press Ctrl+C to stop.")
+        while True:
+            with SessionLocal() as db:
+                stats = worker_once(db, max_jobs=args.max_jobs)
+                db.commit()
+            if stats.processed or stats.enqueued or stats.released:
+                _print(
+                    f"{utcnow().isoformat()} processed={stats.processed} published={stats.published} "
+                    f"awaiting_review={stats.awaiting_review} failed={stats.failed}"
+                )
+            time.sleep(args.interval)
     except WorkerBusy as exc:
         _print(str(exc))
         return 2
     except KeyboardInterrupt:
         _print("Worker stopped.")
         return 0
+    finally:
+        from .telegram.service import telegram_service
+        telegram_service.close()
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -508,7 +509,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
     upgrade_database()
     configure_logging("web")
     _print(f"Channel Press at http://{args.host}:{args.port}")
-    uvicorn.run("channel_press.web.app:app", host=args.host, port=args.port, reload=args.reload)
+    if args.reload:
+        _print("Note: --reload is ignored under managed service control; restart to apply changes.")
+    from .operations import run_web
+
+    run_web(uvicorn.Server(uvicorn.Config("channel_press.web.app:app", host=args.host, port=args.port)))
     return 0
 
 

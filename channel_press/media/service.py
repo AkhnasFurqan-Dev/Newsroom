@@ -185,6 +185,8 @@ def ensure_media_files(db: Session, story: StoryCluster) -> int:
             else ".bin"
         )
         target = settings.media_dir / channel.slug / str(post.id) / f"telegram_{media.id}{suffix}"
+        if db.info.get("durable_worker"):
+            db.commit()
         try:
             telegram_service.download_media(handle, post.telegram_message_id, target)
         except Exception:  # noqa: BLE001 - an unavailable photo must not fail the edition

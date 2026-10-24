@@ -38,6 +38,7 @@ from .models import (
     Channel,
     Edition,
     EditionArticle,
+    Job,
     PublicationProfile,
     ReviewFlag,
     StoryCluster,
@@ -161,7 +162,9 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     issue_number = request.issue_number or next_issue_number(db, channel.id, request.kind)
     volume = request.volume or next_volume(db, channel.id)
     title = request.title.strip() or f"{profile.name} — {request.kind.replace('_', ' ').title()}"
-    edition = Edition(
+    job = db.get(Job, request.job_id) if request.job_id else None
+    resumed = db.get(Edition, job.edition_id) if job and job.edition_id else None
+    edition = resumed or Edition(
         channel_id=channel.id,
         kind=request.kind,
         title=title[:240],
@@ -193,23 +196,34 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     db.add(edition)
     db.flush()
 
-    _notify(request, "normalization", "Clearing unpublished drafts for the window")
-    cleared = clear_editorial_drafts(db, channel.id, request.window_start, request.window_end)
-
-    _notify(request, "clustering", "Building story clusters from source fragments")
-    stories = build_stories(db, channel.id, request.window_start, request.window_end, job_id=request.job_id)
+    cleared = 0
+    if resumed:
+        ids = json.loads(job.result_json or "{}").get("story_ids", [])
+        stories = list(db.scalars(select(StoryCluster).where(StoryCluster.id.in_(ids))))
+    else:
+        _notify(request, "normalization", "Clearing unpublished drafts for the window")
+        cleared = clear_editorial_drafts(db, channel.id, request.window_start, request.window_end)
+        _notify(request, "clustering", "Building story clusters from source fragments")
+        stories = build_stories(db, channel.id, request.window_start, request.window_end, job_id=request.job_id)
     if not stories:
         raise PipelineError(
             "No includable source fragments were found in this window. Import authorized posts "
             "or widen the reporting window."
         )
 
+    if job:
+        job.edition_id = edition.id
+        job.result_json = json.dumps({"story_ids": [story.id for story in stories]})
+        db.commit()
     provider, provider_note = select_provider(channel, request.provider)
     _notify(request, "drafting", f"Drafting {len(stories)} stories with {getattr(provider, 'name', 'provider')}")
     articles: list[Article] = []
     draft_errors: list[str] = []
     try:
         for story in stories:
+            if job:
+                from .operations import check_job_control
+                check_job_control(job.id)
             try:
                 article = draft_story(
                     db,
@@ -219,6 +233,8 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
                     actor_id=request.actor_id,
                 )
                 articles.append(article)
+                if job:
+                    db.commit()
             except Exception as exc:  # one bad story must not lose a valid edition
                 draft_errors.append(f"story {story.id}: {type(exc).__name__}: {str(exc)[:200]}")
     finally:
@@ -244,6 +260,8 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         key=lambda item: (-story_importance.get(item.story_id, 0.0), item.id),
     )
     front_article = next((item for item in ordered if item.genre == "news"), ordered[0])
+    if resumed:
+        db.execute(EditionArticle.__table__.delete().where(EditionArticle.edition_id == edition.id))
     for index, article in enumerate(ordered):
         db.add(
             EditionArticle(
@@ -257,6 +275,8 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     db.flush()
 
     _notify(request, "layout", "Composing tabloid pages and rendering the PDF")
+    if job:
+        db.commit()
     publish_result: PublishResult | None = None
     if request.publish:
         publish_result = publish_edition(

@@ -162,7 +162,7 @@ def draft_story(
     existing = db.scalar(select(Article).where(Article.story_id == story.id).order_by(Article.revision.desc()))
     if existing is not None:
         in_edition = db.scalar(select(EditionArticle.id).where(EditionArticle.article_id == existing.id).limit(1))
-        if existing.locked or in_edition:
+        if existing.locked or in_edition or (job_id and db.info.get("durable_worker")):
             return existing
         db.execute(delete(ArticleClaimLink).where(ArticleClaimLink.article_id == existing.id))
         db.delete(existing)
@@ -174,6 +174,8 @@ def draft_story(
     claims = build_claims(db, story)
     bundle.claims = claims
     fallback_reason = ""
+    if db.info.get("durable_worker"):
+        db.commit()
     try:
         result = provider.draft(bundle)
     except Exception as exc:

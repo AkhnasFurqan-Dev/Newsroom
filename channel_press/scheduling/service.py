@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from ..auth import active_rights, audit
 from ..collection import window as window_math
 from ..collection.service import (
+    CollectionStats,
     EditionWindow,
     LiveTelegramSource,
     claim_window,
@@ -40,6 +41,7 @@ from ..collection.service import (
     record_for_edition,
 )
 from ..config import settings
+from ..locking import owner_process_alive
 from ..logging_setup import get_logger
 from ..models import (
     Article,
@@ -66,6 +68,13 @@ logger = get_logger("worker")
 
 class WorkerBusy(RuntimeError):
     pass
+
+
+class CollectionBusy(RuntimeError):
+    pass
+
+
+
 
 
 class DuplicateWindowError(RuntimeError):
@@ -291,7 +300,7 @@ def enqueue_manual_job(
     if existing is None and record is not None and record.job_id:
         existing = db.get(Job, record.job_id)
     if existing is not None:
-        if existing.status in JOB_RUNNABLE or existing.status in JOB_ALREADY_DONE:
+        if existing.status in JOB_RUNNABLE or existing.status in JOB_ALREADY_DONE or existing.status in {"running", "cancel_requested"}:
             existing.reused_existing = True  # type: ignore[attr-defined]
             return existing
         # failed_terminal / failed_retryable / canceled: reuse the same row so
@@ -300,7 +309,8 @@ def enqueue_manual_job(
         existing.stage = "queued"
         existing.attempt = 0
         existing.error = ""
-        existing.result_json = "{}"
+        if not existing.edition_id:
+            existing.result_json = "{}"
         existing.scheduled_for = now
         existing.started_at = None
         existing.finished_at = None
@@ -350,8 +360,31 @@ def enqueue_collect_job(
     """Queue a collection-only job: ``sync_window`` or ``collect_context``."""
     if mode not in {"sync_window", "collect_context"}:
         raise ValueError("Unknown collection job mode.")
+    key = f"{mode}:{window.key}"
+    existing = db.scalar(select(Job).where(Job.key == key))
+    if existing is not None:
+        if existing.status in JOB_RUNNABLE | JOB_ALREADY_DONE | {"running", "cancel_requested"}:
+            existing.reused_existing = True  # type: ignore[attr-defined]
+            return existing
+        # Failed or cancelled collection for the same window: re-arm this row
+        # so repeated clicks keep exactly one job per window. The retrieval
+        # checkpoint and staged pages let it resume instead of re-fetching.
+        existing.status = "scheduled"
+        existing.stage = "queued"
+        existing.attempt = 0
+        existing.error = ""
+        existing.scheduled_for = utcnow()
+        existing.started_at = None
+        existing.finished_at = None
+        existing.heartbeat_at = None
+        existing.lock_owner = ""
+        existing.lock_expires_at = None
+        existing.channel_id = channel.id
+        existing.requeued_existing = True  # type: ignore[attr-defined]
+        audit(db, None, f"job.{mode}_requeue", "job", existing.id, {"window": window.key})
+        return existing
     job = Job(
-        key=f"{mode}:{channel.id}:{uuid.uuid4().hex[:10]}",
+        key=key,
         kind=mode,
         channel_id=channel.id,
         status="scheduled",
@@ -404,9 +437,30 @@ def enqueue_republish_job(
     return job
 
 
+def _abandoned(job: Job, now: datetime) -> bool:
+    """True only when the recorded owner can no longer be making progress.
+
+    A live local process keeps its lease even when a heartbeat was delayed, so
+    this never steals from an active worker. A ticket owned by another host is
+    only reclaimed after its explicit lease expires.
+    """
+    last = job.heartbeat_at or job.started_at or job.updated_at
+    quiet = last is None or (
+        (now - last).total_seconds() > settings.worker_heartbeat_timeout_seconds
+    )
+    alive = owner_process_alive(job.lock_owner)
+    if alive is True:
+        return False
+    if alive is False:
+        return quiet
+    if not (job.lock_owner or "").strip():
+        return quiet
+    return job.lock_expires_at is not None and job.lock_expires_at < now
+
+
 def release_expired_locks(db: Session, *, now: datetime | None = None) -> int:
     now = now or utcnow()
-    stale = list(
+    lease_expired = list(
         db.scalars(
             select(Job).where(
                 Job.status == "running",
@@ -415,6 +469,18 @@ def release_expired_locks(db: Session, *, now: datetime | None = None) -> int:
             )
         )
     )
+    # Never steal a lease from a local process that is provably still alive,
+    # even if its heartbeat or lease renewal was delayed. Remote owners cannot
+    # be probed, so their explicit lease expiry remains authoritative.
+    stale = [job for job in lease_expired if owner_process_alive(job.lock_owner) is not True]
+    # A crashed local worker must not block the desk for the full two-hour
+    # lease. Only reclaim when the recorded process is provably gone.
+    abandoned = [
+        job
+        for job in db.scalars(select(Job).where(Job.status == "running"))
+        if _abandoned(job, now)
+    ]
+    stale.extend(job for job in abandoned if job not in stale)
     for job in stale:
         job.status = "failed_retryable" if job.attempt < job.max_attempts else "failed_terminal"
         job.error = "Worker lease expired before the job finished."
@@ -422,6 +488,18 @@ def release_expired_locks(db: Session, *, now: datetime | None = None) -> int:
         job.lock_expires_at = None
         job.finished_at = now
         db.add(RetryAttempt(job_id=job.id, attempt=job.attempt, reason=job.error))
+    # A cancel request whose worker died must not leave a zombie: finish the
+    # cancellation, keeping the window and checkpoint available for a retry.
+    for job in db.scalars(select(Job).where(Job.status == "cancel_requested")):
+        if _abandoned(job, now):
+            job.status = "canceled"
+            job.stage = "canceled"
+            job.error = "Cancelled after the worker stopped; no partial edition was released."
+            job.lock_owner = ""
+            job.lock_expires_at = None
+            job.finished_at = now
+            db.add(RetryAttempt(job_id=job.id, attempt=job.attempt, reason=job.error))
+            stale.append(job)
     db.flush()
     return len(stale)
 
@@ -536,6 +614,7 @@ def process_job(
     worker_id: str,
     progress: Callable[[str, str], None] | None = None,
 ) -> dict:
+    db.info["durable_worker"] = True
     payload = json.loads(job.payload_json or "{}")
     if job.kind in {"sync_window", "collect_context"}:
         channel = db.get(Channel, job.channel_id) if job.channel_id else None
@@ -551,12 +630,13 @@ def process_job(
         )
         record = get_or_create_window(db, window, job_id=job.id)
         if not claim_window(db, record, owner=worker_id):
-            raise PublicationError("Another worker already collected this window.")
+            raise CollectionBusy("Collection already active. Waiting for the window owner.")
         # Commit the claim before retrieval: the gateway thread checkpoints each
         # page through its own connection and must not be blocked by our lock.
         db.commit()
         job.stage = "collection"
         job.heartbeat_at = utcnow()
+        db.commit()
         if progress:
             progress("collection", f"Collecting {window.label()}")
         rights = active_rights(db, channel.id)
@@ -649,33 +729,42 @@ def process_job(
     )
 
     def on_progress(stage: str, detail: str) -> None:
+        from ..operations import check_job_control
+        check_job_control(job.id)
         job.stage = stage
         job.heartbeat_at = utcnow()
         stages.append((stage, detail or ""))
         if progress:
             progress(stage, detail)
 
-    want_collect = bool(payload.get("collect")) and not channel.is_demo
+    want_collect = bool(payload.get("collect")) and not channel.is_demo and not job.edition_id
     if want_collect:
         record = get_or_create_window(db, window, job_id=job.id)
-        if not claim_window(db, record, owner=worker_id):
-            raise PublicationError(
-                "Another worker is already collecting this window. It will not be built twice."
+        previous = db.scalar(select(EditionWindowRecord).where(
+            EditionWindowRecord.channel_id == channel.id,
+            EditionWindowRecord.window_start == window.start,
+            EditionWindowRecord.window_end == window.end,
+            EditionWindowRecord.status.in_(["collected", "built", "awaiting_review", "committed"]),
+        ).order_by(EditionWindowRecord.id.desc()))
+        saved = json.loads(previous.stats_json or "{}") if previous else {}
+        if saved.get("complete"):
+            if active_rights(db, channel.id) is None:
+                raise PublicationError("Source authorization missing.")
+            stats = CollectionStats(**saved)
+            record.status = "collected"
+            record.stats_json = json.dumps(saved)
+        else:
+            if not claim_window(db, record, owner=worker_id):
+                raise CollectionBusy("Collection already active. Waiting for the window owner.")
+            db.commit()
+            on_progress("collection", f"Retrieving {window.label()}")
+            db.commit()
+            rights = active_rights(db, channel.id)
+            source = LiveTelegramSource(channel.handle or settings.telegram_source_username)
+            stats = collect_window(
+                db, channel, window, source, rights=rights,
+                actor_id=payload.get("actor_id"), job_id=job.id, record=record,
             )
-        db.commit()
-        on_progress("collection", f"Retrieving {window.label()}")
-        rights = active_rights(db, channel.id)
-        source = LiveTelegramSource(channel.handle or settings.telegram_source_username)
-        stats = collect_window(
-            db,
-            channel,
-            window,
-            source,
-            rights=rights,
-            actor_id=payload.get("actor_id"),
-            job_id=job.id,
-            record=record,
-        )
         collection_stats = stats.as_dict()
         db.flush()
         job.result_json = json.dumps({"collection": collection_stats}, ensure_ascii=False)
@@ -879,7 +968,7 @@ class WorkerStats:
     no_content: int = 0
 
 
-def worker_once(
+def _worker_once(
     db: Session,
     *,
     now: datetime | None = None,
@@ -916,6 +1005,29 @@ def worker_once(
         except Exception as exc:
             db.rollback()
             fresh = db.get(Job, job.id)
+            if isinstance(exc, CollectionBusy):
+                fresh.status = "scheduled"
+                fresh.stage = "waiting_for_collector"
+                fresh.error = str(exc)
+                fresh.attempt = max(0, fresh.attempt - 1)
+                fresh.scheduled_for = utcnow() + timedelta(seconds=30)
+                fresh.lock_owner = ""
+                fresh.lock_expires_at = None
+                db.commit()
+                continue
+            from ..operations import JobCanceled, StopRequested
+            if isinstance(exc, StopRequested):
+                fresh.status = "canceled" if isinstance(exc, JobCanceled) else "paused"
+                fresh.error = str(exc)
+                fresh.lock_owner = ""
+                fresh.lock_expires_at = None
+                fresh.attempt = max(0, fresh.attempt - 1)
+                for row in db.scalars(select(EditionWindowRecord).where(EditionWindowRecord.lock_owner == worker_id)):
+                    row.lock_owner = ""
+                    row.lock_expires_at = None
+                    row.status = "failed"
+                db.commit()
+                break
             logger.error(
                 "job_failed",
                 extra={
@@ -934,9 +1046,33 @@ def worker_once(
                     detail += f" [at {Path(last.filename).name}:{last.lineno} in {last.name}]"
                 # A deterministic pipeline/rights/publication refusal will not
                 # fix itself in five minutes; only unexpected errors retry.
-                retryable = not isinstance(exc, (PipelineError, PublicationError))
+                retryable = (not isinstance(exc, (PipelineError, PublicationError))
+                             and fresh.attempt < fresh.max_attempts)
+                # Release the persisted collection lease on failure; keep the
+                # retrieval cursor and staged pages for an exact-window retry.
+                for window_row in db.scalars(select(EditionWindowRecord).where(
+                    EditionWindowRecord.lock_owner == worker_id
+                )):
+                    window_row.lock_owner = ""
+                    window_row.lock_expires_at = None
+                    window_row.status = "failed"
                 fail_job(db, fresh, detail, retryable=retryable)
                 audit(db, None, "job.failed", "job", fresh.id, {"error": str(exc)[:500]})
                 db.commit()
             stats.failed += 1
     return stats
+
+
+def worker_once(db: Session, **kwargs) -> WorkerStats:
+    """All entry points share the same single OS ownership gate.
+
+    ``cli worker``, the detached web launch and the scheduled task all arrive
+    here, so a double click or a Task Scheduler overlap can never create two
+    competing collectors. A second caller gets ``WorkerBusy`` and simply
+    waits for the next pass.
+    """
+    from ..operations import check_stop, managed_service
+
+    check_stop()
+    with WorkerLease(), managed_service("worker"):
+        return _worker_once(db, **kwargs)

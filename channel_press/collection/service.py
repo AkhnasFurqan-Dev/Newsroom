@@ -171,6 +171,9 @@ class LiveTelegramSource:
             if on_page is not None:
                 on_page(FetchedPage(page=page_no, messages=messages, oldest_id=oldest_id))
 
+        # fetch_window re-authorizes and re-resolves the channel inside one
+        # bounded session operation, so no separate preflight connection is
+        # opened here: that would double Telegram I/O and session handovers.
         outcome = self.service.fetch_window(
             self.handle,
             window.start,
@@ -521,6 +524,8 @@ def collect_window(
         )
     stats = CollectionStats()
     record = record or get_or_create_window(db, window, job_id=job_id)
+    record_id, lock_owner = record.id, record.lock_owner
+    bind = db.get_bind()
     checkpoint = checkpoint_for(db, window)
     if checkpoint is not None:
         # The gateway thread may have advanced the checkpoint through its own
@@ -536,6 +541,8 @@ def collect_window(
     progress = {"fetched": len(staged)}
 
     def _on_page(page: FetchedPage) -> None:  # runs on the gateway thread
+        from ..operations import check_job_control
+        check_job_control(job_id)
         fresh: list[dict] = []
         for raw in page.messages:
             posted = parse_datetime(raw.get("date"))
@@ -546,10 +553,12 @@ def collect_window(
         # page, which the id-keyed merge below de-duplicates.
         append_staged(staged_file, fresh, page.page, staged_lock)
         progress["fetched"] += len(fresh)
-        try:
-            from ..db import SessionLocal
+        from ..db import retry_busy
 
-            with SessionLocal() as side:
+        def persist_page():
+            from sqlalchemy import update
+            from ..models import Job
+            with Session(bind=bind, expire_on_commit=False) as side:
                 save_checkpoint(
                     side,
                     window,
@@ -558,26 +567,40 @@ def collect_window(
                     oldest_id=page.oldest_id,
                     fetched=progress["fetched"],
                 )
+                if lock_owner:
+                    side.execute(update(EditionWindowRecord).where(
+                        EditionWindowRecord.id == record_id,
+                        EditionWindowRecord.lock_owner == lock_owner,
+                    ).values(lock_expires_at=utcnow() + timedelta(minutes=60), updated_at=utcnow()))
+                if job_id:
+                    side.execute(update(Job).where(Job.id == job_id, Job.status == "running").values(
+                        heartbeat_at=utcnow(), lock_expires_at=utcnow() + timedelta(minutes=settings.worker_lock_minutes)))
                 side.commit()
-        except Exception:  # noqa: BLE001 - checkpointing must not break retrieval
-            pass
+        retry_busy(persist_page)
 
+    # Any dirty job progress/claim must be durable BEFORE network I/O. Otherwise
+    # autoflush holds the only SQLite writer while the gateway checkpoints.
+    db.commit()
     try:
         result = source.fetch_window(window, on_page=_on_page, resume_offset=resume_offset)
     except Exception as exc:
+        db.expire_all()
+        checkpoint = checkpoint_for(db, window)
         save_checkpoint(
             db,
             window,
             adapter=source.name,
             page=checkpoint.pages if checkpoint else 0,
-            oldest_id=resume_offset or None,
+            oldest_id=None,
             fetched=progress["fetched"],
             status="partial",
             error=f"{type(exc).__name__}: {str(exc)[:400]}",
         )
         record.status = "failed"
+        record.lock_owner = ""
+        record.lock_expires_at = None
         record.updated_at = utcnow()
-        db.flush()
+        db.commit()
         raise
 
     # Merge staged pages from a previous attempt with this attempt's results.
@@ -655,8 +678,6 @@ def collect_window(
         fetched=stats.fetched,
         status="complete" if result.complete else "partial",
     )
-    if result.complete:
-        staged_file.unlink(missing_ok=True)
     audit(
         db,
         None,
@@ -673,6 +694,11 @@ def collect_window(
         },
     )
     db.flush()
+    db.commit()
+    if result.complete:
+        staged_file.unlink(missing_ok=True)
+    else:
+        raise CollectionError("Collection incomplete: history limit reached. Resume before building.")
     return stats
 
 

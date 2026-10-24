@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     telegram_session_path: str = "./data/telegram.session"
     telegram_source_username: str = ""
     telegram_login_timeout_seconds: int = 300
+    telegram_preflight_timeout_seconds: float = 12
     telegram_history_limit: int = 5000
     telegram_download_media: bool = True
     telegram_max_video_mb: int = 120
@@ -63,6 +64,7 @@ class Settings(BaseSettings):
     disk_quota_mb: int = 4096
 
     worker_lock_minutes: int = 120
+    worker_heartbeat_timeout_seconds: int = 180
     login_max_attempts: int = 5
     login_window_minutes: int = 15
     max_import_bytes: int = 40 * 1024 * 1024
