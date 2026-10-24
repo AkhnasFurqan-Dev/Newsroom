@@ -156,6 +156,7 @@ session-present states without printing any secret value.
 | Restore (app stopped) | `python -m channel_press.cli restore --archive <zip>` |
 | Environment report | `python -m channel_press.cli diagnostics` |
 | Health (configured vs tested) | `python -m channel_press.operations health` |
+| Start the complete local desk | `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1` |
 | Graceful stop | `powershell -ExecutionPolicy Bypass -File .\scripts\stop-services.ps1` |
 | Controlled restart | `powershell -ExecutionPolicy Bypass -File .\scripts\restart-services.ps1` |
 
@@ -170,6 +171,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-task.ps1
 
 The task calls `run-worker.ps1`, which performs one short-lived worker pass and
 exits. No model or server process stays resident while the desk is idle.
+
+For normal interactive use, run `scripts\start.ps1`. It validates the
+configuration and database, stops an old managed instance, starts the web
+service detached, launches one background worker pass to recover queued or
+stale jobs, waits for the login page to answer, and opens the local URL in
+Google Chrome. Use `scripts\stop-services.ps1` when finished; it requests a
+cooperative stop and waits for the web service or in-flight worker operation
+to release its resources. The startup worker is intentionally one-shot: local
+models are not kept loaded while the desk is idle.
 
 `stop-services.ps1` requests a graceful stop and waits; it never kills unrelated
 processes. `restart-services.ps1` validates configuration and the database, stops

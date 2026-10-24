@@ -549,3 +549,23 @@ evidence are `CONCURRENCY_RECOVERY_CONTRACT.md` and
 **Next step:** owner completes the local Telegram login on the machine holding the
 session, records rights, and runs one small supervised cutoff edition with
 auto-release off; then mark C17/C18.
+
+## Post-M14 startup and layout recovery fix (2026-10-24)
+
+- `scripts/start.ps1` now runs the controlled restart, waits for the managed web
+  service, starts one background worker pass for queued/stale jobs, and opens the
+  local URL in Google Chrome (falling back to the default browser only when
+  Chrome is not installed).
+- The print renderer now selects installed Chrome, installed Edge, or bundled
+  Playwright Chromium in that order. If no browser can launch, it reports the
+  exact installation remedy instead of failing with an unexplained browser
+  channel error.
+- Updated `README.md` and `TROUBLESHOOTING.md` with the complete start/stop
+  workflow, stale layout-job recovery, and worker log locations.
+- **Verification:** `pytest tests\test_layout.py tests\test_edition_e2e.py
+  tests\test_concurrency_recovery.py` — 39 passed; `ruff check channel_press
+  tests` — passed. The real startup script reached
+  `http://127.0.0.1:8765/` and launched the recovery worker. The existing live
+  24-story job exceeded the interactive command timeout while rendering; the
+  generated staged PDF was 5 pages at 792 × 1224 pt, but it was intentionally
+  not promoted because the worker process was interrupted.

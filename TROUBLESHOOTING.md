@@ -377,7 +377,27 @@ is to fix the layout.
 change the print CSS. Verify embedded fonts in the manifest after the change.
 
 **Chrome failed to launch** — install Google Chrome, close a hung Chrome process,
-and re-run. Playwright uses `channel="chrome"`, not a downloaded Chromium.
+and re-run. The renderer first uses installed Google Chrome, then Microsoft
+Edge, and finally Playwright's bundled Chromium if it is installed. If none is
+available, install Google Chrome or run
+`.\.venv\Scripts\python.exe -m playwright install chromium`.
+
+**The edition is still a draft and the job says `layout`** — this means the
+worker reached the PDF stage but did not finish it. Run
+`powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1` and wait for the
+background worker pass to finish. Open **Jobs** and use **Retry / resume job**
+if the previous worker was interrupted. A stale worker lease is recovered on
+the next worker pass; the old error text may remain on the job until the retry
+starts. The edition is not publishable until its page count, PDF path and
+quality checks appear on the edition page.
+
+**The startup window opens but no PDF appears** — check
+`data\logs\worker-YYYYMMDD.log` and the newest `data\logs\worker-*.stderr`.
+The web service and worker are separate processes. A large live window can
+take several minutes because each article is drafted, audited and then laid
+out; do not start a second worker pass while one is active. Use
+`.\.venv\Scripts\python.exe -m channel_press.operations owners` to verify
+managed ownership.
 
 ## E-paper and QR problems
 

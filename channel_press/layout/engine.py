@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -560,11 +561,60 @@ def render_edition_pdf(
     html_path.write_text(html, encoding="utf-8")
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            channel="chrome",
-            headless=True,
-            args=["--allow-file-access-from-files", "--disable-gpu"],
-        )
+        launch_attempts: list[dict[str, str]] = []
+        chrome_candidates = [
+            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
+            / "Google"
+            / "Chrome"
+            / "Application"
+            / "chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
+            / "Google"
+            / "Chrome"
+            / "Application"
+            / "chrome.exe",
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "Google"
+            / "Chrome"
+            / "Application"
+            / "chrome.exe",
+        ]
+        edge_candidates = [
+            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
+            / "Microsoft"
+            / "Edge"
+            / "Application"
+            / "msedge.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
+            / "Microsoft"
+            / "Edge"
+            / "Application"
+            / "msedge.exe",
+        ]
+        browser_options = {"headless": True, "args": ["--allow-file-access-from-files", "--disable-gpu"]}
+        browser = None
+        for candidate in chrome_candidates:
+            if candidate.exists():
+                launch_attempts.append({"browser": "chrome", "path": str(candidate)})
+                browser = playwright.chromium.launch(channel="chrome", **browser_options)
+                break
+        if browser is None:
+            for candidate in edge_candidates:
+                if candidate.exists():
+                    launch_attempts.append({"browser": "edge", "path": str(candidate)})
+                    browser = playwright.chromium.launch(channel="msedge", **browser_options)
+                    break
+        if browser is None:
+            launch_attempts.append({"browser": "playwright-chromium", "path": ""})
+            try:
+                browser = playwright.chromium.launch(**browser_options)
+            except Exception as exc:
+                attempted = ", ".join(item["browser"] for item in launch_attempts)
+                raise RuntimeError(
+                    "No supported print browser could be launched. "
+                    f"Tried {attempted}; install Google Chrome or run "
+                    "'playwright install chromium'."
+                ) from exc
         try:
             page = browser.new_page(viewport={"width": 1056, "height": 1632}, device_scale_factor=1)
             page.goto(html_path.as_uri(), wait_until="load", timeout=timeout_ms)
