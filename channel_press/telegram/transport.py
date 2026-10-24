@@ -142,9 +142,9 @@ class TelethonTransport:
         if self._client is not None:
             try:
                 await self._client.disconnect()
-            except Exception:  # noqa: BLE001
-                pass
-            self._client = None
+            finally:
+                self._client.session.close()
+                self._client = None
 
     async def is_authorized(self) -> bool:
         if self._client is None:

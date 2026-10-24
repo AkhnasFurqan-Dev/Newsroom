@@ -103,7 +103,6 @@ from ..publishing.service import (
 from ..scheduling.service import (
     DuplicateWindowError,
     WorkerBusy,
-    WorkerLease,
     enqueue_collect_job,
     enqueue_due_jobs,
     enqueue_manual_job,
@@ -132,6 +131,26 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 def _startup() -> None:
     settings.ensure_dirs()
     upgrade_database()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    telegram_service.close()
+
+
+from sqlalchemy.exc import OperationalError  # noqa: E402
+
+
+@app.exception_handler(OperationalError)
+async def database_busy_handler(request: Request, exc: OperationalError):
+    from ..db import is_busy
+    if is_busy(exc):
+        return HTMLResponse(
+            "Database temporarily busy. Your change was not saved. Retry shortly.",
+            status_code=503, headers={"Retry-After": "2"},
+        )
+    logger.error("database_error", exc_info=(type(exc), exc, exc.__traceback__))
+    return HTMLResponse("Database operation failed. Consult the private web log.", status_code=500)
 
 
 def _env() -> Environment:
@@ -289,13 +308,12 @@ def _launch_worker(background: bool = True) -> str:
     """Start the one-shot worker outside this web request."""
     if os.environ.get("CHANNEL_PRESS_SYNC_JOBS") == "1":
         try:
-            with WorkerLease():
-                with SessionLocal() as db:
-                    stats = worker_once(db, max_jobs=10)
-                    db.commit()
-                return f"Worker completed: {stats.processed} processed, {stats.published} published."
+            with SessionLocal() as db:
+                stats = worker_once(db, max_jobs=10)
+                db.commit()
+            return f"Worker completed: {stats.processed} processed, {stats.published} published."
         except WorkerBusy:
-            return "Worker is already running."
+            return "Worker is already running; this job stays queued for that pass."
         except Exception as exc:  # noqa: BLE001
             logger.exception("worker_launch_failed", extra={"kind": "sync"})
             return f"Worker error: {type(exc).__name__}: {str(exc)[:200]}"
@@ -890,7 +908,26 @@ def _live_handle(channel: Channel) -> str:
 
 
 def _telegram_error(exc: Exception) -> str:
+    """Actionable, redacted copy; Telegram errors already explain the remedy."""
+    if isinstance(exc, TelegramTransportError):
+        return redact(str(exc))[:400]
     return redact(f"{type(exc).__name__}: {exc}")[:400]
+
+
+def _telegram_ready(db: Session, channel: Channel) -> str:
+    """Bounded read-only preflight; return '' when Telegram is Ready.
+
+    The database write transaction is committed first so the web never holds
+    the SQLite writer across the network call.
+    """
+    db.commit()
+    try:
+        telegram_service.preflight(
+            channel.handle, expected_id=str(channel.telegram_channel_id or "")
+        )
+    except TelegramTransportError as exc:
+        return _telegram_error(exc)
+    return ""
 
 
 def _daily_schedule(db: Session, channel: Channel) -> EditionSchedule | None:
@@ -989,7 +1026,8 @@ def telegram_test(
             error="Record the rights declaration before connecting to a live source.",
         )
     try:
-        info = telegram_service.resolve_channel(handle)
+        db.commit()
+        info = telegram_service.preflight(handle, expected_id=str(channel.telegram_channel_id or ""))
     except Exception as exc:  # noqa: BLE001 - surfaced to the operator
         return _redirect(f"/sources/{channel.id}/telegram", error=_telegram_error(exc))
     channel.telegram_channel_id = int(info["id"])
@@ -1007,7 +1045,7 @@ def telegram_test(
     db.commit()
     return _redirect(
         f"/sources/{channel.id}/telegram",
-        f"Resolved {channel.handle} (stable id {channel.telegram_channel_id}).",
+        f"Telegram Ready: {channel.handle}, verified {info['checked_at']}.",
     )
 
 
@@ -1133,6 +1171,12 @@ def telegram_context(
             f"/sources/{channel.id}/telegram",
             error="Context import blocked: record the content-rights declaration first.",
         )
+    blocked = _telegram_ready(db, channel)
+    if blocked:
+        return _redirect(
+            f"/sources/{channel.id}/telegram",
+            error=f"Context import not queued. {blocked}",
+        )
     now = utcnow()
     window = EditionWindow(
         channel_id=channel.id,
@@ -1194,6 +1238,18 @@ def telegram_sync(
             end=now,
             timezone=_timezone(db.get(PublicationProfile, 1)),
             cutoff_local=settings.cutoff_local_time,
+        )
+    blocked = _telegram_ready(db, channel)
+    if blocked:
+        existing = db.scalar(select(Job).where(Job.key == f"sync_window:{window.key}"))
+        if existing is not None:
+            return _redirect(
+                f"/jobs/{existing.id}",
+                f"This window already has job #{existing.id}; no new collection was queued. {blocked}",
+            )
+        return _redirect(
+            f"/sources/{channel.id}/telegram",
+            error=f"Sync not queued. {blocked}",
         )
     job = enqueue_collect_job(
         db,
@@ -1585,6 +1641,15 @@ def build_submit(
             f"/build?channel={channel.id}",
             error="Build blocked: this channel has no active rights declaration.",
         )
+    ready = None
+    if not channel.is_demo and collect == "1":
+        db.commit()
+        try:
+            ready = telegram_service.preflight(
+                channel.handle, expected_id=str(channel.telegram_channel_id or "")
+            )
+        except TelegramTransportError as exc:
+            return _redirect(f"/build?channel={channel.id}", error=str(exc))
     try:
         job = enqueue_manual_job(
             db,
@@ -1621,7 +1686,8 @@ def build_submit(
         launched = f"This window already has job #{job.id} ({job.status.replace('_', ' ')}); no duplicate was created."
     else:
         launched = _launch_worker()
-    return _redirect(f"/jobs/{job.id}", f"Build queued. {launched}")
+    preflight_note = (f"Telegram Ready: @{ready['channel']} ({ready['checked_at']}). " if ready else "")
+    return _redirect(f"/jobs/{job.id}", f"{preflight_note}Build queued. {launched}")
 
 
 @app.get("/editions")
@@ -2074,7 +2140,7 @@ def job_retry(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
-    if job.status not in {"failed_retryable", "failed_terminal", "awaiting_review"}:
+    if job.status not in {"failed_retryable", "failed_terminal", "awaiting_review", "paused"}:
         return _redirect(f"/jobs/{job.id}", error="Only failed or awaiting-review jobs can be retried.")
     if job.status == "awaiting_review":
         return _redirect(f"/jobs/{job.id}", error="Use the edition page to release or re-render a reviewed edition.")
@@ -2105,7 +2171,12 @@ def job_cancel(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
-    if job.status not in {"scheduled", "failed_retryable", "failed_terminal"}:
+    if job.status == "running":
+        job.status = "cancel_requested"
+        audit(db, user, "job.cancel_requested", "job", job.id)
+        db.commit()
+        return _redirect(f"/jobs/{job.id}", "Cancellation requested; the worker will stop at a safe checkpoint.")
+    if job.status not in {"scheduled", "failed_retryable", "failed_terminal", "paused"}:
         return _redirect(f"/jobs/{job.id}", error="This job cannot be cancelled in its current state.")
     job.status = "canceled"
     job.stage = "canceled"
@@ -2407,3 +2478,44 @@ async def unhandled_error(request: Request, exc: Exception):
         },
         status_code=500,
     )
+@app.post("/system/check")
+def system_check(user: User = Depends(require_role("owner")),
+                 db: Session = Depends(session_dependency),
+                 _csrf: None = Depends(require_csrf)):
+    from ..operations import health
+    result = health()
+    channel = db.scalar(select(Channel).where(Channel.is_demo.is_(False)).limit(1))
+    result["web"] = "Connected and tested"
+    if channel and active_rights(db, channel.id):
+        db.commit()
+        try:
+            result["source_channel"] = telegram_service.preflight(
+                channel.handle, expected_id=str(channel.telegram_channel_id or ""))
+            result["telegram"] = telegram_service.status(probe=False)
+        except TelegramTransportError as exc:
+            result["source_channel"] = str(exc)
+    else:
+        result["source_channel"] = "Source authorization missing"
+    return result
+
+
+@app.post("/system/restart")
+def system_restart(confirm: str = Form(""),
+                   user: User = Depends(require_role("owner")),
+                   db: Session = Depends(session_dependency),
+                   _csrf: None = Depends(require_csrf)):
+    if confirm != "restart":
+        raise HTTPException(400, "Confirm the service restart first.")
+    if os.name != "nt":
+        raise HTTPException(409, "Use the service scripts on the Windows host.")
+    audit(db, user, "services.restart", "system", 0)
+    db.commit()
+    log = settings.data_dir / "logs" / "service-restart.log"
+    with log.open("ab") as output:
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+             str(BASE_DIR / "scripts" / "restart-services.ps1")],
+            cwd=BASE_DIR, stdout=output, stderr=output,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+        )
+    return HTMLResponse("Restart requested. Reopen the dashboard shortly. Paused jobs can be resumed in Jobs.")

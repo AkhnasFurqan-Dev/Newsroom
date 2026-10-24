@@ -13,6 +13,22 @@
   </div>
 </div>
 
+{% if can.own %}
+<section class="card">
+  <h2>System Health</h2>
+  <pre id="system-health" aria-live="polite">Web server: responding. Other connections: not tested.</pre>
+  <form><input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button type="button" class="btn" data-health-check>Check Connections</button>
+  </form>
+  <form method="post" action="/system/restart" onsubmit="return confirm('Pause active work and restart Channel Press services?')">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="confirm" value="restart">
+    <button class="btn btn--ghost">Restart Channel Press Services</button>
+  </form>
+</section>
+<script src="/static/js/health.js" defer></script>
+{% endif %}
+
 <div class="grid grid--4">
   <div class="card"><div class="card__label">Source posts</div><div class="card__value">{{ counts.posts }}</div><div class="card__hint">Authorized imports</div></div>
   <div class="card"><div class="card__label">Articles</div><div class="card__value">{{ counts.articles }}</div><div class="card__hint">{{ counts.stories }} clustered stories</div></div>

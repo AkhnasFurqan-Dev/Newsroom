@@ -56,14 +56,14 @@
     {% if can.operate %}
       <form method="post" action="/jobs/{{ job.id }}/retry" class="stack">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" class="btn--ghost">Retry failed job</button>
+        <button type="submit" class="btn--ghost">Retry / resume job</button>
       </form>
       <form method="post" action="/jobs/{{ job.id }}/cancel" class="stack" style="margin-top:8px">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" class="btn--danger">Cancel queued job</button>
+        <button type="submit" class="btn--danger">Cancel job</button>
       </form>
     {% endif %}
-    <p class="small">A failed layout job leaves no published edition. Retry resumes from a fresh transactional build and cannot create a duplicate release for the same cutoff.</p>
+    <p class="small">Running jobs stop at a safe checkpoint. Paused or failed jobs retain their exact window and saved draft. Retry / resume continues the same edition; it does not release it.</p>
 
     <h2>Timing</h2>
     <div class="small">
@@ -79,7 +79,7 @@
 <script>
 (function () {
   const id = {{ job.id }};
-  const terminal = new Set(["published", "failed_terminal", "canceled", "awaiting_review"]);
+  const terminal = new Set(["published", "failed_terminal", "canceled", "paused", "completed", "no_content", "awaiting_review"]);
   const status = document.getElementById("job-status");
   const statusText = document.getElementById("job-status-text");
   const stage = document.getElementById("job-stage");

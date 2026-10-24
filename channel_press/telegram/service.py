@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from ..config import settings
+from ..locking import FileLease, ResourceBusy
 from ..timeutil import parse_datetime, utcnow
 from .transport import (
     PageResult,
@@ -116,23 +117,53 @@ class TelegramService:
         self._connected = False
         self._pending_phone = ""
         self._pending_hash = ""
+        self._thread_lock = threading.Lock()
 
     # -- infrastructure ----------------------------------------------------
 
     def _ensure_loop(self) -> asyncio.AbstractEventLoop:
-        if self._loop is None:
-            loop = asyncio.new_event_loop()
-            thread = threading.Thread(target=loop.run_forever, name="telegram-gateway", daemon=True)
-            thread.start()
-            self._loop = loop
-            self._thread = thread
+        with self._thread_lock:
+            if self._loop is None:
+                loop = asyncio.new_event_loop()
+                thread = threading.Thread(target=loop.run_forever, name="telegram-gateway", daemon=True)
+                thread.start()
+                self._loop = loop
+                self._thread = thread
         return self._loop
+
+    async def _operation(self, coro: Any, timeout: float) -> Any:
+        # Reject competing operations, including other processes, before opening
+        # Telethon SQLite. Transfer ownership only after disconnect has completed.
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        if self._lock.locked():
+            coro.close()
+            raise TelegramTransportError("Telegram session currently busy. Retry after collection finishes.")
+        async with self._lock:
+            lease = FileLease(Path(str(self.session_path.resolve()) + ".owner.lock"))
+            try:
+                lease.__enter__()
+            except ResourceBusy as exc:
+                coro.close()
+                raise TelegramTransportError("Telegram session currently busy in another process.") from exc
+            try:
+                return await asyncio.wait_for(coro, timeout=timeout)
+            except TimeoutError as exc:
+                raise TelegramTransportError("Telegram connection timed out. Retry when the network is available.") from exc
+            finally:
+                try:
+                    if self._transport is not None:
+                        await self._transport.disconnect()
+                finally:
+                    self._transport = None
+                    self._connected = False
+                    lease.__exit__(None, None, None)
 
     def _submit(self, coro: Any, *, timeout: float = 90.0) -> Any:
         loop = self._ensure_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        future = asyncio.run_coroutine_threadsafe(self._operation(coro, timeout), loop)
         try:
-            return future.result(timeout=timeout)
+            return future.result(timeout=timeout + 15)
         except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TelegramTransportError("The Telegram request timed out.") from exc
@@ -155,11 +186,22 @@ class TelegramService:
         if self._loop is None:
             return
         try:
-            self._submit(self._shutdown(), timeout=10)
+            future = asyncio.run_coroutine_threadsafe(self._shutdown(), self._loop)
+            future.result(timeout=15)
         except Exception:  # noqa: BLE001
-            pass
+            return  # Never close a loop still cleaning up a session owner.
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
+        self._loop.close()
+        self._loop = None
+        self._thread = None
+        self._lock = None
 
     async def _shutdown(self) -> None:
+        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         if self._transport is not None:
             await self._transport.disconnect()
             self._transport = None
@@ -227,14 +269,38 @@ class TelegramService:
 
     def status(self, *, probe: bool = False) -> dict:
         now = time.monotonic()
-        if not probe and self._status_cache and now - self._status_at < 60:
-            cached = dict(self._status_cache)
-            cached["cached"] = True
-            return cached
-        result = self._submit(self._status(probe=probe), timeout=45)
+        if not probe:
+            return dict(self._status_cache or {
+                "credentials_configured": self.credentials_configured(),
+                "session_present": self.session_present(),
+                "authenticated": False, "account": None, "checked_at": None,
+                "detail": "Connection not tested. Use Test source connection."
+                if self.credentials_configured() else "API id/hash are not configured.",
+            }, cached=True)
+        result = self._submit(self._status(probe=True), timeout=settings.telegram_preflight_timeout_seconds)
         result["cached"] = False
         self._status_cache = result
         self._status_at = now
+        return result
+
+    def preflight(self, handle: str, *, expected_id: str = "") -> dict:
+        return self._submit(self._preflight(handle, expected_id),
+                            timeout=settings.telegram_preflight_timeout_seconds)
+
+    async def _preflight(self, handle: str, expected_id: str) -> dict:
+        if self._factory is None and not self.session_present():
+            raise TelegramAuthError("Telegram authenticated session is missing. Sign in locally.")
+        transport = await self._authorized_transport()
+        info = await transport.resolve(normalize_handle(handle))
+        if expected_id and str(info["id"]).removeprefix("-100") != str(expected_id).removeprefix("-100"):
+            raise TelegramChannelError("Channel identity changed. Verify the intended source before collection.")
+        await transport.page(normalize_handle(handle), limit=1)
+        result = {**info, "detail": "Telegram Ready", "channel": info["username"],
+                  "checked_at": utcnow().isoformat()}
+        self._status_cache = {"credentials_configured": True, "session_present": True,
+                              "authenticated": True, "account": None,
+                              "detail": f"Telegram Ready: @{info['username']}",
+                              "checked_at": result["checked_at"]}
         return result
 
     # -- login -------------------------------------------------------------
