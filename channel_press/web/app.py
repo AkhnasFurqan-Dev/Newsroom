@@ -1475,6 +1475,54 @@ def media_preview(
     return FileResponse(Path(candidate))
 
 
+@app.get("/media/{media_id}/original")
+def media_original(
+    media_id: int,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+):
+    """Download the stored original for editorial inspection.
+
+    Preview routes compress and can substitute a derivative; this route serves
+    the exact file the channel published so an editor can verify crop, print
+    sharpness and caption against the source. It is not a public endpoint: the
+    caller needs editorial access to the channel and, for a real channel, a
+    current rights grant. Generated derivative files are never exposed as
+    "originals".
+    """
+    media = db.get(PostMedia, media_id)
+    if media is None:
+        raise HTTPException(404, "Media not found.")
+    post = db.get(SourcePost, media.post_id)
+    if post is None:
+        raise HTTPException(404, "Source post not found.")
+    channel = _channel_or_404(db, post.channel_id, user, "editor")
+    if not channel.is_demo:
+        grant = active_rights(db, channel.id)
+        if grant is None or grant.revoked_at is not None:
+            raise HTTPException(403, "No active content-rights grant covers this asset.")
+    original = (media.original_path or "").strip()
+    if not original:
+        raise HTTPException(404, "No stored original is available. Prepare the media cache first.")
+    path = Path(original)
+    try:
+        resolved = path.resolve()
+        root = settings.media_dir.resolve()
+    except OSError:
+        raise HTTPException(404, "The stored original is not readable.") from None
+    if root not in resolved.parents:
+        raise HTTPException(403, "Stored media outside the managed cache is not downloadable.")
+    if not resolved.is_file():
+        raise HTTPException(404, "The stored original is missing from the local cache.")
+    safe_name = f"media-{media.id}{resolved.suffix.lower() or '.bin'}"
+    return FileResponse(
+        resolved,
+        filename=safe_name,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @app.get("/stories")
 def stories_page(
     request: Request,
@@ -2041,6 +2089,7 @@ def edition_detail(
         )
         media_rows = article_media(db, selected.id)
         lead = next((row for row in media_rows if row.role == "lead" and row.selected), None)
+        supporting = next((row for row in media_rows if row.role == "supporting" and row.selected), None)
         alternatives = rank_media(db, story) if story is not None else []
         if story is not None:
             allowed = {choice.media.id for choice in alternatives}
@@ -2060,6 +2109,7 @@ def edition_detail(
             "external": external,
             "media_rows": media_rows,
             "lead_media": lead,
+            "supporting_media": supporting,
             "alternatives": alternatives,
             "history": history,
             "published_snapshot": published_snapshot,
@@ -2161,6 +2211,12 @@ def edition_article_save(
     alt_caption: str = Form(""),
     alt_credit: str = Form(""),
     remove_media: str = Form(""),
+    supporting_media_id: str = Form(""),
+    supporting_caption: str = Form(""),
+    supporting_credit: str = Form(""),
+    alt_supporting_caption: str = Form(""),
+    alt_supporting_credit: str = Form(""),
+    remove_supporting: str = Form(""),
     lock: str = Form(""),
     user: User = Depends(require_role("editor")),
     db: Session = Depends(session_dependency),
@@ -2209,6 +2265,27 @@ def edition_article_save(
                 article_id=article.id,
                 caption=media_caption,
                 credit=media_credit,
+            )
+        if remove_supporting == "1":
+            clear_article_media(db, article_id=article.id, role="supporting")
+        elif str(supporting_media_id).strip().isdigit() and story is not None:
+            apply_media_choice(
+                db,
+                article_id=article.id,
+                story=story,
+                media_id=int(supporting_media_id),
+                target_dir=settings.media_dir,
+                caption=(alt_supporting_caption or supporting_caption) or None,
+                credit=(alt_supporting_credit or supporting_credit) or None,
+                role="supporting",
+            )
+        elif supporting_caption or supporting_credit:
+            update_media_caption(
+                db,
+                article_id=article.id,
+                caption=supporting_caption,
+                credit=supporting_credit,
+                role="supporting",
             )
         from ..editorial.revisions import mark_preview_stale
 

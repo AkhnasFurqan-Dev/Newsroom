@@ -855,3 +855,62 @@ edited or released in this phase.
   server never receives it).
 - A quality-warning preview is allowed so editors can inspect a broken page;
   release remains strict.
+
+---
+
+## Phase B — media control and printed QR citations
+
+**Goal:** stop printing long URL lists, give editors real control over the
+pictures the paper prints, and never expose a private asset as a public link.
+
+**Citations**
+
+- `channel_press/publishing/qr.py` adds `citation_code()`, a self-contained
+  0.85in QR image emitted as a PNG data URI. It accepts only a syntactically
+  public HTTP(S) destination: loopback, `file:`, RFC1918 and placeholder
+  addresses are rejected before encoding.
+- The printed appendix now prints a compact QR plus a short scan label instead
+  of a full URL. Where no public direct source post exists (fixture messages,
+  unverified external pages) it prints an explicit "No public link" /
+  "External link not printed" label rather than an invented or local address.
+- Long inline source links were removed from the section records; those now say
+  "public post (scan appendix)".
+- `manifest.json` keeps the full digital provenance (`url`, `qr_target`,
+  `qr_printed`, `qr_reason`, `message_id`, timestamps) while stripping the QR
+  image bytes so JSON stays readable.
+
+**Media manager**
+
+- The edition workspace shows the current lead image, a captioned/credited
+  editor override, a remove control, and ranked alternatives with preview
+  thumbnails, dimensions, sensitivity and eligibility state.
+- A supporting-media slot was added: explicit editor choice only, never
+  auto-selected. Briefs and narrow rows never take a second picture.
+- `apply_media_choice(role="supporting")` stores a separate derivative and
+  caption/credit set; the renderer prints it as a smaller second figure.
+- `GET /media/{id}/original` serves the exact stored source file as a private
+  attachment to editors who can access the channel and, for a real channel,
+  hold a current rights grant. Files outside the managed media cache are
+  refused even if a database row points there.
+- Non-documentary/promotional assets remain blocked for real channels. The
+  synthetic demo channel may select its labelled fixture plates.
+
+**Verification**
+
+- `tests/test_citations.py` (5 tests): rejects loopback/private/file targets,
+  round-trips a public Telegram URL through QR encode/decode, never invents a
+  target for fixture or unverified entries, decodes the printed appendix QR
+  from a 200dpi render and measures it in the 0.6–1.1in band, and proves a
+  fixture edition prints no fake code.
+- `tests/test_editorial_workspace.py` gained supporting-media add/remove and
+  original-download tests, including refusal of a path outside the cache.
+- `.\\.venv\\Scripts\\python.exe -m pytest -q -p no:warnings` → green
+  (all tests; 2 live-Ollama skips).
+- `.\\.venv\\Scripts\\python.exe -m ruff check channel_press tests alembic` →
+  **All checks passed!**
+
+**Fixture vs real channel**
+
+QR tests use a synthetic `https://t.me/example_channel/101` target attached to
+a fixture post and a demo edition. No real Telegram post was downloaded,
+published or linked in this phase.

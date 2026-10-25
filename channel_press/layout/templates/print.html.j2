@@ -183,7 +183,7 @@
           <h4>Messages cited</h4>
           <ul>
             {% for message in ctx.messages %}
-            <li><span class="msg">Msg {{ message.message_id }}</span> {{ message.date }}{% if message.url %} · <a href="{{ message.url }}">source</a>{% endif %}</li>
+            <li><span class="msg">Msg {{ message.message_id }}</span> {{ message.date }}{% if message.url %} · public post (scan appendix){% endif %}</li>
             {% endfor %}
           </ul>
           <p class="section-record__check">{{ ctx.claims }} claims checked · {{ ctx.corrections }} correction(s) · {{ ctx.unverified }} explicitly unverified · {{ ctx.high_risk }} risk-tagged.</p>
@@ -207,7 +207,7 @@
     </div>
     <table class="source-table">
       <thead>
-        <tr><th>Ref</th><th>Published (UTC)</th><th>Source message</th><th>Item</th><th>Link / status</th></tr>
+        <tr><th>Ref</th><th>Published (UTC)</th><th>Source message</th><th>Item</th><th>Citation</th></tr>
       </thead>
       <tbody>
         {% for entry in appendix_entries %}
@@ -215,8 +215,15 @@
           <td class="ref">{{ entry.ref }}</td>
           <td>{{ entry.date }}</td>
           <td>{{ entry.message_id if entry.message_id is not none else '—' }}</td>
-          <td>{{ entry.article }}{% if entry.language and entry.language != 'en' %} <span class="lang">[{{ entry.language }}]</span>{% endif %}</td>
-          <td class="url">{% if entry.url %}<a href="{{ entry.url }}">{{ entry.url }}</a>{% else %}Fixture message — no public URL{% endif %}{% if entry.kind == 'external_link_unverified' %}<br><em>External link — not independently verified</em>{% endif %}</td>
+          <td>{{ entry.article }}{% if entry.language and entry.language != 'en' %} <span class="lang">[{{ entry.language }}]</span>{% endif %}{% if entry.kind == 'external_link_unverified' %}<div class="qr-label">{{ entry.title or entry.publisher or 'External reference' }} · not independently verified</div>{% endif %}</td>
+          <td class="qr">
+            {% if entry.qr_data_uri %}
+            <img class="source-qr" src="{{ entry.qr_data_uri }}" alt="QR code for source message {{ entry.message_id }} from {{ profile.channel_handle or 'the source channel' }}" width="84" height="84">
+            <div class="qr-label">{{ entry.citation_label }}</div>
+            {% else %}
+            <span class="no-qr">{{ entry.citation_label }}</span>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

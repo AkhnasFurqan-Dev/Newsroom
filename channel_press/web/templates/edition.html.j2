@@ -188,7 +188,9 @@
           <div class="ws-media__thumb"><img src="/media/{{ selected_context.lead_media.media_id }}/preview" alt="Current lead media" loading="lazy"></div>
           {% endif %}
           <div class="stack">
-            <div class="small">Current: {{ selected_context.lead_media.graphic_kind|status_label }}{% if selected_context.lead_media.checksum %} · <span class="mono">{{ selected_context.lead_media.checksum[:12] }}…</span>{% endif %}</div>
+            <div class="small">Current: {{ selected_context.lead_media.graphic_kind|status_label }}{% if selected_context.lead_media.checksum %} · <span class="mono">{{ selected_context.lead_media.checksum[:12] }}…</span>{% endif %}
+              {% if selected_context.lead_media.media_id %} · <a href="/media/{{ selected_context.lead_media.media_id }}/original">Download original</a>{% endif %}
+            </div>
             <div class="field"><label for="media_caption">Caption</label><input id="media_caption" name="media_caption" type="text" value="{{ selected_context.lead_media.caption }}" data-initial="{{ selected_context.lead_media.caption }}"></div>
             <div class="field"><label for="media_credit">Credit</label><input id="media_credit" name="media_credit" type="text" value="{{ selected_context.lead_media.credit }}" data-initial="{{ selected_context.lead_media.credit }}"></div>
             <label class="field--inline"><input type="checkbox" name="remove_media" value="1"> Remove lead media from the layout</label>
@@ -223,6 +225,52 @@
         <div class="field-row">
           <div class="field"><label for="alt_caption">Caption for replacement</label><input id="alt_caption" name="alt_caption" type="text" value="" placeholder="Optional: overrides the source caption"></div>
           <div class="field"><label for="alt_credit">Credit for replacement</label><input id="alt_credit" name="alt_credit" type="text" value="" placeholder="Optional: overrides the source credit"></div>
+        </div>
+        {% endif %}
+      </fieldset>
+
+      <fieldset class="ws-media">
+        <legend>Supporting media (optional)</legend>
+        {% if selected_context.supporting_media %}
+        <div class="ws-media__current">
+          {% if selected_context.supporting_media.path %}
+          <div class="ws-media__thumb"><img src="/media/{{ selected_context.supporting_media.media_id }}/preview" alt="Current supporting media" loading="lazy"></div>
+          {% endif %}
+          <div class="stack">
+            <div class="small">Current: {{ selected_context.supporting_media.graphic_kind|status_label }}{% if selected_context.supporting_media.media_id %} · <a href="/media/{{ selected_context.supporting_media.media_id }}/original">Download original</a>{% endif %}</div>
+            <div class="field"><label for="supporting_caption">Caption</label><input id="supporting_caption" name="supporting_caption" type="text" value="{{ selected_context.supporting_media.caption }}" data-initial="{{ selected_context.supporting_media.caption }}"></div>
+            <div class="field"><label for="supporting_credit">Credit</label><input id="supporting_credit" name="supporting_credit" type="text" value="{{ selected_context.supporting_media.credit }}" data-initial="{{ selected_context.supporting_media.credit }}"></div>
+            <label class="field--inline"><input type="checkbox" name="remove_supporting" value="1"> Remove supporting media</label>
+          </div>
+        </div>
+        {% else %}
+        <p class="muted small">No supporting image. Briefs and narrow columns never receive a second picture, so the layout stays legible.</p>
+        {% endif %}
+
+        {% if selected_context.alternatives %}
+        <div class="ws-media__alternatives">
+          <div class="small">Promote a source asset to supporting:</div>
+          {% for choice in selected_context.alternatives %}
+          {% if not selected_context.lead_media or selected_context.lead_media.media_id != choice.media.id %}
+          <label class="ws-media__option{% if not choice.eligible %} is-blocked{% endif %}">
+            <input type="radio" name="supporting_media_id" value="{{ choice.media.id }}" {% if not choice.eligible %}disabled{% endif %} {% if selected_context.supporting_media and selected_context.supporting_media.media_id == choice.media.id %}checked{% endif %}>
+            {% if choice.preview_available %}
+            <img src="/media/{{ choice.media.id }}/preview" alt="Supporting alternative {{ choice.media.id }}" loading="lazy">
+            {% else %}
+            <span class="ws-media__placeholder">{{ choice.media.kind|status_label }}</span>
+            {% endif %}
+            <span class="small">
+              #{{ choice.media.id }} · {{ choice.media.width }}×{{ choice.media.height }}
+              {% if not choice.eligible %} · blocked{% endif %}
+              <br>{{ choice.media.caption[:70] or 'No source caption' }}
+            </span>
+          </label>
+          {% endif %}
+          {% endfor %}
+        </div>
+        <div class="field-row">
+          <div class="field"><label for="alt_supporting_caption">Caption for supporting pick</label><input id="alt_supporting_caption" name="alt_supporting_caption" type="text" value="" placeholder="Optional override"></div>
+          <div class="field"><label for="alt_supporting_credit">Credit for supporting pick</label><input id="alt_supporting_credit" name="alt_supporting_credit" type="text" value="" placeholder="Optional override"></div>
         </div>
         {% endif %}
       </fieldset>

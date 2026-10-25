@@ -1,4 +1,4 @@
-"""Phase A regression tests: revisioned editing, previews and immutable versions.
+﻿"""Phase A regression tests: revisioned editing, previews and immutable versions.
 
 These tests encode the editorial contract that was previously broken:
 
@@ -24,6 +24,7 @@ from sqlalchemy import create_engine, inspect, select
 
 from channel_press import models  # noqa: F401  (register tables)
 from channel_press.editorial.revisions import (
+    article_media,
     article_snapshot,
     revision_history,
     set_article_status,
@@ -390,6 +391,101 @@ def test_editor_can_replace_lead_media_with_eligible_source_asset(db, demo_chann
     assert leads[0]["caption"] == "Editor-selected replacement caption."
 
 
+def _second_asset(db, article):
+    story = db.get(models.StoryCluster, article.story_id)
+    choices = rank_media(db, story)
+    lead_ids = {
+        row.media_id
+        for row in article_media(db, article.id)
+        if row.role == "lead" and row.selected
+    }
+    for choice in choices:
+        if choice.media.id in lead_ids or not choice.eligible:
+            continue
+        if choice.media.original_path and Path(choice.media.original_path).is_file():
+            return story, choice
+    return story, None
+
+
+def test_editor_can_add_supporting_media_and_the_preview_renders_it(
+    db, demo_channel, owner, client, auth
+):
+    edition = _seed(db, demo_channel, owner)
+    _, article = _first_link(db, edition)
+    story, choice = _second_asset(db, article)
+    if choice is None:
+        pytest.skip("fixture story has no second usable media asset")
+    marker = "ZZ SUPPORTING CAPTION 5150"
+    location = _save(
+        client,
+        auth,
+        edition,
+        article,
+        supporting_media_id=str(choice.media.id),
+        alt_supporting_caption=marker,
+        alt_supporting_credit="Supporting fixture credit",
+    )
+    working_id = int(location.split("/editions/")[1].split("?")[0])
+    db.expire_all()
+    working = db.get(Edition, working_id)
+    supporting_rows = [
+        row
+        for row in article_media(db, article.id)
+        if row.role == "supporting" and row.selected
+    ]
+    assert len(supporting_rows) == 1
+    assert supporting_rows[0].media_id == choice.media.id
+    assert supporting_rows[0].caption == marker
+    assert working.preview_pdf_path and Path(working.preview_pdf_path).exists()
+    assert marker in _pdf_text(working.preview_pdf_path)
+
+    # Removing it is explicit and does not disturb the lead image.
+    lead_before = [
+        row.media_id
+        for row in article_media(db, article.id)
+        if row.role == "lead" and row.selected
+    ]
+    _save(client, auth, working, db.get(Article, article.id), remove_supporting="1")
+    db.expire_all()
+    remaining = article_media(db, article.id)
+    assert not [row for row in remaining if row.role == "supporting" and row.selected]
+    assert [
+        row.media_id for row in remaining if row.role == "lead" and row.selected
+    ] == lead_before
+    assert story is not None
+
+
+def test_original_media_download_serves_the_stored_source_file(
+    db, demo_channel, owner, client, auth
+):
+    edition = _seed(db, demo_channel, owner)
+    _, article = _first_link(db, edition)
+    story, choice = _second_asset(db, article)
+    media = choice.media if choice is not None else rank_media(db, story)[0].media
+    source = Path(media.original_path)
+    assert source.is_file()
+    response = client.get(f"/media/{media.id}/original")
+    assert response.status_code == 200
+    assert response.content == source.read_bytes()
+    assert "attachment" in response.headers["content-disposition"].lower()
+    assert "no-store" in response.headers.get("cache-control", "")
+
+
+def test_original_media_download_refuses_files_outside_the_cache(
+    db, demo_channel, owner, client, auth, tmp_path
+):
+    edition = _seed(db, demo_channel, owner)
+    _, article = _first_link(db, edition)
+    story, choice = _second_asset(db, article)
+    media = choice.media if choice is not None else rank_media(db, story)[0].media
+    outside = tmp_path / "not-cache.bin"
+    outside.write_bytes(b"private bytes")
+    media.original_path = str(outside)
+    db.commit()
+    response = client.get(f"/media/{media.id}/original")
+    assert response.status_code == 403
+
+
 def test_alembic_migration_creates_workspace_columns(tmp_path, monkeypatch):
     from channel_press.config import settings
 
@@ -422,3 +518,4 @@ def test_workspace_assets_are_served(client):
     css = client.get("/static/css/app.css")
     assert css.status_code == 200
     assert ".workspace" in css.text
+

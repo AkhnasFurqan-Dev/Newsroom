@@ -43,6 +43,11 @@ class StoryPackage:
     media_caption: str = ""
     media_credit: str = ""
     media_label: str = ""
+    supporting_media_id: int | None = None
+    supporting_media_path: str = ""
+    supporting_media_caption: str = ""
+    supporting_media_credit: str = ""
+    supporting_media_label: str = ""
     map_result: MapResult | None = None
     chart_svg: str = ""
     chart_spec: ChartSpec | None = None
@@ -160,16 +165,28 @@ def _build_package(
         package.headline_size = "section"
 
     if media_dir is not None:
-        existing = db.scalar(
-            select(ArticleMedia).where(ArticleMedia.article_id == article.id, ArticleMedia.selected.is_(True)).limit(1)
-        )
-        if existing is not None and (not existing.path or not Path(existing.path).is_file()):
-            # A cleared cache or removed output folder must never leave the
-            # template pointing at a missing image. Drop the stale selection
-            # and try to build a fresh derivative from local media.
-            db.delete(existing)
-            db.flush()
-            existing = None
+
+        def _current(role: str) -> ArticleMedia | None:
+            row = db.scalar(
+                select(ArticleMedia)
+                .where(
+                    ArticleMedia.article_id == article.id,
+                    ArticleMedia.role == role,
+                    ArticleMedia.selected.is_(True),
+                )
+                .order_by(ArticleMedia.id.desc())
+                .limit(1)
+            )
+            if row is not None and (not row.path or not Path(row.path).is_file()):
+                # A cleared cache or removed output folder must never leave the
+                # template pointing at a missing image. Drop the stale
+                # selection and let the caller rebuild from local media.
+                db.delete(row)
+                db.flush()
+                return None
+            return row
+
+        existing = _current("lead")
         if existing is None:
             choice = select_lead_media(
                 db,
@@ -180,9 +197,7 @@ def _build_package(
                 download_missing=download_media,
             )
             if choice:
-                existing = db.scalar(
-                    select(ArticleMedia).where(ArticleMedia.article_id == article.id).order_by(ArticleMedia.id.desc()).limit(1)
-                )
+                existing = _current("lead")
         if existing is not None and existing.media_id is not None and existing.media_id in (exclude_media_ids or set()):
             package.media_id = None
             package.media_path = ""
@@ -194,6 +209,18 @@ def _build_package(
             package.media_label = "VIDEO STILL" if existing.graphic_kind == "video_still" else (
                 "FIXTURE TEST PLATE" if not (existing.caption or "").lower().startswith("source") and "fixture" in (existing.caption or "").lower() else ""
             )
+        # A supporting asset is an explicit editor choice and is never
+        # auto-selected. Briefs only ever carry one picture so a two-image
+        # block cannot overflow a narrow brief column.
+        supporting = None if is_brief else _current("supporting")
+        if supporting is not None and supporting.media_id is not None and supporting.media_id in (exclude_media_ids or set()):
+            supporting = None
+        if supporting is not None:
+            package.supporting_media_id = supporting.media_id
+            package.supporting_media_path = supporting.path
+            package.supporting_media_caption = supporting.caption
+            package.supporting_media_credit = supporting.credit
+            package.supporting_media_label = "VIDEO STILL" if supporting.graphic_kind == "video_still" else ""
     if not package.media_path and map_profile is not None:
         map_result = render_locator_map(story, map_profile)
         if not map_result.fallback:
@@ -414,6 +441,8 @@ def create_plan(
                     "url": ref.url,
                     "language": "",
                     "kind": "external_link_unverified",
+                    "title": ref.title or "",
+                    "publisher": ref.publisher or "",
                 }
             )
     return EditionPlan(

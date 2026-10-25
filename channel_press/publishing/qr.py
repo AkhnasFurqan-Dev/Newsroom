@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import io
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +18,78 @@ class QRResult:
     target: str
     reason: str
     verified: bool
+
+
+@dataclass
+class CitationCode:
+    """A self-contained QR image for one printed citation.
+
+    ``data_uri`` is embedded in the print HTML so the PDF stays independent of
+    cache files and of the machine that generated it.
+    """
+
+    target: str
+    data_uri: str
+    label: str
+    reason: str
+    public: bool
+
+    @property
+    def available(self) -> bool:
+        return bool(self.data_uri)
+
+
+_CITATION_CACHE: dict[str, CitationCode] = {}
+
+
+def _forbidden_target(target: str) -> str:
+    lowered = target.casefold()
+    if (
+        "localhost" in lowered
+        or "127.0.0.1" in lowered
+        or lowered.startswith("file:")
+        or lowered.startswith("http://[::1]")
+        or lowered.startswith("https://[::1]")
+    ):
+        return "local_or_offline_target"
+    return ""
+
+
+def citation_code(target: str, *, label: str = "") -> CitationCode:
+    """Build a QR only for a syntactically public HTTP(S) destination.
+
+    Reachability is deliberately not tested during layout: a print run must not
+    depend on the network. The manifest records the payload and whether it comes
+    from a source message; the appendix never prints a local or invented URL.
+    """
+    target = (target or "").strip()
+    if not target:
+        return CitationCode("", "", label, "no_public_link", False)
+    blocked = _forbidden_target(target)
+    if blocked:
+        return CitationCode(target, "", label, blocked, False)
+    ok, detail = validate_public_http_url(target)
+    if not ok:
+        return CitationCode(target, "", label, f"not_public: {detail}", False)
+    cached = _CITATION_CACHE.get(target)
+    if cached is not None:
+        return CitationCode(cached.target, cached.data_uri, label or cached.label, cached.reason, cached.public)
+    qr = qrcode.QRCode(version=None, error_correction=ERROR_CORRECT_M, box_size=10, border=2)
+    qr.add_data(target)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="#181716", back_color="#ffffff").convert("RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    data_uri = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    code = CitationCode(
+        target=target,
+        data_uri=data_uri,
+        label=label,
+        reason=f"public target accepted ({detail})",
+        public=True,
+    )
+    _CITATION_CACHE[target] = code
+    return code
 
 
 def verify_reachable(url: str, timeout: float = 6.0) -> tuple[bool, str]:

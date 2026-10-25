@@ -41,6 +41,14 @@ ASSET_KINDS = {
 }
 
 
+def manifest_sources(entries: list[dict]) -> list[dict]:
+    """Digital provenance without embedding the QR image bytes in JSON."""
+    return [
+        {key: value for key, value in entry.items() if key != "qr_data_uri"}
+        for entry in entries
+    ]
+
+
 class PublicationError(RuntimeError):
     pass
 
@@ -472,7 +480,7 @@ def publish_edition(
             )
             if not allow_quality_warnings:
                 raise LayoutQualityError(list(render.qa["warnings"]))
-        plan = create_plan(
+        plan = render.plan or create_plan(
             db,
             edition,
             profile,
@@ -572,7 +580,7 @@ def publish_edition(
             },
             "quality": render.qa,
             "pages": render.pages,
-            "sources": plan.appendix_entries,
+            "sources": manifest_sources(plan.appendix_entries),
             "articles": manifest_articles,
             "epaper": {
                 "index": "epaper/index.html",

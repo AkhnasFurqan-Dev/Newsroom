@@ -69,6 +69,7 @@ class RenderResult:
     pages: list[dict]
     qa: dict
     meta: dict
+    plan: EditionPlan | None = None
 
 
 @dataclass
@@ -281,21 +282,30 @@ def _asset_uri(value: str) -> str:
 
 def _media_html(package: StoryPackage) -> Markup:
     parts: list[str] = []
+
+    def _figure(path: str, caption: str, credit: str, label: str, *, extra: str = "") -> str:
+        uri = _asset_uri(path)
+        if not uri:
+            return ""
+        label_html = f'<span class="media-label">{html.escape(label)}</span>' if label else ""
+        caption_html = html.escape(caption or "Source image supplied with the channel report.")
+        credit_html = html.escape(credit or "Source channel")
+        alt = html.escape(caption or package.article.title)
+        return (
+            f'<figure class="story__media{extra}"><img src="{html.escape(uri)}" alt="{alt}">'
+            f"<figcaption>{label_html}{caption_html} "
+            f'<span class="credit">Credit: {credit_html}</span></figcaption></figure>'
+        )
+
     if package.media_path:
-        uri = _asset_uri(package.media_path)
-        if uri:
-            label = (
-                f'<span class="media-label">{html.escape(package.media_label)}</span>'
-                if package.media_label
-                else ""
+        parts.append(
+            _figure(
+                package.media_path,
+                package.media_caption,
+                package.media_credit,
+                package.media_label,
             )
-            caption = html.escape(package.media_caption or "Source image supplied with the channel report.")
-            credit = html.escape(package.media_credit or "Source channel")
-            alt = html.escape(package.media_caption or package.article.title)
-            parts.append(
-                f'<figure class="story__media"><img src="{html.escape(uri)}" alt="{alt}">'
-                f'<figcaption>{label}{caption} <span class="credit">Credit: {credit}</span></figcaption></figure>'
-            )
+        )
     elif package.map_result is not None and not package.map_result.fallback:
         result = package.map_result
         parts.append(
@@ -306,7 +316,17 @@ def _media_html(package: StoryPackage) -> Markup:
             + f" {html.escape(result.legend)}"
             + "</figcaption></figure>"
         )
-    return Markup("".join(parts))
+    if package.supporting_media_path:
+        parts.append(
+            _figure(
+                package.supporting_media_path,
+                package.supporting_media_caption,
+                package.supporting_media_credit,
+                package.supporting_media_label,
+                extra=" story__media--supporting",
+            )
+        )
+    return Markup("".join(part for part in parts if part))
 
 
 def _paragraphs_html(paragraphs: list[str]) -> Markup:
@@ -348,6 +368,45 @@ def _assign_source_refs(plan: EditionPlan) -> None:
             by_article.setdefault(int(article_id), []).append(ref)
     for package in plan.packages:
         package.source_refs = by_article.get(package.article.id, [])
+
+
+def _attach_citations(plan: EditionPlan, *, demo_edition: bool) -> None:
+    """Attach a compact QR citation or an explicit no-link label to each entry.
+
+    A code is printed only for a public direct Telegram source URL. Fixture
+    messages have no public destination and never receive a fake code. External
+    web references stay digital-only until an editor has verified them, so the
+    printed appendix does not promote an unvetted link.
+    """
+    from ..publishing.qr import citation_code
+
+    for entry in plan.appendix_entries:
+        kind = entry.get("kind")
+        url = (entry.get("url") or "").strip()
+        if demo_edition or kind == "fixture" or not url:
+            entry["qr_data_uri"] = ""
+            entry["qr_target"] = ""
+            entry["qr_printed"] = False
+            entry["qr_reason"] = "fixture_has_no_public_url" if demo_edition else "no_public_link"
+            entry["citation_label"] = "No public link"
+            continue
+        if kind == "external_link_unverified":
+            entry["qr_data_uri"] = ""
+            entry["qr_target"] = ""
+            entry["qr_printed"] = False
+            entry["qr_reason"] = "external_link_not_printed"
+            entry["citation_label"] = "External link not printed"
+            continue
+        code = citation_code(url, label=f"Message {entry.get('message_id') or ''}".strip())
+        entry["qr_data_uri"] = code.data_uri
+        entry["qr_target"] = code.target
+        entry["qr_printed"] = code.available
+        entry["qr_reason"] = code.reason
+        if code.available:
+            entry["citation_label"] = f"Scan · msg {entry.get('message_id') or ''}".strip()
+        else:
+            entry["citation_label"] = "Link withheld (not public)"
+
 
 
 def _edition_labels(edition: Edition, timezone: str) -> tuple[str, str, str]:
@@ -482,6 +541,7 @@ def build_print_html(
     demo_edition: bool,
 ) -> tuple[str, PageChunkPlan]:
     _assign_source_refs(plan)
+    _attach_citations(plan, demo_edition=demo_edition)
     chunk_plan = build_page_plan(plan)
     date_label, window_label, cutoff_label = _edition_labels(edition, plan.profile.timezone)
     css = CSS_PATH.read_text(encoding="utf-8")
@@ -505,13 +565,16 @@ def build_print_html(
     appendix_intro = (
         "Each report in this edition is tied to the dated source message(s) below. The appendix is the "
         "publication's evidence trail: it records what the channel published, when, and which item each "
-        "report drew on. Where a public post link exists it is printed in full; fixture messages have no "
-        "public URL and are identified by message number instead."
+        "report drew on. A compact QR code is printed only when the direct public source post exists; "
+        "fixture messages and unverified external pages are identified by message number or publisher "
+        "instead of a long or invented URL. The complete digital provenance remains in the edition "
+        "manifest."
     )
     appendix_method = (
         f"{cutoff_label}. Article text is checked against the source corpus by an independent rule-based "
-        "audit before layout. Corrections are recorded as superseding claims. No QR code is printed unless "
-        "a destination is public and verified reachable; otherwise this appendix is the source of record. "
+        "audit before layout. Corrections are recorded as superseding claims. QR payloads are public "
+        "direct source URLs only; private, offline or placeholder addresses are never encoded. Where no "
+        "public link exists, this appendix is the source of record. "
         f"{demo_note}"
     )
     appendix_footer = (
@@ -797,4 +860,5 @@ def compile_edition(
     )
     if progress:
         progress("layout_complete", f"PDF validated with {result.qa.get('page_count', 0)} pages")
+    result.plan = plan
     return result
