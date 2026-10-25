@@ -766,3 +766,92 @@ manuals and this log.
 `The Pakistan News`, runs one supervised cutoff with auto-release off, then
 inspects the generated PDF/e-paper for language, attribution and media behavior
 before enabling the schedule.
+
+---
+
+## Phase A — editorial integrity: revisions, previews and immutable versions
+
+**Goal:** an editor's saved change must appear in the next rendered preview and
+release, while an already published version stays byte-for-byte unchanged.
+
+**What changed**
+
+- `channel_press/editorial/revisions.py` (new) owns the content lifecycle:
+  article snapshots and SHA-256 fingerprints, optimistic-concurrency saves
+  (`expected_revision`), field-level revision diffs, editorial status changes,
+  article ordering, frozen `EditionArticle` snapshots and working-version
+  creation (`working_revision`).
+- `EditionArticle.article_revision` and `snapshot_json` freeze the exact article
+  content used by each published version. Later edits cannot alter it.
+- `Edition.preview_*` tracks the private working preview: state
+  (`missing`/`current`/`stale`/`failed`), content fingerprint, render timestamp
+  and folder. Preview folders are `.preview-<edition_id>` and are never
+  publication pointers.
+- A published edition is never mutated into a new version. Saving, reordering or
+  changing status opens `V(n+1)` as a draft via `working_revision`; release stays
+  an explicit editor action.
+- Release always re-renders from the latest saved revisions and then freezes
+  snapshots, manifest article revisions, content hashes, PDF checksum, page set
+  and timestamp. The preview folder is discarded after a successful release.
+- The scheduler's `republish_edition` job now renders a working preview only and
+  finishes as `awaiting_review`; it no longer auto-publishes.
+- The edition page is a three-pane workspace: article list with revision/status
+  indicators, the full article editor (headline, deck, standfirst, body, byline,
+  section, genre, lead media and captions, status, order) and the rendered page
+  preview with evidence, claims, external context, revision history, published
+  snapshot hash and version family.
+- Every article in an edition is editable, not only review-flagged articles.
+- `workspace.js` adds dirty-form detection, an undo-unsaved button, a save-state
+  badge and a `beforeunload` warning. Server-side concurrency still wins: a stale
+  form is rejected and the saved revision is preserved.
+- Excluded articles are omitted from composition; a held or “needs research”
+  article blocks release until the editor resolves it. Rendering an edition
+  whose every article is withheld fails with a clear message instead of emitting
+  a blank paper.
+- Media alternatives are ranked with eligibility flags. A non-documentary or
+  promotional asset is refused for a real channel; the explicitly labelled demo
+  channel may use its synthetic plates. Editors can replace the lead asset, edit
+  caption/credit or remove it.
+
+**Schema and migration**
+
+`alembic/versions/f4b8c2d6e123_editorial_workspace.py` adds
+`articles.byline`, five `editions.preview_*` columns and
+`edition_articles.article_revision` / `snapshot_json`.
+Before touching the owner database, a backup was written:
+`data/backups/channel-press-20261025-111225.zip` (13.2 MB). The migration was
+first applied to a copy of the real database, then to
+`data/channel_press.db`; the copy retained 7 editions, 81 articles and 1,687
+stored posts. Current revision: `f4b8c2d6e123`.
+
+**Verification**
+
+- `tests/test_editorial_workspace.py` (new, 8 tests) covers:
+  edit → preview → release V2 → edit → V3; V1/V2 byte immutability and frozen
+  snapshots; stale-form rejection; every-article editability; excluded composition
+  and held release blocking; revision diffs; eligible media replacement; the
+  Alembic column set; and the served workspace assets.
+- `.\.venv\Scripts\python.exe -m pytest -q -p no:warnings` → **208 passed, 2
+  skipped**. The skips remain the two live-Ollama tests because no model server is
+  running.
+- `.\.venv\Scripts\python.exe -m ruff check channel_press tests alembic` →
+  **All checks passed!**
+- Migration on a copy of the owner database upgraded
+  `e3f6a9c0d013 → f4b8c2d6e123` and exposed the new columns without changing row
+  counts.
+
+**Fixture vs real channel**
+
+All workspace tests use repository fixtures and the demo channel. They prove the
+software path, not live Telegram access or publication. No live channel was
+edited or released in this phase.
+
+**Known limits at this checkpoint**
+
+- Media alternatives are rendered from the local cache; downloads remain a
+  separate, rights-gated preparation step.
+- The workspace is server-rendered and intentionally does not autosave. An editor
+  who ignores the unsaved-changes warning still loses unsubmitted text (the
+  server never receives it).
+- A quality-warning preview is allowed so editors can inspect a broken page;
+  release remains strict.

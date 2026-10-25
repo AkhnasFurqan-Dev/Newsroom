@@ -1,15 +1,22 @@
 {% extends "base.html.j2" %}
-{% block title %}{{ edition.title }}{% endblock %}
+{% block title %}{{ edition.title }} · v{{ edition.version }}{% endblock %}
+{% block shell_class %}shell--wide{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">{{ edition.kind|status_label }} · Volume {{ edition.volume }}, Issue {{ edition.issue_number }} · Version {{ edition.version }}</div>
+    <div class="kicker">{{ edition.kind|status_label }} · Vol. {{ edition.volume }} No. {{ edition.issue_number }} · <strong>Version {{ edition.version }}</strong>{% if edition.parent_edition_id %} of edition #{{ edition.parent_edition_id }}{% endif %}</div>
     <h1>{{ edition.title }}</h1>
-    <p class="lede">Reporting window {{ edition.window_start|localtime(edition.timezone) }} to {{ edition.window_end|localtime(edition.timezone) }}. Cutoff {{ edition.cutoff_at|localtime(edition.timezone) }}.</p>
+    <p class="lede">Window {{ edition.window_start|localtime(edition.timezone) }} to {{ edition.window_end|localtime(edition.timezone) }} · cutoff {{ edition.cutoff_at|localtime(edition.timezone) }}</p>
   </div>
   <div class="page-head__actions">
     <span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span>
-    {% if pdf_exists %}<a class="btn" href="/editions/{{ edition.id }}/pdf" target="_blank" rel="noopener">Open PDF</a>{% endif %}
+    {% if edition.status == 'published' %}
+      <span class="badge badge--published">Immutable release</span>
+    {% else %}
+      <span class="badge badge--{{ 'review' if edition.preview_state != 'current' else 'approved' }}">Preview: {{ edition.preview_state|status_label }}</span>
+    {% endif %}
+    {% if working_pdf_exists %}<a class="btn" href="/editions/{{ edition.id }}/working.pdf" target="_blank" rel="noopener">Open preview PDF</a>{% endif %}
+    {% if pdf_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/pdf" target="_blank" rel="noopener">Published PDF</a>{% endif %}
     {% if epaper_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/epaper" target="_blank" rel="noopener">E-paper</a>{% endif %}
   </div>
 </div>
@@ -17,7 +24,23 @@
 {% if manifest.get('demo_edition') %}
 <div class="notice notice--warn">
   <h3>Synthetic demonstration edition</h3>
-  <p>This edition was built only from repository fixture data. Its people, places, quotations and figures are invented for software testing. It is not a news report and must not be published as journalism.</p>
+  <p>Built only from repository fixture data. People, places, quotations and figures are invented for software testing.</p>
+</div>
+{% endif %}
+
+{% if edition.status == 'published' %}
+<div class="notice">
+  <h3>Published version {{ edition.version }} is frozen</h3>
+  <p>This version and its manifest cannot be changed. Save any article from this workspace to open version {{ edition.version + 1 }} as a working draft; version {{ edition.version }} stays exactly as released.</p>
+</div>
+{% elif edition.preview_state != 'current' %}
+<div class="notice notice--warn">
+  <h3>Preview is {{ edition.preview_state|status_label|lower }}</h3>
+  <p>Saved editorial changes are not represented in the rendered pages until the preview is rebuilt.</p>
+  <form method="post" action="/editions/{{ edition.id }}/preview" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button type="submit">Rebuild preview now</button>
+  </form>
 </div>
 {% endif %}
 
@@ -25,147 +48,352 @@
 <div class="notice notice--danger">
   <h3>Release held</h3>
   <p>{{ blockers|join('; ') }}</p>
-  {% if flags %}<p class="small">Open items are listed below. Resolve them from each article's review page.</p>{% endif %}
-</div>
-{% elif blockers %}
-<div class="notice notice--warn">
-  <h3>Published with open review items</h3>
-  <p>This edition is already released. The following items remain open and are recorded against it: {{ blockers|join('; ') }}</p>
-  {% if flags %}<p class="small">Resolve them from each article's review page; a later edition will carry any correction.</p>{% endif %}
 </div>
 {% endif %}
 
-<div class="grid grid--sidebar">
-  <div>
-    <h2>Pages</h2>
-    {% if pages %}
-    <div class="page-strip">
-      {% for page in pages %}
-        <a class="page-thumb" href="/editions/{{ edition.id }}/preview/{{ page.page_number }}" target="_blank" rel="noopener">
-          {% if page.preview_path %}<img src="/editions/{{ edition.id }}/preview/{{ page.page_number }}" alt="Page {{ page.page_number }} preview">{% else %}<div style="height:180px;background:#eee"></div>{% endif %}
-          <span>Page {{ page.page_number }} · {{ page.template|status_label }}</span>
-        </a>
-      {% endfor %}
+<div class="workspace">
+  <aside class="workspace__list">
+    <div class="workspace__head">
+      <h2>Articles</h2><span class="small">{{ rows|length }}</span>
     </div>
-    {% else %}
-      <p class="muted">No page previews recorded.</p>
+    <ol class="ws-articles">
+      {% for link, item in rows %}
+      {% set state = article_states.get(item.id, {}) %}
+      <li>
+        <a class="ws-article{% if selected and item.id == selected.id %} is-selected{% endif %}" href="/editions/{{ edition.id }}?article={{ item.id }}">
+          <span class="ws-article__title">{{ item.title }}</span>
+          <span class="ws-article__meta">
+            <span class="badge badge--{{ item.status }}">{{ status_labels.get(item.status, item.status) }}</span>
+            <span>{{ section_labels.get(link.section, link.section) }}</span>
+            <span>r{{ item.revision }}</span>
+            {% if state.get('dirty') %}<span class="dirty-dot" title="Saved changes are not in the published snapshot">changed</span>{% endif %}
+          </span>
+        </a>
+      </li>
+      {% else %}
+      <li class="muted">No articles linked.</li>
+      {% endfor %}
+    </ol>
+
+    <h2>Versions</h2>
+    <ul class="ws-versions">
+      {% for item in family %}
+      {% set m = item.manifest_json|json_loads({}) %}
+      <li class="{% if item.id == edition.id %}is-current{% endif %}">
+        <a href="/editions/{{ item.id }}">V{{ item.version }}</a>
+        <span class="badge badge--{{ item.status }}">{{ item.status|status_label }}</span>
+        {% if item.version == edition.version %}<span class="small">this view</span>{% endif %}
+        <div class="small">
+          {% if m.get('pdf', {}).get('sha256') %}SHA {{ m.get('pdf', {}).get('sha256')[:12] }}…{% else %}no published bundle{% endif %}
+          {% if m.get('edition', {}).get('published_at') %} · {{ m.get('edition', {}).get('published_at') }}{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <h2>Release</h2>
+    {% if can.edit %}
+      {% if edition.status != 'published' %}
+      <form method="post" action="/editions/{{ edition.id }}/publish" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" {% if blockers %}disabled{% endif %}>Release version {{ edition.version }}</button>
+        <span class="help">Renders the latest saved revisions and freezes this version. No automatic upload.</span>
+      </form>
+      <form method="post" action="/editions/{{ edition.id }}/preview" class="inline" style="margin-top:8px">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost btn--small">Rebuild preview only</button>
+      </form>
+      {% else %}
+      <form method="post" action="/editions/{{ edition.id }}/revision" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="btn--ghost">Open working version {{ edition.version + 1 }}</button>
+        <span class="help">Creates a draft from the latest saved revisions. Version {{ edition.version }} remains unchanged.</span>
+      </form>
+      {% endif %}
     {% endif %}
 
-    <h2>Articles in this edition</h2>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Article</th><th>Section</th><th>Genre</th><th>Status</th><th class="num">Words</th></tr></thead>
-        <tbody>
-        {% for article in articles %}
-          <tr>
-            <td><a href="/articles/{{ article.id }}">{{ article.title }}</a></td>
-            <td>{{ section_labels.get(article.section, article.section) }}</td>
-            <td>{{ article.genre|status_label }}</td>
-            <td><span class="badge badge--{{ article.status }}">{{ article.status|status_label }}</span></td>
-            <td class="num">{{ article.word_count }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="5" class="muted">No linked articles.</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <h2>Quality inspection</h2>
+    <h2>Edition quality</h2>
     {% set quality = manifest.get('quality', {}) %}
     <div class="audit-box">
-      <div><strong>Page count:</strong> {{ quality.get('page_count', '—') }}</div>
-      <div><strong>Expected page size:</strong> {{ quality.get('expected_size_pt', {}).get('width', 792) }} × {{ quality.get('expected_size_pt', {}).get('height', 1224) }} pt (11 × 17 in)</div>
-      <div><strong>Office-print proof:</strong> {{ 'yes' if quality.get('office_print_proof') else 'no' }}</div>
+      <div><strong>Pages:</strong> {{ quality.get('page_count', '—') }}</div>
       <div><strong>Warnings:</strong> {{ quality.get('warnings', [])|join('; ') or 'none' }}</div>
-      {% if quality.get('pages') %}
-      <h3 style="font-size:14px">Per-page checks</h3>
+      <div><strong>PDF bytes:</strong> {{ manifest.get('pdf', {}).get('bytes', '—') }}</div>
+      <div><strong>PDF SHA:</strong> <span class="mono">{{ (manifest.get('pdf', {}).get('sha256') or '—')[:16] }}</span></div>
+    </div>
+  </aside>
+
+  <section class="workspace__editor">
+    {% if selected %}
+    {% set state = article_states.get(selected.id, {}) %}
+    <div class="ws-editor-head">
+      <div>
+        <div class="kicker">{{ section_labels.get(selected.section, selected.section) }} · {{ selected.genre|status_label }} · revision {{ selected.revision }}</div>
+        <h2>{{ selected.title }}</h2>
+      </div>
+      <div class="ws-editor-head__badges">
+        <span class="badge badge--{{ selected.status }}">{{ status_labels.get(selected.status, selected.status) }}</span>
+        {% if state.get('dirty') %}<span class="badge badge--review">Changed since publication</span>{% endif %}
+        {% if story %}<a class="btn btn--ghost btn--small" href="/stories/{{ story.id }}">Evidence record</a>{% endif %}
+      </div>
+    </div>
+
+    {% if can.edit %}
+    <form method="post" action="/editions/{{ edition.id }}/articles/{{ selected.id }}/save" class="stack ws-editor" data-dirty-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="expected_revision" value="{{ selected.revision }}">
+      <div class="field">
+        <label for="title">Headline</label>
+        <input id="title" name="title" type="text" value="{{ selected.title }}" maxlength="300" required data-initial="{{ selected.title }}">
+      </div>
+      <div class="field">
+        <label for="deck">Deck / subheadline</label>
+        <input id="deck" name="deck" type="text" value="{{ selected.deck }}" maxlength="300" data-initial="{{ selected.deck }}">
+      </div>
+      <div class="field">
+        <label for="standfirst">Standfirst</label>
+        <textarea id="standfirst" name="standfirst" style="min-height:70px" data-initial="{{ selected.standfirst }}">{{ selected.standfirst }}</textarea>
+      </div>
+      <div class="field">
+        <label for="body_text">Body <span class="small">(blank line between paragraphs)</span></label>
+        <textarea id="body_text" class="body-editor" name="body_text" required data-initial="{{ selected.body_text }}">{{ selected.body_text }}</textarea>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="byline">Byline</label>
+          <input id="byline" name="byline" type="text" value="{{ selected.byline }}" maxlength="120" placeholder="Publication byline" data-initial="{{ selected.byline }}">
+        </div>
+        <div class="field">
+          <label for="section">Section</label>
+          <select id="section" name="section">
+            {% for key, label in sections %}{% if key != 'front' %}
+            <option value="{{ key }}" {% if selected.section == key %}selected{% endif %}>{{ label }}</option>
+            {% endif %}{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="genre">Genre</label>
+          <select id="genre" name="genre">
+            {% for value in ['news', 'analysis', 'opinion', 'editor_note', 'brief'] %}
+            <option value="{{ value }}" {% if selected.genre == value %}selected{% endif %}>{{ value|status_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <fieldset class="ws-media">
+        <legend>Lead media</legend>
+        {% if selected_context.lead_media %}
+        <div class="ws-media__current">
+          {% if selected_context.lead_media.path %}
+          <div class="ws-media__thumb"><img src="/media/{{ selected_context.lead_media.media_id }}/preview" alt="Current lead media" loading="lazy"></div>
+          {% endif %}
+          <div class="stack">
+            <div class="small">Current: {{ selected_context.lead_media.graphic_kind|status_label }}{% if selected_context.lead_media.checksum %} · <span class="mono">{{ selected_context.lead_media.checksum[:12] }}…</span>{% endif %}</div>
+            <div class="field"><label for="media_caption">Caption</label><input id="media_caption" name="media_caption" type="text" value="{{ selected_context.lead_media.caption }}" data-initial="{{ selected_context.lead_media.caption }}"></div>
+            <div class="field"><label for="media_credit">Credit</label><input id="media_credit" name="media_credit" type="text" value="{{ selected_context.lead_media.credit }}" data-initial="{{ selected_context.lead_media.credit }}"></div>
+            <label class="field--inline"><input type="checkbox" name="remove_media" value="1"> Remove lead media from the layout</label>
+          </div>
+        </div>
+        {% else %}
+        <p class="muted small">No lead media selected. The layout will use a sourced map, chart or text-only treatment.</p>
+        {% endif %}
+
+        {% if selected_context.alternatives %}
+        <div class="ws-media__alternatives">
+          <div class="small">Choose another eligible source asset (local cache only during render):</div>
+          {% for choice in selected_context.alternatives %}
+          <label class="ws-media__option{% if not choice.eligible %} is-blocked{% endif %}">
+            <input type="radio" name="lead_media_id" value="{{ choice.media.id }}" {% if not choice.eligible %}disabled{% endif %} {% if selected_context.lead_media and selected_context.lead_media.media_id == choice.media.id %}checked{% endif %}>
+            {% if choice.preview_available %}
+            <img src="/media/{{ choice.media.id }}/preview" alt="Alternative {{ choice.media.id }}" loading="lazy">
+            {% else %}
+            <span class="ws-media__placeholder">{{ choice.media.kind|status_label }}</span>
+            {% endif %}
+            <span class="small">
+              #{{ choice.media.id }} · {{ choice.media.width }}×{{ choice.media.height }}
+              · {{ choice.media.kind }}
+              {% if choice.media.is_sensitive %} · sensitive{% endif %}
+              {% if choice.media.download_state != 'downloaded' %} · on request{% endif %}
+              {% if not choice.eligible %} · blocked: {{ choice.blocked_reason|status_label|lower }}{% endif %}
+              <br>{{ choice.media.caption[:90] or 'No source caption' }}
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+        <div class="field-row">
+          <div class="field"><label for="alt_caption">Caption for replacement</label><input id="alt_caption" name="alt_caption" type="text" value="" placeholder="Optional: overrides the source caption"></div>
+          <div class="field"><label for="alt_credit">Credit for replacement</label><input id="alt_credit" name="alt_credit" type="text" value="" placeholder="Optional: overrides the source credit"></div>
+        </div>
+        {% endif %}
+      </fieldset>
+
+      <label class="field--inline"><input type="checkbox" name="lock" value="1" {% if selected.locked %}checked{% endif %}> Lock this text against AI regeneration</label>
+      <div class="field-row ws-save">
+        <button type="submit">Save and Update Preview</button>
+        <button type="button" class="btn--ghost" data-revert>Undo unsaved changes</button>
+        <span class="small" data-dirty-note hidden>Unsaved changes</span>
+        <span class="small muted">Preview currently represents revision {{ edition.preview_revision or '—' }} · content fingerprint {{ fingerprint }}</span>
+      </div>
+    </form>
+
+    <div class="ws-actions">
+      <form method="post" action="/editions/{{ edition.id }}/articles/{{ selected.id }}/status" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button class="btn--small" name="status" value="approved">Approve</button>
+        <button class="btn--small btn--ghost" name="status" value="held">Hold</button>
+        <button class="btn--small btn--danger" name="status" value="excluded">Exclude / restore later</button>
+        <button class="btn--small btn--ghost" name="status" value="research">Needs research</button>
+        <button class="btn--small btn--ghost" name="status" value="draft">Restore to draft</button>
+      </form>
+      <form method="post" action="/editions/{{ edition.id }}/articles/{{ selected.id }}/order" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button class="btn--small btn--ghost" name="direction" value="-1">Move up</button>
+        <button class="btn--small btn--ghost" name="direction" value="1">Move down</button>
+      </form>
+    </div>
+    {% else %}
+    <div class="prose">
+      {% for paragraph in selected.body_json|json_loads([]) %}<p>{{ paragraph }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
+    <h3>Source evidence</h3>
+    <details open>
+      <summary>{{ selected_context.evidence_rows|length }} source fragment(s) · {{ selected_context.claims|length }} claim(s) · {{ selected_context.external|length }} external reference(s)</summary>
+      <div class="ws-evidence">
+        {% for fragment, post in selected_context.evidence_rows %}
+        <article class="ws-evidence__item">
+          <div class="small">
+            <span class="mono">msg {{ post.telegram_message_id }}</span> · {{ post.posted_at|localtime(edition.timezone) }}
+            · {{ post.language }}{% if post.source_url %} · <a href="{{ post.source_url }}" rel="noopener nofollow">source</a>{% endif %}
+          </div>
+          <p>{{ fragment.text[:700] }}</p>
+        </article>
+        {% else %}
+        <p class="muted">No linked source fragments.</p>
+        {% endfor %}
+      </div>
+      {% if selected_context.claims %}
+      <h4>Claims</h4>
       <div class="table-wrap">
         <table>
-          <thead><tr><th class="num">Page</th><th>Size (in)</th><th class="num">Text chars</th><th class="num">Images</th><th class="num">Links</th><th class="num">Min font</th><th>Blank</th></tr></thead>
+          <thead><tr><th>Claim</th><th>Type</th><th>Verification</th><th>Event</th></tr></thead>
           <tbody>
-          {% for row in quality.get('pages', []) %}
-            <tr>
-              <td class="num">{{ row.page }}</td>
-              <td>{{ row.width_in }} × {{ row.height_in }}</td>
-              <td class="num">{{ row.text_chars }}</td>
-              <td class="num">{{ row.images }}</td>
-              <td class="num">{{ row.links }}</td>
-              <td class="num">{{ row.min_font_pt }}</td>
-              <td>{{ 'YES' if row.blank else 'no' }}</td>
-            </tr>
+          {% for claim in selected_context.claims %}
+            <tr><td>{{ claim.text[:240] }}</td><td>{{ claim.claim_type }}</td><td>{{ claim.verification_status }}</td><td class="small">{{ claim.event_at|localtime(edition.timezone) if claim.event_at else '—' }}</td></tr>
           {% endfor %}
           </tbody>
         </table>
       </div>
       {% endif %}
-    </div>
-
-    <h2>Open review items</h2>
-    {% if flags %}
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Article</th><th>Category</th><th>Severity</th><th>Message</th></tr></thead>
-        <tbody>
-        {% for flag in flags %}
-          <tr>
-            <td><a href="/articles/{{ flag.article_id }}">Article #{{ flag.article_id }}</a></td>
-            <td>{{ flag.category|status_label }}</td>
-            <td><span class="badge badge--{{ flag.severity }}">{{ flag.severity|status_label }}</span></td>
-            <td>{{ flag.message[:200] }}</td>
-          </tr>
+      {% if selected_context.external %}
+      <h4>External context (editor-inspected)</h4>
+      <ul class="small">
+        {% for ref in selected_context.external %}
+        <li><a href="{{ ref.url }}" rel="noopener nofollow">{{ ref.title or ref.url }}</a> · {{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate(edition.timezone) }}</li>
         {% endfor %}
-        </tbody>
-      </table>
+      </ul>
+      {% endif %}
+      {% if selected_context.timelines %}
+      <h4>Chronology</h4>
+      <ul class="small">
+        {% for event in selected_context.timelines %}<li>{{ event.event_at|localtime(edition.timezone) }} — {{ event.description }} <em>({{ event.certainty }})</em></li>{% endfor %}
+      </ul>
+      {% endif %}
+    </details>
+
+    <h3>Revision history</h3>
+    {% for version in selected_context.history %}
+    <details {% if loop.first %}open{% endif %}>
+      <summary>Revision {{ version.revision }} · {{ version.created_at|localtime(edition.timezone) }}{% if version.diff %} · {{ version.diff|length }} field change(s){% endif %}</summary>
+      {% if version.diff %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+          <tbody>
+          {% for change in version.diff %}
+            <tr><td>{{ change.label }}</td><td class="diff-before">{{ change.before[:400] }}</td><td class="diff-after">{{ change.after[:400] }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small muted">Initial saved state for this revision.</p>
+      {% endif %}
+      <p class="small">{{ version.snapshot.get('title','') }} · {{ version.snapshot.get('section','') }} · status {{ version.snapshot.get('status','') }}</p>
+    </details>
+    {% else %}
+      <p class="muted">No saved revisions.</p>
+    {% endfor %}
+
+    {% if selected_context.published_snapshot %}
+    <h3>Published snapshot</h3>
+    <div class="audit-box">
+      <div><strong>Frozen revision:</strong> {{ selected_link.article_revision }}</div>
+      <div><strong>Frozen content hash:</strong> <span class="mono">{{ selected_context.published_hash[:24] }}…</span></div>
+      <div><strong>Current content hash:</strong> <span class="mono">{{ selected_context.current_hash[:24] }}…</span></div>
+      <div><strong>Status:</strong> {{ 'changed since publication' if selected_context.is_dirty else 'identical to the published version' }}</div>
+      {% if selected_context.is_dirty %}
+      <h4>Changes not yet in the published version</h4>
+      <ul class="small">
+        <li>Headline: {{ selected_context.published_snapshot.get('title','') }} → {{ selected_context.current_snapshot.get('title','') }}</li>
+        <li>Body paragraphs: {{ selected_context.published_snapshot.get('body', [])|length }} → {{ selected_context.current_snapshot.get('body', [])|length }}</li>
+      </ul>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="muted">No article is linked to this edition.</p>
+    {% endif %}
+  </section>
+
+  <aside class="workspace__preview">
+    <div class="workspace__head">
+      <h2>Newspaper preview</h2>
+      <span class="small">{{ pages|length }} page(s)</span>
+    </div>
+    {% if pages %}
+    <div class="ws-pages">
+      {% for page in pages %}
+      {% set page_number = page.page_number %}
+      <figure class="ws-page{% if active_page == page_number %} is-active{% endif %}">
+        <a href="/editions/{{ edition.id }}/preview/{{ page_number }}?v={{ edition.preview_revision or edition.version }}" target="_blank" rel="noopener">
+          <img src="/editions/{{ edition.id }}/preview/{{ page_number }}?v={{ edition.preview_revision or edition.version }}" alt="Page {{ page_number }}" loading="lazy">
+        </a>
+        <figcaption>
+          <span>Page {{ page_number }} · {{ page.template|status_label }}</span>
+          {% for item in page_articles.get(page_number, []) %}
+          <a class="small" href="/editions/{{ edition.id }}?article={{ item.id }}">{{ item.title[:60] }}{% if item.title|length > 60 %}…{% endif %}</a>
+          {% endfor %}
+        </figcaption>
+      </figure>
+      {% endfor %}
     </div>
     {% else %}
-      <p class="muted">No open review items for this edition.</p>
-    {% endif %}
-  </div>
-
-  <aside>
-    <h2>Release</h2>
-    <p class="small">A release marks this immutable local bundle as published. It does not upload anything to a public host.</p>
-    {% if can.edit %}
-      <form method="post" action="/editions/{{ edition.id }}/publish" class="stack">
-        <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" {% if blockers or edition.status == 'published' %}disabled{% endif %}>Release edition</button>
-      </form>
-      {% if can.operate %}
-      <form method="post" action="/editions/{{ edition.id }}/republish" class="stack" style="margin-top:10px">
-        <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" class="btn--ghost">Re-render as version {{ edition.version + 1 }}</button>
-        <span class="help">Re-renders the same article set (for layout or correction fixes) into a new versioned folder.</span>
-      </form>
-      {% endif %}
+      <p class="muted">No rendered pages yet. Save an article or rebuild the preview.</p>
     {% endif %}
 
-    <h2>Bundle</h2>
-    <ul class="checklist">
-      <li><span>PDF</span><b>{% if pdf_exists %}<a href="/editions/{{ edition.id }}/pdf">available</a>{% else %}missing{% endif %}</b></li>
-      <li><span>Print HTML</span><b>{{ 'available' if manifest.get('pdf') else '—' }}</b></li>
-      <li><span>E-paper</span><b>{% if epaper_exists %}<a href="/editions/{{ edition.id }}/epaper">available</a>{% else %}missing{% endif %}</b></li>
-      <li><span>Manifest</span><b>{{ 'recorded' if manifest else 'missing' }}</b></li>
-      <li><span>PDF SHA-256</span><b class="mono">{{ (manifest.get('pdf', {}).get('sha256') or '')[:16] }}{% if manifest.get('pdf', {}).get('sha256') %}…{% endif %}</b></li>
-      <li><span>PDF bytes</span><b>{{ manifest.get('pdf', {}).get('bytes', '—') }}</b></li>
-    </ul>
-
-    <h2>Provenance</h2>
-    <div class="small">
-      <p>{{ manifest.get('provenance_note', 'No provenance note recorded.') }}</p>
-      <p><strong>Generated:</strong> {{ manifest.get('generated_at', '—') }}</p>
-      <p><strong>Cartography:</strong> {{ manifest.get('publication', {}).get('cartographic_profile', '—') }}</p>
-      <p><strong>Accent:</strong> {{ manifest.get('publication', {}).get('accent', '—') }}</p>
-      <p><strong>Output:</strong> <span class="mono">{{ edition.output_dir or '—' }}</span></p>
-    </div>
+    <h3>Open review items</h3>
+    {% for flag in flags[:8] %}
+      <div class="ws-flag">
+        <span class="badge badge--{{ flag.severity }}">{{ flag.severity|status_label }}</span>
+        <a href="/editions/{{ edition.id }}?article={{ flag.article_id }}">{{ flag.category|status_label }}</a>
+        <div class="small">{{ flag.message[:160] }}</div>
+      </div>
+    {% else %}
+      <p class="muted small">No open review items for this edition's articles.</p>
+    {% endfor %}
 
     {% if job %}
-    <h2>Build job</h2>
-    <p><a href="/jobs/{{ job.id }}">Job #{{ job.id }}</a> · <span class="badge badge--{{ job.status }}">{{ job.status|status_label }}</span></p>
+    <h3>Last job</h3>
+    <p class="small"><a href="/jobs/{{ job.id }}">Job #{{ job.id }}</a> · {{ job.status|status_label }} · {{ job.stage|status_label }}</p>
     {% endif %}
-
-    <h2>Notes</h2>
-    <p class="small">This PDF is an office-print proof, not a certified PDF/X print-shop file. Verify the paper size and margins with the printer before commercial production. The source appendix is the evidence trail; QR codes appear only when a public destination is verified.</p>
+    <h3>Provenance</h3>
+    <p class="small">{{ manifest.get('provenance_note', 'No manifest recorded yet.') }}</p>
+    <p class="small mono">{{ edition.output_dir or edition.preview_dir or '—' }}</p>
   </aside>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/workspace.js" defer></script>
 {% endblock %}

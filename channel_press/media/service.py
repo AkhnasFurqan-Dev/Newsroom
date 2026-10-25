@@ -11,7 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Channel, PostFragment, PostMedia, SourcePost, StoryCluster
+from ..models import ArticleMedia, Channel, PostFragment, PostMedia, SourcePost, StoryCluster
 from ..timeutil import utcnow
 
 
@@ -22,6 +22,9 @@ class MediaChoice:
     reasons: list[str]
     is_video_frame: bool = False
     frame_seconds: float = 0.0
+    eligible: bool = True
+    blocked_reason: str = ""
+    preview_available: bool = False
 
 
 def _checksum(path: Path) -> str:
@@ -749,6 +752,9 @@ def rank_media(db: Session, story: StoryCluster) -> list[MediaChoice]:
     if not posts:
         return []
     media_rows = list(db.scalars(select(PostMedia).where(PostMedia.post_id.in_([p.id for p in posts]))))
+    posts_by_id = {post.id: post for post in posts}
+    channel = db.get(Channel, story.channel_id)
+    demo_channel = bool(channel and channel.is_demo)
     text = " ".join((p.text or "") for p in posts) + " " + story.canonical_title
     story_tokens = set(text.lower().split())
     choices: list[MediaChoice] = []
@@ -785,7 +791,29 @@ def rank_media(db: Session, story: StoryCluster) -> list[MediaChoice]:
         if media.kind in {"video", "animation"}:
             score -= 0.5
             reasons.append("video requires a selected still")
-        choices.append(MediaChoice(media=media, score=round(score, 3), reasons=reasons))
+        post = posts_by_id.get(media.post_id)
+        eligible, blocked_reason = (
+            _media_is_eligible(media, post=post) if post is not None else (False, "missing_source_post")
+        )
+        if not eligible and demo_channel and blocked_reason == "non_documentary_asset":
+            eligible = True
+            blocked_reason = ""
+        candidate = media.derivative_path or media.original_path
+        preview_available = bool(
+            candidate
+            and Path(candidate).is_file()
+            and Path(candidate).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+        )
+        choices.append(
+            MediaChoice(
+                media=media,
+                score=round(score, 3),
+                reasons=reasons,
+                eligible=eligible,
+                blocked_reason=blocked_reason,
+                preview_available=preview_available,
+            )
+        )
     choices.sort(key=lambda choice: choice.score, reverse=True)
     return choices
 
@@ -854,6 +882,108 @@ def select_lead_media(
         db.flush()
         return choice
     return None
+
+
+def apply_media_choice(
+    db: Session,
+    *,
+    article_id: int,
+    story: StoryCluster,
+    media_id: int,
+    target_dir: Path,
+    caption: str | None = None,
+    credit: str | None = None,
+    role: str = "lead",
+) -> ArticleMedia:
+    """Replace an article's lead/supporting asset with an eligible source asset.
+
+    Only media already associated with the story's source posts and cleared by
+    the rights/eligibility rules can be selected. The renderer still receives a
+    local derivative; no Telegram download happens during layout.
+    """
+    media = db.get(PostMedia, media_id)
+    if media is None:
+        raise ValueError("Media asset not found.")
+    if media.deleted_at is not None:
+        raise ValueError("This asset was withdrawn at the source and cannot be reused.")
+    allowed = {choice.media.id for choice in rank_media(db, story)}
+    if media.id not in allowed:
+        raise ValueError("That asset is not part of this story's source evidence.")
+    post = db.get(SourcePost, media.post_id)
+    if post is None:
+        raise ValueError("The source post for this asset is missing.")
+    eligible, reason = _media_is_eligible(media, post=post)
+    channel = db.get(Channel, post.channel_id)
+    demo_channel = bool(channel and channel.is_demo)
+    # A demo channel's plates are explicitly labelled synthetic in every
+    # edition, so an editor may choose among them. A real channel may not
+    # present a non-documentary or promotional asset as news photography.
+    if not eligible and not (demo_channel and reason == "non_documentary_asset"):
+        raise ValueError(f"Media cannot be used: {reason}.")
+    if not media.original_path or not Path(media.original_path).is_file():
+        ensure_media_files(db, story)
+    source = Path(media.original_path or "")
+    if not source.is_file():
+        raise ValueError("The local asset is missing and could not be prepared.")
+    graphic_kind = "photo"
+    if media.kind in {"video", "animation"}:
+        frames = extract_video_frames(media)
+        if not frames:
+            raise ValueError("No usable still frame could be extracted from that video.")
+        source = Path(frames[0]["path"])
+        graphic_kind = "video_still"
+    derivative = make_derivative(
+        source,
+        target_dir,
+        f"article_{article_id}_{role}_{media.id}.jpg",
+        crop_ratio=1.5,
+    )
+    media.derivative_path = str(derivative)
+    for row in db.scalars(
+        select(ArticleMedia).where(ArticleMedia.article_id == article_id, ArticleMedia.role == role)
+    ):
+        db.delete(row)
+    record = ArticleMedia(
+        article_id=article_id,
+        media_id=media.id,
+        role=role,
+        caption=(caption if caption is not None else media.caption) or "Source media.",
+        credit=(credit if credit is not None else media.credit) or "Source channel",
+        path=str(derivative),
+        checksum=_checksum(derivative),
+        graphic_kind=graphic_kind,
+        selected=True,
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
+def clear_article_media(db: Session, *, article_id: int, role: str = "lead") -> int:
+    removed = 0
+    for row in db.scalars(
+        select(ArticleMedia).where(ArticleMedia.article_id == article_id, ArticleMedia.role == role)
+    ):
+        db.delete(row)
+        removed += 1
+    db.flush()
+    return removed
+
+
+def update_media_caption(
+    db: Session, *, article_id: int, caption: str, credit: str, role: str = "lead"
+) -> ArticleMedia | None:
+    row = db.scalar(
+        select(ArticleMedia)
+        .where(ArticleMedia.article_id == article_id, ArticleMedia.role == role, ArticleMedia.selected.is_(True))
+        .order_by(ArticleMedia.id.desc())
+        .limit(1)
+    )
+    if row is not None:
+        row.caption = caption.strip()
+        row.credit = credit.strip()
+        db.flush()
+    return row
 
 
 def extract_video_frames(media: PostMedia, max_frames: int = 3) -> list[dict]:

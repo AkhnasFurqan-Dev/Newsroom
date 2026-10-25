@@ -420,10 +420,20 @@ def publish_edition(
     allow_quality_warnings: bool = False,
     mark_published: bool = True,
     layout_progress: Callable[[str, str], None] | None = None,
+    preview: bool = False,
 ) -> PublishResult:
+    """Render an edition.
+
+    ``preview=True`` writes a private working preview and never mutates the
+    publication fields (``output_dir``/``pdf_path``/``status``). A preview is
+    therefore never a published version, even when the edition itself is
+    published: the caller edits a working revision instead.
+    """
     profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
     if profile is None:
         raise PublicationError("Publication profile is not configured.")
+    if preview:
+        mark_published = False
     if demo_edition is None:
         channel = edition.channel_id
         from ..models import Channel
@@ -489,10 +499,38 @@ def publish_edition(
                     # cleared only by an explicit cache command.
                     media.edition_id = edition.id
                     media.retention_state = "edition_working_media"
+        from ..editorial.revisions import (
+            article_snapshot,
+            edition_content_fingerprint,
+            freeze_edition_articles,
+            snapshot_hash,
+        )
+
+        if not preview:
+            # The rendered bundle and its frozen article snapshots become the
+            # immutable record of this version. Do this before the manifest so
+            # the recorded revision/hash is exactly what was rendered.
+            freeze_edition_articles(db, edition)
         # Copy the print artefacts into a predictable layout.
         pdf_target = staging / "sample_issue.pdf"
         shutil.copy2(render.pdf_path, pdf_target)
         (staging / "print.html").write_text(render.html_path.read_text(encoding="utf-8"), encoding="utf-8")
+        manifest_articles = []
+        for package in plan.packages:
+            snapshot = article_snapshot(db, package.article)
+            manifest_articles.append(
+                {
+                    "id": package.article.id,
+                    "story_id": package.story.id,
+                    "title": package.article.title,
+                    "section": package.section,
+                    "genre": package.genre,
+                    "status": package.article.status,
+                    "revision": package.article.revision,
+                    "content_sha256": snapshot_hash(snapshot),
+                    "source_refs": package.source_refs,
+                }
+            )
         manifest = {
             "schema": "channel_press.manifest.v1",
             "edition": {
@@ -502,8 +540,13 @@ def publish_edition(
                 "issue_number": edition.issue_number,
                 "volume": edition.volume,
                 "version": edition.version,
-                "status": "published" if mark_published else "awaiting_review",
-                "published_at": iso_utc(utcnow()) if mark_published else None,
+                "parent_edition_id": edition.parent_edition_id,
+                "status": (
+                    "preview" if preview else ("published" if mark_published else "awaiting_review")
+                ),
+                "published_at": (
+                    None if preview else (iso_utc(utcnow()) if mark_published else None)
+                ),
                 "timezone": edition.timezone,
                 "window_start": iso_utc(edition.window_start),
                 "window_end": iso_utc(edition.window_end),
@@ -518,6 +561,7 @@ def publish_edition(
                 "accent": profile.accent,
             },
             "generated_at": iso_utc(utcnow()),
+            "preview": preview,
             "demo_edition": bool(demo_edition),
             "pdf": {
                 "file": "sample_issue.pdf",
@@ -529,18 +573,7 @@ def publish_edition(
             "quality": render.qa,
             "pages": render.pages,
             "sources": plan.appendix_entries,
-            "articles": [
-                {
-                    "id": package.article.id,
-                    "story_id": package.story.id,
-                    "title": package.article.title,
-                    "section": package.section,
-                    "genre": package.genre,
-                    "status": package.article.status,
-                    "source_refs": package.source_refs,
-                }
-                for package in plan.packages
-            ],
+            "articles": manifest_articles,
             "epaper": {
                 "index": "epaper/index.html",
                 "text": "epaper/text.html",
@@ -573,10 +606,18 @@ def publish_edition(
         if render.qa.get("page_count", 0) < 1:
             raise PublicationError("PDF contains no pages.")
 
-        final_dir = output_root / edition_slug(profile) / edition_folder_name(edition, profile)
-        final_dir.parent.mkdir(parents=True, exist_ok=True)
-        if final_dir.exists():
-            raise PublicationError(f"Output folder already exists: {final_dir}")
+        if preview:
+            final_dir = output_root / edition_slug(profile) / f".preview-{edition.id}"
+            final_dir.parent.mkdir(parents=True, exist_ok=True)
+            # The preview folder is owned by this edition and can be replaced:
+            # it is never a published artefact.
+            if final_dir.exists():
+                shutil.rmtree(final_dir)
+        else:
+            final_dir = output_root / edition_slug(profile) / edition_folder_name(edition, profile)
+            final_dir.parent.mkdir(parents=True, exist_ok=True)
+            if final_dir.exists():
+                raise PublicationError(f"Output folder already exists: {final_dir}")
         staging.replace(final_dir)
         staging = final_dir
         pdf_path = final_dir / "sample_issue.pdf"
@@ -584,6 +625,25 @@ def publish_edition(
         manifest_path = final_dir / "manifest.json"
 
         _persist_pages(db, edition, plan, render, preview_root=final_dir / "pages")
+        if preview:
+            edition.preview_dir = str(final_dir)
+            edition.preview_pdf_path = str(pdf_path)
+            edition.preview_revision = edition_content_fingerprint(db, edition)
+            edition.preview_updated_at = utcnow()
+            edition.preview_state = "current"
+            edition.updated_at = utcnow()
+            db.flush()
+            return PublishResult(
+                edition_id=edition.id,
+                status="preview",
+                output_dir=final_dir,
+                pdf_path=pdf_path,
+                epaper_dir=epaper_path,
+                manifest_path=manifest_path,
+                warnings=list(render.qa.get("warnings", [])),
+                version=edition.version,
+                media_cleanup={},
+            )
         db.execute(EditionAsset.__table__.delete().where(EditionAsset.edition_id == edition.id))
         for name, kind in ASSET_KINDS.items():
             path = final_dir / name
@@ -643,6 +703,11 @@ def publish_edition(
                 )
         else:
             media_cleanup = {}
+        if mark_published:
+            # The release bundle is now the authoritative rendered output. The
+            # private preview folder is redundant and must not be mistaken for
+            # the published artefact.
+            _discard_preview(edition, output_root)
         db.flush()
         return PublishResult(
             edition_id=edition.id,
@@ -659,6 +724,72 @@ def publish_edition(
         if staging.exists() and staging.name.startswith(".staging-"):
             shutil.rmtree(staging, ignore_errors=True)
         raise
+
+
+def _discard_preview(edition: Edition, output_root: Path) -> None:
+    """Forget and delete the working preview once a version is released."""
+    preview_dir = edition.preview_dir
+    edition.preview_dir = ""
+    edition.preview_pdf_path = ""
+    edition.preview_state = "current"
+    edition.preview_updated_at = utcnow()
+    if not preview_dir:
+        return
+    try:
+        target = Path(preview_dir).resolve()
+        root = output_root.resolve()
+    except OSError:
+        return
+    if root in target.parents and target.name.startswith(".preview-"):
+        shutil.rmtree(target, ignore_errors=True)
+
+
+
+def render_preview(
+    db: Session,
+    edition: Edition,
+    *,
+    actor_id: int | None = None,
+) -> PublishResult:
+    """Render the working preview without publishing.
+
+    Quality warnings are recorded rather than raised: an editor must still see
+    the page that needs fixing. Publication keeps the strict gate.
+    """
+    result = publish_edition(
+        db,
+        edition,
+        actor_id=actor_id,
+        mark_published=False,
+        allow_quality_warnings=True,
+        preview=True,
+    )
+    audit_note = {
+        "preview_revision": edition.preview_revision,
+        "pages": len(result.warnings),
+    }
+    _ = audit_note
+    return result
+
+
+def purge_unpublished_output(edition: Edition, *, output_root: Path | None = None) -> None:
+    """Remove a stale draft bundle before re-rendering it for publication.
+
+    Only an unpublished edition may be cleaned; a published folder is immutable.
+    The check is deliberately path-based and conservative.
+    """
+    if edition.status == "published" or not edition.output_dir:
+        return
+    root = (output_root or settings.output_dir).resolve()
+    try:
+        target = Path(edition.output_dir).resolve()
+    except OSError:
+        return
+    if root not in target.parents:
+        return
+    if target.name.startswith(".preview-") or target.name.startswith(".staging-"):
+        return
+    shutil.rmtree(target, ignore_errors=True)
 
 
 def advance_watermark(db: Session, schedule: EditionSchedule, cutoff_at: datetime) -> None:

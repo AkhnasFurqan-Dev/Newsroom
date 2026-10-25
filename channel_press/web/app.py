@@ -71,6 +71,23 @@ from ..db import SessionLocal, session_dependency
 from ..logging_setup import configure_logging, get_logger
 from ..editorial.audit import publish_gate
 from ..editorial.drafting import reaudit_article, save_editor_edit
+from ..editorial.revisions import (
+    BLOCKING_STATUSES,
+    EDITORIAL_STATUSES,
+    STATUS_LABELS,
+    RevisionConflict,
+    article_media,
+    article_snapshot,
+    edition_content_fingerprint,
+    edition_versions,
+    preview_matches_content,
+    reorder_article,
+    revision_history,
+    save_article_revision,
+    set_article_status,
+    snapshot_hash,
+    working_revision,
+)
 from ..ingestion.adapters import ImportFormatError, normalize_messages
 from ..ingestion.service import ensure_import_media_dir, import_payload
 from ..migrations import upgrade_database
@@ -78,7 +95,6 @@ from ..preflight import build_preflight
 from ..models import (
     Article,
     ArticleMedia,
-    ArticleVersion,
     AuditEvent,
     CartographicProfile,
     Channel,
@@ -91,7 +107,6 @@ from ..models import (
     JobStep,
     PostFragment,
     PostMedia,
-    PublicationAttempt,
     PublicationProfile,
     ReviewFlag,
     RightsGrant,
@@ -104,10 +119,18 @@ from ..models import (
 )
 from ..publishing.service import (
     edition_review_blockers,
-    finalize_media_cleanup,
-    record_manifest_release,
+    publish_edition,
+    purge_unpublished_output,
+    render_preview,
 )
-from ..media.service import clear_media_cache, media_cache_summary
+from ..media.service import (
+    apply_media_choice,
+    clear_article_media,
+    clear_media_cache,
+    media_cache_summary,
+    rank_media,
+    update_media_caption,
+)
 from ..editorial.moderation import (
     CLASSIFICATION_LABELS,
     CLASSIFIER_VERSION,
@@ -119,7 +142,6 @@ from ..scheduling.service import (
     enqueue_collect_job,
     enqueue_due_jobs,
     enqueue_manual_job,
-    enqueue_republish_job,
     latest_due_cutoff,
     progress_snapshot,
     worker_once,
@@ -381,6 +403,63 @@ def _edition_or_404(db: Session, edition_id: int, user: User) -> Edition:
     if channel and not can_access_channel(db, user, channel, "viewer"):
         raise HTTPException(403, "You do not have access to this edition.")
     return edition
+
+
+def _edition_link_or_404(
+    db: Session, edition: Edition, article_id: int
+) -> tuple[EditionArticle, Article]:
+    link = db.scalar(
+        select(EditionArticle).where(
+            EditionArticle.edition_id == edition.id,
+            EditionArticle.article_id == article_id,
+        )
+    )
+    if link is None:
+        raise HTTPException(404, "That article is not part of this edition.")
+    article = db.get(Article, article_id)
+    if article is None:
+        raise HTTPException(404, "Article not found.")
+    return link, article
+
+
+def _edition_links(db: Session, edition: Edition) -> list[tuple[EditionArticle, Article]]:
+    links = list(
+        db.scalars(
+            select(EditionArticle)
+            .where(EditionArticle.edition_id == edition.id)
+            .order_by(EditionArticle.sort_order.asc(), EditionArticle.id.asc())
+        )
+    )
+    rows: list[tuple[EditionArticle, Article]] = []
+    for link in links:
+        article = db.get(Article, link.article_id)
+        if article is not None:
+            rows.append((link, article))
+    return rows
+
+
+def _rerender_preview(db: Session, edition: Edition, *, actor_id: int | None) -> tuple[bool, str]:
+    """Render after a committed editorial change. Failure never loses the edit."""
+    from ..publishing.service import LayoutQualityError, PublicationError
+
+    try:
+        result = render_preview(db, edition, actor_id=actor_id)
+        db.commit()
+    except (PublicationError, LayoutQualityError, ValueError) as exc:
+        db.rollback()
+        edition = db.get(Edition, edition.id) or edition
+        edition.preview_state = "failed"
+        db.commit()
+        return False, f"Saved, but the preview could not be rebuilt: {str(exc)[:300]}"
+    except Exception as exc:  # noqa: BLE001 - never lose a saved revision
+        db.rollback()
+        edition = db.get(Edition, edition.id) or edition
+        edition.preview_state = "failed"
+        db.commit()
+        return False, f"Saved, but the preview failed: {type(exc).__name__}: {str(exc)[:240]}"
+    warnings = list(result.warnings or [])
+    note = f" Preview rebuilt with {len(warnings)} layout warning(s)." if warnings else " Preview is current."
+    return True, note
 
 
 def _safe_child(root: Path, relative: str) -> Path:
@@ -1374,6 +1453,28 @@ def telegram_sync(
 # ---------------------------------------------------------------------------
 
 
+@app.get("/media/{media_id}/preview")
+def media_preview(
+    media_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(session_dependency),
+):
+    media = db.get(PostMedia, media_id)
+    if media is None:
+        raise HTTPException(404, "Media not found.")
+    post = db.get(SourcePost, media.post_id)
+    if post is None:
+        raise HTTPException(404, "Source post not found.")
+    _channel_or_404(db, post.channel_id, user)
+    candidate = media.derivative_path if media.derivative_path and Path(media.derivative_path).exists() else media.original_path
+    if not candidate or not Path(candidate).exists():
+        raise HTTPException(404, "The local preview is not available.")
+    suffix = Path(candidate).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        raise HTTPException(404, "No image preview is available for this asset.")
+    return FileResponse(Path(candidate))
+
+
 @app.get("/stories")
 def stories_page(
     request: Request,
@@ -1477,10 +1578,24 @@ def article_detail(
     if story:
         _channel_or_404(db, story.channel_id, user)
     flags = list(db.scalars(select(ReviewFlag).where(ReviewFlag.article_id == article.id).order_by(ReviewFlag.id.desc())))
-    versions = list(db.scalars(select(ArticleVersion).where(ArticleVersion.article_id == article.id).order_by(ArticleVersion.revision.desc())))
+    versions = revision_history(db, article)
     audit_data = json.loads(article.audit_json or "{}")
     gate, blockers = publish_gate(db, article.id)
     media = list(db.scalars(select(ArticleMedia).where(ArticleMedia.article_id == article.id)))
+    alternatives = rank_media(db, story) if story is not None else []
+    from ..models import ExternalReference
+
+    external = (
+        list(
+            db.scalars(
+                select(ExternalReference)
+                .where(ExternalReference.story_id == article.story_id)
+                .order_by(ExternalReference.accessed_at.desc())
+            )
+        )
+        if story is not None
+        else []
+    )
     editions = list(
         db.scalars(
             select(Edition)
@@ -1505,7 +1620,11 @@ def article_detail(
             gate=gate,
             blockers=blockers,
             media=media,
+            alternatives=alternatives,
+            external=external,
             editions=editions,
+            editorial_statuses=EDITORIAL_STATUSES,
+            status_labels=STATUS_LABELS,
         ),
     )
 
@@ -1518,6 +1637,10 @@ def article_edit(
     deck: str = Form(""),
     standfirst: str = Form(""),
     body_text: str = Form(...),
+    byline: str = Form(""),
+    section: str = Form(""),
+    genre: str = Form(""),
+    expected_revision: str = Form(""),
     lock: str = Form(""),
     user: User = Depends(require_role("editor")),
     db: Session = Depends(session_dependency),
@@ -1530,6 +1653,7 @@ def article_edit(
     if story:
         _channel_or_404(db, story.channel_id, user, "editor")
     try:
+        expected = int(expected_revision) if str(expected_revision).strip().isdigit() else article.revision
         save_editor_edit(
             db,
             article,
@@ -1539,13 +1663,36 @@ def article_edit(
             body_text=body_text,
             actor_id=user.id,
             lock=bool(lock),
+            expected_revision=expected,
+            byline=byline,
         )
+        if section and section != article.section:
+            article.section = section
+        if genre and genre != article.genre:
+            article.genre = genre
+        from ..editorial.revisions import mark_preview_stale
+
+        affected = list(
+            db.scalars(
+                select(Edition)
+                .join(EditionArticle, EditionArticle.edition_id == Edition.id)
+                .where(EditionArticle.article_id == article.id)
+            )
+        )
+        for edition in affected:
+            mark_preview_stale(db, edition)
         audit(db, user, "article.edit", "article", article.id, {"revision": article.revision})
         db.commit()
+    except RevisionConflict as exc:
+        db.rollback()
+        return _redirect(f"/articles/{article.id}", error=str(exc))
     except ValueError as exc:
         db.rollback()
         return _redirect(f"/articles/{article.id}", error=str(exc))
-    return _redirect(f"/articles/{article.id}", "Article saved as a new revision.")
+    return _redirect(
+        f"/articles/{article.id}",
+        "Article saved as a new revision. Rebuild the edition preview from the edition workspace.",
+    )
 
 
 @app.post("/articles/{article_id}/reaudit")
@@ -1617,7 +1764,7 @@ def article_status(
     story = db.get(StoryCluster, article.story_id)
     if story:
         _channel_or_404(db, story.channel_id, user, "editor")
-    if status not in {"draft", "needs_review", "approved", "rejected"}:
+    if status not in EDITORIAL_STATUSES:
         return _redirect(f"/articles/{article.id}", error="Unknown article status.")
     gate, blockers = publish_gate(db, article.id)
     if status == "approved" and not gate:
@@ -1625,10 +1772,21 @@ def article_status(
             f"/articles/{article.id}",
             error="Cannot approve while blocking review items remain: " + ", ".join(blockers),
         )
-    article.status = status
-    audit(db, user, "article.status", "article", article.id, {"status": status})
+    set_article_status(db, article, status, actor_id=user.id)
+    from ..editorial.revisions import mark_preview_stale
+
+    for edition in db.scalars(
+        select(Edition)
+        .join(EditionArticle, EditionArticle.edition_id == Edition.id)
+        .where(EditionArticle.article_id == article.id)
+    ):
+        mark_preview_stale(db, edition)
+    audit(db, user, "article.status", "article", article.id, {"status": status, "revision": article.revision})
     db.commit()
-    return _redirect(f"/articles/{article.id}", f"Article marked {status.replace('_', ' ')}.")
+    return _redirect(
+        f"/articles/{article.id}",
+        f"Article marked {STATUS_LABELS.get(status, status).lower()}.",
+    )
 
 
 @app.post("/articles/{article_id}/lock")
@@ -1809,32 +1967,143 @@ def editions_page(request: Request, user: User = Depends(current_user), db: Sess
 def edition_detail(
     edition_id: int,
     request: Request,
+    article: int | None = None,
+    page: int | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(session_dependency),
 ):
     edition = _edition_or_404(db, edition_id, user)
-    manifest = json.loads(edition.manifest_json or "{}")
-    pages = list(db.scalars(select(EditionPage).where(EditionPage.edition_id == edition.id).order_by(EditionPage.page_number)))
-    blockers = edition_review_blockers(db, edition.id)
-    job = db.scalar(select(Job).where(Job.edition_id == edition.id).order_by(Job.id.desc()))
-    articles = list(
+    channel = db.get(Channel, edition.channel_id)
+    rows = _edition_links(db, edition)
+    selected_link: EditionArticle | None = None
+    selected: Article | None = None
+    if article is not None:
+        selected_link, selected = _edition_link_or_404(db, edition, article)
+    elif rows:
+        selected_link, selected = rows[0]
+    pages = list(
         db.scalars(
-            select(Article)
-            .join(EditionArticle, EditionArticle.article_id == Article.id)
-            .where(EditionArticle.edition_id == edition.id)
-            .order_by(EditionArticle.sort_order)
+            select(EditionPage)
+            .where(EditionPage.edition_id == edition.id)
+            .order_by(EditionPage.page_number)
         )
     )
+    blockers = edition_review_blockers(db, edition.id)
+    held_rows = [(link, item) for link, item in rows if item.status in BLOCKING_STATUSES]
     flags = list(
         db.scalars(
-            select(ReviewFlag).where(
+            select(ReviewFlag)
+            .where(
                 ReviewFlag.status == "open",
-                ReviewFlag.article_id.in_([a.id for a in articles] or [-1]),
+                ReviewFlag.article_id.in_([item.id for _, item in rows] or [-1]),
             )
+            .order_by(ReviewFlag.id.desc())
         )
     )
+    family = edition_versions(db, edition)
+    manifest = json.loads(edition.manifest_json or "{}")
+    preview_pages = bool(edition.preview_dir) or edition.status == "published"
+    fingerprint = edition_content_fingerprint(db, edition)
+    preview_current = preview_matches_content(db, edition) or (
+        edition.status == "published" and bool(edition.pdf_path)
+    )
+    selected_context: dict = {}
+    if selected is not None:
+        story = db.get(StoryCluster, selected.story_id)
+        evidence_rows = db.execute(
+            select(PostFragment, SourcePost)
+            .join(SourcePost, PostFragment.post_id == SourcePost.id)
+            .where(PostFragment.story_id == selected.story_id)
+            .order_by(SourcePost.posted_at.asc())
+        ).all()
+        claims = list(
+            db.scalars(
+                select(StoryClaim)
+                .where(StoryClaim.story_id == selected.story_id)
+                .order_by(StoryClaim.event_at.asc(), StoryClaim.id.asc())
+            )
+        )
+        timelines = list(
+            db.scalars(
+                select(StoryTimelineEvent)
+                .where(StoryTimelineEvent.story_id == selected.story_id)
+                .order_by(StoryTimelineEvent.event_at.asc())
+            )
+        )
+        from ..models import ExternalReference
+
+        external = list(
+            db.scalars(
+                select(ExternalReference)
+                .where(ExternalReference.story_id == selected.story_id)
+                .order_by(ExternalReference.accessed_at.desc())
+            )
+        )
+        media_rows = article_media(db, selected.id)
+        lead = next((row for row in media_rows if row.role == "lead" and row.selected), None)
+        alternatives = rank_media(db, story) if story is not None else []
+        if story is not None:
+            allowed = {choice.media.id for choice in alternatives}
+            alternatives = [choice for choice in alternatives if choice.media.id in allowed][:12]
+        history = revision_history(db, selected)
+        published_snapshot: dict = {}
+        try:
+            published_snapshot = json.loads(selected_link.snapshot_json or "{}") if selected_link else {}
+        except json.JSONDecodeError:
+            published_snapshot = {}
+        current_snapshot = article_snapshot(db, selected)
+        selected_context = {
+            "story": story,
+            "evidence_rows": evidence_rows,
+            "claims": claims,
+            "timelines": timelines,
+            "external": external,
+            "media_rows": media_rows,
+            "lead_media": lead,
+            "alternatives": alternatives,
+            "history": history,
+            "published_snapshot": published_snapshot,
+            "current_snapshot": current_snapshot,
+            "current_hash": snapshot_hash(current_snapshot),
+            "published_hash": snapshot_hash(published_snapshot) if published_snapshot else "",
+            "is_dirty": bool(published_snapshot)
+            and snapshot_hash(current_snapshot) != snapshot_hash(published_snapshot),
+        }
     epaper_exists = bool(edition.epaper_dir and (Path(edition.epaper_dir) / "index.html").exists())
     pdf_exists = bool(edition.pdf_path and Path(edition.pdf_path).exists())
+    working_pdf = edition.preview_pdf_path if edition.preview_pdf_path else edition.pdf_path
+    working_pdf_exists = bool(working_pdf and Path(working_pdf).exists())
+    page_previews = {row.page_number: row.preview_path for row in pages}
+    article_states: dict[int, dict] = {}
+    for link, item in rows:
+        try:
+            frozen = json.loads(link.snapshot_json or "{}")
+        except json.JSONDecodeError:
+            frozen = {}
+        article_states[item.id] = {
+            "has_snapshot": bool(frozen),
+            "frozen_revision": link.article_revision,
+            "dirty": bool(frozen)
+            and snapshot_hash(article_snapshot(db, item)) != snapshot_hash(frozen),
+        }
+    by_article = {item.id: item for _, item in rows}
+    page_articles: dict[int, list[Article]] = {}
+    for page_row in pages:
+        try:
+            story_map = json.loads(page_row.story_map_json or "[]")
+        except json.JSONDecodeError:
+            story_map = []
+        seen: set[int] = set()
+        linked: list[Article] = []
+        for entry in story_map if isinstance(story_map, list) else []:
+            try:
+                article_id = int(entry.get("article_id") or 0)
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if article_id in by_article and article_id not in seen:
+                seen.add(article_id)
+                linked.append(by_article[article_id])
+        page_articles[page_row.page_number] = linked
     return render(
         request,
         "edition.html",
@@ -1844,15 +2113,254 @@ def edition_detail(
             user,
             "editions",
             edition=edition,
+            channel=channel,
             manifest=manifest,
             pages=pages,
+            page_previews=page_previews,
             blockers=blockers,
-            job=job,
-            articles=articles,
+            held_rows=held_rows,
+            job=db.scalar(select(Job).where(Job.edition_id == edition.id).order_by(Job.id.desc())),
+            rows=rows,
+            articles=[item for _, item in rows],
+            selected_link=selected_link,
+            selected=selected,
+            selected_context=selected_context,
             flags=flags,
+            family=family,
+            fingerprint=fingerprint,
+            preview_current=preview_current,
+            preview_pages=preview_pages,
+            working_pdf_exists=working_pdf_exists,
             epaper_exists=epaper_exists,
             pdf_exists=pdf_exists,
+            editorial_statuses=EDITORIAL_STATUSES,
+            status_labels=STATUS_LABELS,
+            active_page=page,
+            article_states=article_states,
+            page_articles=page_articles,
         ),
+    )
+
+
+@app.post("/editions/{edition_id}/articles/{article_id}/save")
+def edition_article_save(
+    edition_id: int,
+    article_id: int,
+    request: Request,
+    title: str = Form(...),
+    deck: str = Form(""),
+    standfirst: str = Form(""),
+    body_text: str = Form(...),
+    byline: str = Form(""),
+    section: str = Form("national"),
+    genre: str = Form("news"),
+    expected_revision: str = Form(""),
+    lead_media_id: str = Form(""),
+    media_caption: str = Form(""),
+    media_credit: str = Form(""),
+    alt_caption: str = Form(""),
+    alt_credit: str = Form(""),
+    remove_media: str = Form(""),
+    lock: str = Form(""),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Save an article revision and rebuild the edition preview from it."""
+    edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    original_edition_id = edition.id
+    try:
+        if edition.status == "published":
+            edition = working_revision(db, edition, actor_id=user.id)
+            db.flush()
+        link, article = _edition_link_or_404(db, edition, article_id)
+        expected = int(expected_revision) if str(expected_revision).strip().isdigit() else article.revision
+        save_article_revision(
+            db,
+            article,
+            title=title,
+            deck=deck,
+            standfirst=standfirst,
+            body_text=body_text,
+            actor_id=user.id,
+            expected_revision=expected,
+            byline=byline,
+            section=section,
+            genre=genre,
+            lock=bool(lock) or article.locked,
+        )
+        story = db.get(StoryCluster, article.story_id)
+        if remove_media == "1":
+            clear_article_media(db, article_id=article.id)
+        elif str(lead_media_id).strip().isdigit() and story is not None:
+            apply_media_choice(
+                db,
+                article_id=article.id,
+                story=story,
+                media_id=int(lead_media_id),
+                target_dir=settings.media_dir,
+                caption=(alt_caption or media_caption) or None,
+                credit=(alt_credit or media_credit) or None,
+            )
+        elif media_caption or media_credit:
+            update_media_caption(
+                db,
+                article_id=article.id,
+                caption=media_caption,
+                credit=media_credit,
+            )
+        from ..editorial.revisions import mark_preview_stale
+
+        mark_preview_stale(db, edition)
+        audit(
+            db,
+            user,
+            "article.workspace_save",
+            "article",
+            article.id,
+            {
+                "edition": edition.id,
+                "revision": article.revision,
+                "working_version": edition.version,
+            },
+        )
+        db.commit()
+    except RevisionConflict as exc:
+        db.rollback()
+        return _redirect(
+            f"/editions/{original_edition_id}?article={article_id}",
+            error=str(exc),
+        )
+    except ValueError as exc:
+        db.rollback()
+        return _redirect(
+            f"/editions/{original_edition_id}?article={article_id}",
+            error=str(exc),
+        )
+    ok, note = _rerender_preview(db, edition, actor_id=user.id)
+    target = f"/editions/{edition.id}?article={article.id}"
+    if not ok:
+        return _redirect(target, error=note)
+    return _redirect(target, f"Saved revision {article.revision}.{note}")
+
+
+@app.post("/editions/{edition_id}/articles/{article_id}/status")
+def edition_article_status(
+    edition_id: int,
+    article_id: int,
+    request: Request,
+    status: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    original_edition_id = edition.id
+    if status not in EDITORIAL_STATUSES:
+        return _redirect(f"/editions/{edition.id}?article={article_id}", error="Unknown article status.")
+    if edition.status == "published":
+        edition = working_revision(db, edition, actor_id=user.id)
+        db.flush()
+    link, article = _edition_link_or_404(db, edition, article_id)
+    if status == "approved":
+        gate, blockers = publish_gate(db, article.id)
+        if not gate:
+            db.rollback()
+            return _redirect(
+                f"/editions/{original_edition_id}?article={article_id}",
+                error="Cannot approve while blocking review items remain: " + ", ".join(blockers),
+            )
+    from ..editorial.revisions import mark_preview_stale
+
+    set_article_status(db, article, status, actor_id=user.id)
+    mark_preview_stale(db, edition)
+    audit(
+        db,
+        user,
+        "article.status",
+        "article",
+        article.id,
+        {"status": status, "edition": edition.id, "revision": article.revision},
+    )
+    db.commit()
+    ok, note = _rerender_preview(db, edition, actor_id=user.id)
+    target = f"/editions/{edition.id}?article={article.id}"
+    label = STATUS_LABELS.get(status, status)
+    if not ok:
+        return _redirect(target, error=note)
+    return _redirect(target, f"Article marked {label}.{note}")
+
+
+@app.post("/editions/{edition_id}/articles/{article_id}/order")
+def edition_article_order(
+    edition_id: int,
+    article_id: int,
+    request: Request,
+    direction: int = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    if edition.status == "published":
+        edition = working_revision(db, edition, actor_id=user.id)
+        db.flush()
+    link, article = _edition_link_or_404(db, edition, article_id)
+    reorder_article(db, edition, link, 1 if direction > 0 else -1)
+    audit(db, user, "edition.article_order", "edition", edition.id, {"article": article.id, "direction": direction})
+    db.commit()
+    ok, note = _rerender_preview(db, edition, actor_id=user.id)
+    target = f"/editions/{edition.id}?article={article.id}"
+    if not ok:
+        return _redirect(target, error=note)
+    return _redirect(target, f"Article order updated.{note}")
+
+
+@app.post("/editions/{edition_id}/preview")
+def edition_preview_refresh(
+    edition_id: int,
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    if edition.status == "published":
+        edition = working_revision(db, edition, actor_id=user.id)
+        db.commit()
+        return _redirect(
+            f"/editions/{edition.id}",
+            f"Version {edition.version} opened as a working draft. Release it when the changes are approved.",
+        )
+    ok, note = _rerender_preview(db, edition, actor_id=user.id)
+    target = f"/editions/{edition.id}"
+    if not ok:
+        return _redirect(target, error=note)
+    return _redirect(target, f"Preview rebuilt from the latest saved revisions.{note}")
+
+
+@app.post("/editions/{edition_id}/revision")
+def edition_create_revision(
+    edition_id: int,
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    if edition.status != "published":
+        return _redirect(f"/editions/{edition.id}", "This edition is already a working draft.")
+    revision = working_revision(db, edition, actor_id=user.id)
+    audit(db, user, "edition.revision_open", "edition", revision.id, {"source": edition.id})
+    db.commit()
+    return _redirect(
+        f"/editions/{revision.id}",
+        f"Version {revision.version} created from the published version {edition.version}. V{edition.version} remains unchanged.",
     )
 
 
@@ -1959,52 +2467,89 @@ def edition_publish(
     _csrf: None = Depends(require_csrf),
 ):
     edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    if edition.status == "published":
+        return _redirect(
+            f"/editions/{edition.id}",
+            "This version is already published and immutable. Open a working revision to make changes.",
+        )
     blockers = edition_review_blockers(db, edition.id)
+    rows = _edition_links(db, edition)
+    withheld = [
+        f"{article.title[:70]} ({STATUS_LABELS.get(article.status, article.status)})"
+        for _, article in rows
+        if article.status in BLOCKING_STATUSES
+    ]
+    if withheld:
+        blockers.append("Held or awaiting research: " + "; ".join(withheld[:4]))
     if blockers:
         return _redirect(f"/editions/{edition.id}", error="Cannot release: " + "; ".join(blockers[:4]))
-    if not edition.pdf_path or not Path(edition.pdf_path).exists():
-        return _redirect(f"/editions/{edition.id}", error="Cannot release: the PDF is missing.")
-    edition.status = "published"
-    edition.published_at = utcnow()
-    record_manifest_release(edition)
-    commit_edition_window(db, edition)
-    db.add(
-        PublicationAttempt(
-            edition_id=edition.id,
-            destination=edition.output_dir or "local",
-            status="succeeded",
-            checksum=(json.loads(edition.manifest_json or "{}").get("pdf", {}) or {}).get("sha256", ""),
-            completed_at=utcnow(),
-        )
-    )
-    audit(db, user, "edition.publish", "edition", edition.id)
+    # Release always renders the latest saved revisions. A stale draft bundle is
+    # discarded first; a published bundle is never touched.
+    purge_unpublished_output(edition)
     db.commit()
-    cleanup_note = ""
     try:
-        result = finalize_media_cleanup(db, edition, actor=user)
-        db.commit()
-        if result.get("pending") or result.get("failed"):
-            cleanup_note = " Media cleanup is pending; retry from Media cache."
-    except Exception:  # noqa: BLE001 - publication stays successful
+        publish_edition(
+            db,
+            edition,
+            actor_id=user.id,
+            mark_published=True,
+            allow_quality_warnings=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - keep the edition editable
         db.rollback()
-        cleanup_note = " Media cleanup failed and is pending; the edition remains published."
-    return _redirect(f"/editions/{edition.id}", "Edition released." + cleanup_note)
+        edition = db.get(Edition, edition_id) or edition
+        edition.preview_state = "failed"
+        db.commit()
+        return _redirect(
+            f"/editions/{edition.id}",
+            error=f"Release failed; the edition is still a draft: {type(exc).__name__}: {str(exc)[:300]}",
+        )
+    commit_edition_window(db, edition)
+    audit(
+        db,
+        user,
+        "edition.publish",
+        "edition",
+        edition.id,
+        {
+            "version": edition.version,
+            "pdf_sha256": (json.loads(edition.manifest_json or "{}").get("pdf", {}) or {}).get("sha256", ""),
+        },
+    )
+    db.commit()
+    return _redirect(
+        f"/editions/{edition.id}",
+        f"Version {edition.version} published as an immutable release. Earlier versions are unchanged.",
+    )
 
 
 @app.post("/editions/{edition_id}/republish")
 def edition_republish(
     edition_id: int,
     request: Request,
-    user: User = Depends(require_role("operator")),
+    user: User = Depends(require_role("editor")),
     db: Session = Depends(session_dependency),
     _csrf: None = Depends(require_csrf),
 ):
+    """Open the next version from the latest saved revisions.
+
+    This never publishes automatically: it renders a working preview, and the
+    configured release action is required before the new version becomes V(n).
+    """
     edition = _edition_or_404(db, edition_id, user)
-    job = enqueue_republish_job(db, edition, actor_id=user.id)
-    audit(db, user, "edition.republish", "edition", edition.id, {"job": job.id})
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    working = working_revision(db, edition, actor_id=user.id)
+    audit(db, user, "edition.republish", "edition", working.id, {"source": edition.id, "version": working.version})
     db.commit()
-    launched = _launch_worker()
-    return _redirect(f"/jobs/{job.id}", f"Re-render queued as a new version. {launched}")
+    ok, note = _rerender_preview(db, working, actor_id=user.id)
+    target = f"/editions/{working.id}"
+    if not ok:
+        return _redirect(target, error=note)
+    return _redirect(
+        target,
+        f"Working version {working.version} rendered from the latest saved revisions. Release it to publish.{note}",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -289,9 +289,17 @@ def create_plan(
     ) or db.scalar(select(CartographicProfile).limit(1))
     packages: list[StoryPackage] = []
     used_media_ids: set[int] = set()
+    from ..editorial.revisions import EXCLUDED_STATUSES
+
     for link in links:
         article = db.get(Article, link.article_id)
         if article is None:
+            continue
+        # Editor decisions are authoritative for the printed product: an
+        # excluded article is never composed into the paper, and a held article
+        # stays out until the hold is lifted. Release is blocked separately so
+        # a hold cannot silently disappear.
+        if article.status in EXCLUDED_STATUSES or article.status == "held":
             continue
         package = _build_package(
             db,
@@ -307,6 +315,10 @@ def create_plan(
         if package.media_id is not None:
             used_media_ids.add(package.media_id)
         packages.append(package)
+    if not packages:
+        raise ValueError(
+            "Every article in this edition is excluded or held; restore at least one article before rendering."
+        )
     news = [p for p in packages if p.genre == "news"]
     lead = max(news, key=lambda p: p.story.importance, default=packages[0])
     # Never repeat the same source still for two different reports in one edition.

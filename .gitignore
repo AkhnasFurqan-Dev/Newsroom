@@ -38,3 +38,5 @@ Desktop.ini
 
 # Agent/session transcripts (may contain environment details)
 executing-*.json
+ses_*.json
+.vscode/

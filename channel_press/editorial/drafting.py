@@ -35,6 +35,7 @@ def _snapshot(article: Article) -> str:
             "deck": article.deck,
             "standfirst": article.standfirst,
             "body_json": article.body_json,
+            "byline": article.byline,
             "genre": article.genre,
             "section": article.section,
             "status": article.status,
@@ -406,31 +407,28 @@ def save_editor_edit(
     body_text: str,
     actor_id: int | None,
     lock: bool = False,
+    expected_revision: int | None = None,
+    byline: str | None = None,
 ) -> Article:
-    body = [paragraph.strip() for paragraph in body_text.split("\n\n") if paragraph.strip()]
-    if not body:
-        raise ValueError("Article body cannot be empty.")
-    article.title = title.strip()[:300]
-    article.deck = deck.strip()[:300]
-    article.standfirst = standfirst.strip()
-    article.body_json = json.dumps(body, ensure_ascii=False)
-    article.body_text = "\n\n".join(body)
-    article.word_count = len(article.body_text.split())
-    article.revision += 1
-    article.locked = lock or article.locked
-    article.updated_at = utcnow()
-    # A manual edit does not silently clear the audit; it becomes stale and is
-    # re-audited explicitly by the editor action.
-    db.add(
-        ArticleVersion(
-            article_id=article.id,
-            revision=article.revision,
-            snapshot_json=_snapshot(article),
-            actor_id=actor_id,
-        )
+    """Compatibility wrapper around the revision service.
+
+    Every caller (web, tests, CLI) lands on the same optimistic-concurrency
+    implementation, so an editor cannot silently overwrite a newer revision.
+    """
+    from .revisions import save_article_revision
+
+    return save_article_revision(
+        db,
+        article,
+        title=title,
+        deck=deck,
+        standfirst=standfirst,
+        body_text=body_text,
+        actor_id=actor_id,
+        expected_revision=expected_revision,
+        byline=byline,
+        lock=lock or article.locked,
     )
-    db.flush()
-    return article
 
 
 def reaudit_article(db: Session, article: Article) -> dict:

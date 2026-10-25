@@ -8,10 +8,11 @@
     <p class="lede">{{ article.deck or article.standfirst }}</p>
   </div>
   <div class="page-head__actions">
-    <span class="badge badge--{{ article.status }}">{{ article.status|status_label }}</span>
+    <span class="badge badge--{{ article.status }}">{{ status_labels.get(article.status, article.status) }}</span>
     <span class="badge {% if article.risk_level == 'high' %}badge--review{% endif %}">Risk: {{ article.risk_level }}</span>
     {% if article.locked %}<span class="badge">Locked</span>{% endif %}
     {% if story %}<a class="btn btn--ghost" href="/stories/{{ story.id }}">Story evidence</a>{% endif %}
+    {% if editions %}<a class="btn btn--ghost" href="/editions/{{ editions[0].id }}?article={{ article.id }}">Edition workspace</a>{% endif %}
   </div>
 </div>
 
@@ -26,15 +27,31 @@
   <div>
     <h2>Draft text</h2>
     {% if can.edit %}
-    <form method="post" action="/articles/{{ article.id }}/edit" class="stack">
+    <form method="post" action="/articles/{{ article.id }}/edit" class="stack" data-dirty-form>
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <div class="field"><label for="title">Headline</label><input id="title" name="title" type="text" value="{{ article.title }}" maxlength="300" required></div>
-      <div class="field"><label for="deck">Deck</label><input id="deck" name="deck" type="text" value="{{ article.deck }}" maxlength="300"></div>
-      <div class="field"><label for="standfirst">Standfirst</label><textarea id="standfirst" name="standfirst" style="min-height:80px">{{ article.standfirst }}</textarea></div>
-      <div class="field"><label for="body_text">Body (blank line between paragraphs)</label><textarea id="body_text" class="body-editor" name="body_text" required>{{ article.body_text }}</textarea></div>
+      <input type="hidden" name="expected_revision" value="{{ article.revision }}">
+      <div class="field"><label for="title">Headline</label><input id="title" name="title" type="text" value="{{ article.title }}" maxlength="300" required data-initial="{{ article.title }}"></div>
+      <div class="field"><label for="deck">Deck</label><input id="deck" name="deck" type="text" value="{{ article.deck }}" maxlength="300" data-initial="{{ article.deck }}"></div>
+      <div class="field"><label for="standfirst">Standfirst</label><textarea id="standfirst" name="standfirst" style="min-height:80px" data-initial="{{ article.standfirst }}">{{ article.standfirst }}</textarea></div>
+      <div class="field"><label for="body_text">Body (blank line between paragraphs)</label><textarea id="body_text" class="body-editor" name="body_text" required data-initial="{{ article.body_text }}">{{ article.body_text }}</textarea></div>
+      <div class="field-row">
+        <div class="field"><label for="byline">Byline</label><input id="byline" name="byline" type="text" value="{{ article.byline }}" maxlength="120" data-initial="{{ article.byline }}"></div>
+        <div class="field"><label for="section">Section</label>
+          <select id="section" name="section">
+            {% for key, label in sections %}{% if key != 'front' %}<option value="{{ key }}" {% if article.section == key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}
+          </select>
+        </div>
+        <div class="field"><label for="genre">Genre</label>
+          <select id="genre" name="genre">
+            {% for value in ['news', 'analysis', 'opinion', 'editor_note', 'brief'] %}<option value="{{ value }}" {% if article.genre == value %}selected{% endif %}>{{ value|status_label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
       <label class="field--inline"><input type="checkbox" name="lock" value="1" {% if article.locked %}checked{% endif %}> Lock this headline and text against regeneration</label>
       <div class="field-row">
         <button type="submit">Save revision</button>
+        <button type="button" class="btn--ghost" data-revert>Undo unsaved changes</button>
+        <span class="small" data-dirty-note hidden>Unsaved changes</span>
       </div>
     </form>
     <form method="post" action="/articles/{{ article.id }}/reaudit" class="inline" style="margin-top:10px">
@@ -46,6 +63,30 @@
         {% for paragraph in article.body_json|json_loads([]) %}<p>{{ paragraph }}</p>{% endfor %}
       </div>
     {% endif %}
+
+    <h2>Versions</h2>
+    {% for version in versions %}
+    <details {% if loop.first %}open{% endif %}>
+      <summary>Revision {{ version.revision }} · {{ version.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}{% if version.diff %} · {{ version.diff|length }} change(s){% endif %}</summary>
+      {% if version.diff %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+          <tbody>
+          {% for change in version.diff %}
+            <tr><td>{{ change.label }}</td><td class="diff-before">{{ change.before[:400] }}</td><td class="diff-after">{{ change.after[:400] }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small muted">Initial saved state for this revision.</p>
+      {% endif %}
+      <pre class="small">{{ version.snapshot|tojson(indent=2) if version.snapshot else '' }}</pre>
+    </details>
+    {% else %}
+      <p class="muted">No saved revisions.</p>
+    {% endfor %}
 
     <h2>Review items</h2>
     {% if flags %}
@@ -81,16 +122,6 @@
     {% else %}
       <p class="muted">No review items recorded for this article.</p>
     {% endif %}
-
-    <h2>Versions</h2>
-    {% for version in versions %}
-    <details>
-      <summary>Revision {{ version.revision }} · {{ version.created_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</summary>
-      <pre>{{ version.snapshot_json }}</pre>
-    </details>
-    {% else %}
-      <p class="muted">No saved revisions.</p>
-    {% endfor %}
   </div>
 
   <aside>
@@ -124,8 +155,8 @@
       <div class="field">
         <label for="status">Article status</label>
         <select id="status" name="status">
-          {% for value in ['draft', 'needs_review', 'approved', 'rejected'] %}
-          <option value="{{ value }}" {% if article.status == value %}selected{% endif %}>{{ value|status_label }}</option>
+          {% for value in ['draft', 'needs_review', 'research', 'approved', 'held', 'excluded'] %}
+          <option value="{{ value }}" {% if article.status == value %}selected{% endif %}>{{ status_labels.get(value, value) }}</option>
           {% endfor %}
         </select>
       </div>
@@ -149,13 +180,26 @@
     {% else %}
       <p class="muted">No selected media.</p>
     {% endfor %}
+    {% if alternatives %}
+    <p class="small">Open the edition workspace to replace the lead asset using eligible source media.</p>
+    {% endif %}
+
+    <h2>External context</h2>
+    {% for ref in external %}
+      <div class="small" style="margin-bottom:6px"><a href="{{ ref.url }}" rel="noopener nofollow">{{ ref.title or ref.url }}</a><br>{{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate }}</div>
+    {% else %}
+      <p class="muted small">No external references recorded.</p>
+    {% endfor %}
 
     <h2>Appears in</h2>
     {% for edition in editions %}
-      <div><a href="/editions/{{ edition.id }}">{{ edition.title }}</a> <span class="small">v{{ edition.version }} · {{ edition.status }}</span></div>
+      <div><a href="/editions/{{ edition.id }}?article={{ article.id }}">{{ edition.title }}</a> <span class="small">v{{ edition.version }} · {{ edition.status }}</span></div>
     {% else %}
       <p class="muted">Not linked to an edition.</p>
     {% endfor %}
   </aside>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/workspace.js" defer></script>
 {% endblock %}

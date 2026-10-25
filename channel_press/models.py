@@ -375,6 +375,7 @@ class Article(Base):
     standfirst: Mapped[str] = mapped_column(Text, default="")
     body_json: Mapped[str] = mapped_column(Text, default="[]")
     body_text: Mapped[str] = mapped_column(Text, default="")
+    byline: Mapped[str] = mapped_column(String(120), default="")
     genre: Mapped[str] = mapped_column(String(20), default="news")
     section: Mapped[str] = mapped_column(String(40), default="national")
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
@@ -606,6 +607,14 @@ class Edition(Base):
     pdf_path: Mapped[str] = mapped_column(String(500), default="")
     epaper_dir: Mapped[str] = mapped_column(String(500), default="")
     qr_policy: Mapped[str] = mapped_column(String(40), default="appendix")
+    # Draft preview state. A preview is never a published version: it lives in
+    # a hidden preview folder and is invalidated whenever an article revision
+    # used by this edition changes.
+    preview_state: Mapped[str] = mapped_column(String(20), default="current")
+    preview_revision: Mapped[int] = mapped_column(Integer, default=0)
+    preview_updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    preview_dir: Mapped[str] = mapped_column(String(500), default="")
+    preview_pdf_path: Mapped[str] = mapped_column(String(500), default="")
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
@@ -622,6 +631,11 @@ class EditionArticle(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     page_start: Mapped[int] = mapped_column(Integer, default=1)
     is_front: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Frozen copy of the article at the moment this edition version was
+    # published. It is what makes V1 immune to later article edits even though
+    # the working Article row keeps its revision history.
+    article_revision: Mapped[int] = mapped_column(Integer, default=0)
+    snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class EditionPage(Base):

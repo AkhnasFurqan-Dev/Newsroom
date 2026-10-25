@@ -759,25 +759,24 @@ def process_job(
         return json.loads(job.result_json)
 
     if job.kind == "republish_edition":
-        from ..publishing.service import publish_edition
+        from ..editorial.revisions import working_revision
+        from ..publishing.service import render_preview
 
-        edition = db.get(Edition, int(payload.get("edition_id") or job.edition_id or 0))
-        if edition is None:
+        source = db.get(Edition, int(payload.get("edition_id") or job.edition_id or 0))
+        if source is None:
             raise PublicationError("Republish job has no valid edition.")
-        job.stage = "layout"
+        # A re-render never mutates a published edition. It creates (or reuses)
+        # the next working version and renders a private preview from the latest
+        # saved article revisions. Release stays a separate editorial action.
+        edition = working_revision(db, source, actor_id=payload.get("actor_id"))
+        job.edition_id = edition.id
+        job.stage = "preview"
         job.heartbeat_at = utcnow()
         if progress:
-            progress("layout", f"Re-rendering edition {edition.id}")
-        edition.version += 1
-        edition.correction_note = edition.correction_note or "Re-rendered edition."
-        result = publish_edition(
-            db,
-            edition,
-            mark_published=True,
-            actor_id=payload.get("actor_id"),
-        )
-        job.status = "published"
-        job.stage = "published"
+            progress("preview", f"Rendering version {edition.version} preview")
+        result = render_preview(db, edition, actor_id=payload.get("actor_id"))
+        job.status = "awaiting_review"
+        job.stage = "preview_ready"
         job.finished_at = utcnow()
         job.heartbeat_at = job.finished_at
         job.lock_owner = ""
@@ -785,14 +784,15 @@ def process_job(
         job.result_json = json.dumps(
             {
                 "edition_id": edition.id,
+                "source_edition_id": source.id,
                 "status": edition.status,
-                "output_dir": edition.output_dir,
-                "pages": result.warnings and json.loads(edition.manifest_json or "{}").get("pdf", {}).get("page_count"),
+                "preview_dir": str(result.output_dir),
                 "version": edition.version,
+                "warnings": result.warnings,
             },
             ensure_ascii=False,
         )
-        _job_steps(db, job, [("layout", f"Rendered version {edition.version}")])
+        _job_steps(db, job, [("preview", f"Rendered version {edition.version} preview")])
         db.flush()
         return json.loads(job.result_json)
 
