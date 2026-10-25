@@ -699,6 +699,9 @@ post-publication cleanup were incomplete, inconsistent or untested.
 - The existing fixture-to-PDF e2e remains green and asserts the printed byline,
   source disclosure, `media_cleanup` manifest entry and e-paper text byline.
 
+**Commit:** `85246dd` — `feat(moderation): classify stored posts and manage media
+lifecycle`
+
 **Fixture vs real channel**
 
 The results above are fixture and owner-import evidence. **The Pakistan News was
