@@ -44,6 +44,8 @@ from .models import (
     StoryCluster,
 )
 from .publishing.service import PublishResult, publish_edition
+from .media.service import prepare_edition_media
+from .ingestion.service import reclassify_posts
 from .timeutil import utcnow
 
 ProgressCallback = Callable[[str, str], None]
@@ -195,10 +197,31 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     db.flush()
 
     cleared = 0
+    reclassification = None
     if resumed:
         ids = json.loads(job.result_json or "{}").get("story_ids", [])
         stories = list(db.scalars(select(StoryCluster).where(StoryCluster.id.in_(ids))))
     else:
+        # Stored posts imported before the current ruleset would otherwise
+        # bypass new exclusion rules because clustering only reads
+        # inclusion_status. Reclassify the window before any draft is cleared
+        # or built; explicit editor overrides are preserved.
+        _notify(request, "classification", "Re-checking stored posts with the current moderation rules")
+        reclassification = reclassify_posts(
+            db,
+            channel,
+            start=request.window_start,
+            end=request.window_end,
+            actor_id=request.actor_id,
+        )
+        _notify(
+            request,
+            "classification",
+            f"Classified {reclassification.reclassified} stored posts "
+            f"({reclassification.included} included, {reclassification.excluded} excluded, "
+            f"{reclassification.overrides} editor overrides, "
+            f"{reclassification.duplicates} repeated copies)",
+        )
         _notify(request, "normalization", "Clearing unpublished drafts for the window")
         cleared = clear_editorial_drafts(db, channel.id, request.window_start, request.window_end)
         _notify(request, "clustering", "Building story clusters from source fragments")
@@ -273,6 +296,19 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         )
     db.flush()
 
+    _notify(request, "media_prepare", f"Preparing media for {len(stories)} stories")
+    media_stats = prepare_edition_media(
+        db, edition.id, stories, job_id=request.job_id, progress=request.progress
+    )
+    _notify(
+        request,
+        "media_download",
+        f"Media: {media_stats['discovered']} discovered, {media_stats['selected']} selected, "
+        f"{media_stats['downloaded']} downloaded ({media_stats['bytes_downloaded']} bytes), "
+        f"{media_stats['skipped_cached']} already cached, {media_stats['skipped_policy']} skipped by policy, "
+        f"{media_stats['failed']} failed",
+    )
+    _notify(request, "media_process", "Media preparation complete; layout will use local files only")
     _notify(request, "layout", "Composing tabloid pages and rendering the PDF")
     if job:
         db.commit()
@@ -312,7 +348,22 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
             "needs_review": len(review_articles),
             "open_review_flags": len(flag_rows),
             "cleared_drafts": cleared,
+            "reclassification": (
+                {
+                    "scanned": reclassification.scanned,
+                    "reclassified": reclassification.reclassified,
+                    "included": reclassification.included,
+                    "excluded": reclassification.excluded,
+                    "overrides": reclassification.overrides,
+                    "duplicates": reclassification.duplicates,
+                    "fragments_created": reclassification.fragments_created,
+                    "by_classification": reclassification.by_classification,
+                }
+                if reclassification
+                else None
+            ),
             "draft_errors": draft_errors,
+            "media": media_stats,
             "window_start": request.window_start.isoformat(),
             "window_end": request.window_end.isoformat(),
         },

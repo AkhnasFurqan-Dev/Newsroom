@@ -15,6 +15,8 @@
   <div class="grid grid--2">
     <div class="field"><label for="name">Publication name</label><input id="name" name="name" type="text" value="{{ profile.name }}" required></div>
     <div class="field"><label for="channel_handle">Source channel handle</label><input id="channel_handle" name="channel_handle" type="text" value="{{ profile.channel_handle }}"></div>
+    <div class="field"><label for="byline">Byline (printed under every headline)</label><input id="byline" name="byline" type="text" value="{{ profile.byline }}" placeholder="Editorial Desk"></div>
+    <div class="field"><label for="source_disclosure">Source disclosure (evidence statement)</label><textarea id="source_disclosure" name="source_disclosure" style="min-height:70px" placeholder="Editorial roundup based primarily on authorized posts published by …">{{ profile.source_disclosure }}</textarea></div>
     <div class="field"><label for="slogan">Slogan</label><input id="slogan" name="slogan" type="text" value="{{ profile.slogan }}"></div>
     <div class="field"><label for="city">City</label><input id="city" name="city" type="text" value="{{ profile.city }}"></div>
     <div class="field"><label for="timezone">Timezone (IANA)</label><input id="timezone" name="timezone" type="text" value="{{ profile.timezone }}" required></div>

@@ -130,6 +130,7 @@ a { color: inherit; text-decoration: none; }
 .story--front .story__headline--major { font-size: 39pt; line-height: 0.95; }
 .story--front .story__headline--front { font-size: 38pt; line-height: 1.0; }
 .story--front .story__headline { letter-spacing: -0.025em; margin: 0.04in 0 0.07in; }
+.story__byline { font-family: var(--sans); font-size: 7.4pt; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 1px 0 3px; }
 .story--front .story__deck { font-size: 13pt; line-height: 1.26; color: var(--ink-soft); font-style: italic; }
 .story--front .story__standfirst { font-family: var(--sans); font-size: 10pt; line-height: 1.36; }
 .story--front .story__body { columns: 3; column-gap: 0.22in; column-rule: 1px solid #d7d2c6; font-size: 8.9pt; line-height: 1.3; }

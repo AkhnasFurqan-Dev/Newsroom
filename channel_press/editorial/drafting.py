@@ -15,12 +15,17 @@ from ..models import (
     Channel,
     EditionArticle,
     ModelRun,
+    PostFragment,
+    PublicationProfile,
+    ReviewFlag,
+    SourcePost,
     StoryClaim,
     StoryCluster,
 )
 from ..timeutil import utcnow
 from .audit import audit_article
 from .claims import build_claims, contains_injection, strip_injection
+from .moderation import attribution_issues, profanity_details, redact_profanity
 
 
 def _snapshot(article: Article) -> str:
@@ -201,6 +206,24 @@ def draft_story(
     if not result.body:
         raise ValueError("Draft provider returned an empty body.")
 
+    # Draft-output profanity validation: headlines and decks never print
+    # profanity (quoted or not); body text keeps quoted evidence so the editor
+    # can judge whether the quote is editorially necessary. The system must not
+    # generate gratuitous profanity even when the source post contains it.
+    redacted: list[str] = []
+    result.title, removed = redact_profanity(result.title, keep_quotes=False)
+    redacted.extend(removed)
+    result.deck, removed = redact_profanity(result.deck, keep_quotes=False)
+    redacted.extend(removed)
+    result.standfirst, removed = redact_profanity(result.standfirst, keep_quotes=False)
+    redacted.extend(removed)
+    cleaned_body: list[str] = []
+    for paragraph in result.body:
+        paragraph, removed = redact_profanity(paragraph)
+        redacted.extend(removed)
+        cleaned_body.append(paragraph)
+    result.body = cleaned_body
+
     body_json = json.dumps(result.body, ensure_ascii=False)
     body_text = "\n\n".join(result.body)
     word_count = len(body_text.split())
@@ -223,6 +246,95 @@ def draft_story(
     )
     db.add(article)
     db.flush()
+    channel = db.get(Channel, story.channel_id)
+    output_text = " ".join([result.title, result.deck, result.standfirst, *result.body])
+    moderation = profanity_details(output_text)
+    if moderation["level"] != "none":
+        article.status = "needs_review"
+        message = f"Draft language moderation: {moderation['level']}."
+        if redacted:
+            message += " Redacted from draft: " + ", ".join(sorted(set(redacted))) + "."
+        if moderation["quoted"]:
+            message += " Quoted profanity was preserved in the evidence and body for editorial decision."
+        if moderation["needs_review"]:
+            message += " Targeted abuse or threats must be reviewed by a human before release."
+        db.add(
+            ReviewFlag(
+                article_id=article.id,
+                story_id=story.id,
+                category="profanity",
+                severity=(
+                    "block_publish"
+                    if moderation["level"] in {"threat", "hate_or_dehumanizing"}
+                    else "review"
+                ),
+                message=message[:1000],
+            )
+        )
+    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    publications = {
+        name.strip()
+        for name in (channel.title if channel else "", profile.name if profile else "")
+        if name and name.strip()
+    }
+    attribution_findings: list[str] = []
+    for publication in publications:
+        attribution_findings.extend(attribution_issues(output_text, publication))
+    if attribution_findings:
+        article.status = "needs_review"
+        db.add(
+            ReviewFlag(
+                article_id=article.id,
+                story_id=story.id,
+                category="attribution",
+                severity="review",
+                message=(
+                    "Publication identity was written as a person or eyewitness: "
+                    + "; ".join(sorted(set(attribution_findings)))
+                )[:1000],
+            )
+        )
+    # Source-side moderation is escalated to the human queue even when the
+    # draft itself is clean: a threat or hate claim must never be auto-released
+    # merely because a model paraphrased it politely.
+    source_posts = list(
+        db.scalars(
+            select(SourcePost)
+            .join(PostFragment, PostFragment.post_id == SourcePost.id)
+            .where(PostFragment.story_id == story.id)
+            .distinct()
+        )
+    )
+    severe = [
+        post
+        for post in source_posts
+        if post.moderation_status in {"threat", "hate_or_dehumanizing", "targeted_abuse", "sexual_or_explicit"}
+    ]
+    if severe:
+        block = any(post.moderation_status in {"threat", "hate_or_dehumanizing"} for post in severe)
+        db.add(
+            ReviewFlag(
+                article_id=article.id,
+                story_id=story.id,
+                category="source_moderation",
+                severity="block_publish" if block else "review",
+                message=(
+                    f"{len(severe)} source post(s) contain abuse, threats or explicit material "
+                    f"({', '.join(sorted({post.moderation_status for post in severe}))}). "
+                    "Verify that the drafted wording attributes and paraphrases it responsibly."
+                )[:1000],
+            )
+        )
+    if any(post.classification == "language_needs_review" for post in source_posts):
+        db.add(
+            ReviewFlag(
+                article_id=article.id,
+                story_id=story.id,
+                category="language_review",
+                severity="review",
+                message="At least one source post uses an unrecognised script; verify the translation and names.",
+            )
+        )
     corpus = "\n".join(source.text for source in bundle.sources)
     audit = audit_article(
         db,

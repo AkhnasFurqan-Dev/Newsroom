@@ -280,7 +280,7 @@ def test_public_channel_source_url_is_built_from_handle(db, owner):
     )
     db.add(grant)
     db.flush()
-    payload = {"messages": [{"id": 77, "date": "2026-10-20T08:00:00Z", "text": "Verified public channel report."}]}
+    payload = {"messages": [{"id": 77, "date": "2026-10-20T08:00:00Z", "text": "Police confirmed a roadside bomb struck a patrol in Quetta."}]}
     import_payload(db, channel, payload, imported_by=owner.id, rights_grant=active_rights(db, channel.id))
     db.commit()
     post = db.query(SourcePost).filter_by(channel_id=channel.id).one()

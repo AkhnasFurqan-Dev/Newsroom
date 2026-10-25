@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     telegram_history_limit: int = 5000
     telegram_download_media: bool = True
     telegram_max_video_mb: int = 120
+    telegram_max_media_mb: int = 25
+    media_max_assets_per_story: int = 3
+    media_download_attempts: int = 2
+    media_retention_hours: int = 72
 
     cutoff_local_time: str = "05:00"
     initial_context_lookback_days: int = 30

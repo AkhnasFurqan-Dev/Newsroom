@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from ..ingestion.adapters import NormalizedMessage
+from ..editorial.moderation import classify_message, exclusion_for
 
 PROMO_PATTERNS = [
     r"(?i)^\s*join (our|the) (new )?channel",
@@ -39,19 +40,14 @@ def promotion_only(message: NormalizedMessage) -> bool:
 
 
 def exclusion_reason(message: NormalizedMessage, *, rights_ok: bool) -> str | None:
-    if message.deleted:
-        return "deleted"
-    if message.forward_origin:
-        return "telegram_forward"
-    if not message.text.strip() and not (message.media or []):
-        return "empty"
-    if message.raw and message.raw.get("type") in {"service", "messageService"} and not message.text.strip():
-        return "service_event"
-    if promotion_only(message):
-        return "promotion_only"
-    if not rights_ok:
-        return "rights_unconfirmed"
-    return None
+    """Persisted exclusion vocabulary, driven by the versioned classifier."""
+    service_event = bool(
+        message.raw
+        and message.raw.get("type") in {"service", "messageService"}
+        and not message.text.strip()
+    )
+    result = classify_message(message, rights_ok=rights_ok)
+    return exclusion_for(result, deleted=message.deleted, service_event=service_event)
 
 
 def split_segments(message: NormalizedMessage) -> list[dict]:

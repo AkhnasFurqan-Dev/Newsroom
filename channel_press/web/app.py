@@ -52,7 +52,13 @@ from ..bootstrap import (
     setup_complete,
 )
 from ..config import BASE_DIR, settings
-from ..constants import EXCLUSION_REASONS, ROLE_RANK, SECTION_LABELS, SECTIONS
+from ..constants import (
+    EDITOR_OVERRIDE_CHOICES,
+    EXCLUSION_REASONS,
+    ROLE_RANK,
+    SECTION_LABELS,
+    SECTIONS,
+)
 from ..collection.service import (
     EditionWindow,
     checkpoint_for,
@@ -98,7 +104,14 @@ from ..models import (
 )
 from ..publishing.service import (
     edition_review_blockers,
+    finalize_media_cleanup,
     record_manifest_release,
+)
+from ..media.service import clear_media_cache, media_cache_summary
+from ..editorial.moderation import (
+    CLASSIFICATION_LABELS,
+    CLASSIFIER_VERSION,
+    EDITOR_OVERRIDES,
 )
 from ..scheduling.service import (
     DuplicateWindowError,
@@ -548,6 +561,53 @@ def account_submit(
 # ---------------------------------------------------------------------------
 
 
+@app.get("/media-cache")
+def media_cache_page(
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+):
+    active_jobs = len(
+        list(
+            db.scalars(
+                select(Job).where(Job.status.in_(["running", "scheduled", "queued", "resumable"]))
+            )
+        )
+    )
+    return render(
+        request,
+        "media_cache.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "media_cache",
+            summary=media_cache_summary(db, mode="unused"),
+            active_jobs=active_jobs,
+        ),
+    )
+
+
+@app.post("/media-cache/clear")
+def media_cache_clear(
+    request: Request,
+    mode: str = Form("unused"),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    if mode not in {"unused", "all"}:
+        raise HTTPException(400, "Unknown cache clear mode.")
+    result = clear_media_cache(db, include_derivatives=True, mode=mode)
+    audit(db, user, "media.cache_clear", "media_cache", 0, {"mode": mode, **{k: v for k, v in result.items() if k != "deleted_files"}})
+    db.commit()
+    message = f"Deleted {result['deleted']} files and freed {result['bytes']} bytes."
+    if result["skipped"]:
+        message += f" {result['skipped']} media records were protected and kept."
+    if result["failed"]:
+        message += f" {result['failed']} files could not be removed; they were skipped."
+    return _redirect("/media-cache", message)
+
 @app.get("/")
 def dashboard(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
     channels = list(db.scalars(select(Channel).order_by(Channel.id)))
@@ -744,6 +804,8 @@ def source_detail(
             stories=stories,
             rights=active_rights(db, channel.id),
             exclusion_reasons=EXCLUSION_REASONS,
+            classification_labels=CLASSIFICATION_LABELS,
+            override_choices=EDITOR_OVERRIDE_CHOICES,
             media_counts=media_counts,
             window=_window_for_channel(db, channel, _timezone(db.get(PublicationProfile, 1))),
             channel_permission=channel_role(db, user, channel),
@@ -871,6 +933,44 @@ async def source_import(
         f"/sources/{channel.id}",
         f"Imported {stats.raw_count} messages: {stats.created} new, {stats.updated} updated, "
         f"{stats.rejected} excluded, {stats.media} media.",
+    )
+
+
+@app.post("/sources/{channel_id}/posts/{post_id}/override")
+def source_post_override(
+    channel_id: int,
+    post_id: int,
+    request: Request,
+    decision: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Record an editor decision that survives re-imports and rebuilds."""
+    channel = _channel_or_404(db, channel_id, user, "editor")
+    post = db.get(SourcePost, post_id)
+    if post is None or post.channel_id != channel.id:
+        raise HTTPException(404, "Source post not found.")
+    if decision not in EDITOR_OVERRIDES:
+        raise HTTPException(400, "Unknown editor decision.")
+    status, reason, classification = EDITOR_OVERRIDES[decision]
+    previous = {
+        "override": post.editor_override,
+        "inclusion": post.inclusion_status,
+        "classification": post.classification,
+    }
+    post.editor_override = decision
+    post.inclusion_status = status
+    post.exclusion_reason = reason
+    post.classification = classification
+    post.classification_reason = f"editor_override:{decision}"
+    post.classification_version = CLASSIFIER_VERSION
+    post.classified_at = utcnow()
+    audit(db, user, "source.override", "source_post", post.id, {"decision": decision, "previous": previous})
+    db.commit()
+    return _redirect(
+        f"/sources/{channel.id}",
+        "Editor decision recorded; it survives re-imports and edition rebuilds.",
     )
 
 
@@ -1879,7 +1979,16 @@ def edition_publish(
     )
     audit(db, user, "edition.publish", "edition", edition.id)
     db.commit()
-    return _redirect(f"/editions/{edition.id}", "Edition released.")
+    cleanup_note = ""
+    try:
+        result = finalize_media_cleanup(db, edition, actor=user)
+        db.commit()
+        if result.get("pending") or result.get("failed"):
+            cleanup_note = " Media cleanup is pending; retry from Media cache."
+    except Exception:  # noqa: BLE001 - publication stays successful
+        db.rollback()
+        cleanup_note = " Media cleanup failed and is pending; the edition remains published."
+    return _redirect(f"/editions/{edition.id}", "Edition released." + cleanup_note)
 
 
 @app.post("/editions/{edition_id}/republish")
@@ -2318,6 +2427,8 @@ def branding_save(
     request: Request,
     name: str = Form(...),
     channel_handle: str = Form(""),
+    byline: str = Form("Editorial Desk"),
+    source_disclosure: str = Form(""),
     slogan: str = Form(""),
     footer_text: str = Form(""),
     city: str = Form(""),
@@ -2353,6 +2464,8 @@ def branding_save(
         return _redirect("/branding", error="Unknown QR strategy.")
     profile.name = name.strip()[:160]
     profile.channel_handle = channel_handle.strip()[:120]
+    profile.byline = (byline.strip()[:120] or "Editorial Desk")
+    profile.source_disclosure = source_disclosure.strip()[:600]
     profile.slogan = slogan.strip()[:240]
     profile.footer_text = footer_text.strip()
     profile.city = city.strip()[:120]

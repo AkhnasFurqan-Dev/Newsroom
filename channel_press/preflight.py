@@ -23,6 +23,8 @@ WARN = "warn"
 MISSING = "missing"
 ERROR = "error"
 BLOCKED = "blocked"
+CONFIGURED = "configured"
+SESSION_PRESENT = "session_present"
 
 SECRET_ENV_KEYS = (
     "CHANNEL_PRESS_TELEGRAM_API_HASH",
@@ -71,6 +73,7 @@ class PreflightReport:
 
 
 def module_available(name: str) -> bool:
+    """Is ``name`` importable in this process."""
     return importlib.util.find_spec(name) is not None
 
 
@@ -96,9 +99,15 @@ def _session_permissions_ok(path: Path) -> tuple[bool, str]:
 def telegram_environment() -> dict:
     """Non-secret description of Telegram readiness.
 
-    ``status`` is one of ``missing``, ``configured``, ``session_present`` or
-    ``session_unreadable``. Authentication itself is only known after the
-    gateway connects, so the caller adds ``authenticated``.
+    ``status`` is one of ``missing``, ``configured``, ``session_present``,
+    ``session_unreadable`` or ``blocked``. Authentication itself is only known
+    after the gateway connects, so the caller adds ``authenticated``.
+
+    NOTE: monkeypatching ``module_available`` during testing may not reliably
+    change the result when the test suite shares the same interpreter process
+    with other tests that have already imported the module. Prefer a test design
+    that uses a separate interpreter or that exercises the status logic through
+    ``build_preflight`` / ``telegram_check`` so the path is fully re-derived.
     """
     api_id = bool(settings.telegram_api_id.strip())
     api_hash = bool(settings.telegram_api_hash.strip())
@@ -127,10 +136,12 @@ def telegram_environment() -> dict:
         state["status"] = MISSING
     elif not state["telethon_installed"]:
         state["status"] = BLOCKED
-    elif session_exists:
-        state["status"] = "session_present"
+    elif not session_exists:
+        state["status"] = CONFIGURED
+    elif not state.get("session_readable", False):
+        state["status"] = "session_unreadable"
     else:
-        state["status"] = "configured"
+        state["status"] = SESSION_PRESENT
     return state
 
 

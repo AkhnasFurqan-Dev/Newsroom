@@ -42,6 +42,36 @@ EXCLUSION_REASONS = {
     "rights_unconfirmed": "No active content-rights grant",
     "deleted": "Deleted or withdrawn at source",
     "duplicate": "Duplicate of an ingested source message",
+    "repeated_copy": "Repeated copy of an already accepted post",
+    "context_only": "Context only: no reportable development",
+    "greeting_or_condolence_no_event": "Greeting, prayer or condolence with no event detail",
+    "emoji_or_reaction_only": "Emoji or reaction only",
+    "symbols_only": "Symbols or digits with no words",
+    "link_only_no_commentary": "Link without meaningful source commentary",
+    "generic_slogan": "Generic slogan with no reportable content",
+    "profanity_only": "Profanity or abuse without reportable content",
+    "abuse_without_reportable_content": "Abuse or threats with no reportable content",
+    "unsupported_media_only": "Unsupported media without a usable caption",
+    "unsupported_media_no_caption": "Unsupported media without a usable caption",
+    "low_information": "No recognised editorial signal",
+    "no_editorial_signal": "No recognised editorial signal",
+    "breaking_or_update_without_information": "\"Breaking\"/\"update\" with no information",
+    "number_without_event_context": "Numbers without a reportable event",
+    "instruction_injection_without_news": "Embedded instructions with no news content",
+    "language_needs_review": "Unrecognised script: kept for language review",
+    "unrecognised_script": "Unrecognised script: kept for language review",
+    "editor_excluded": "Excluded by editor decision",
+    "editor_context_only": "Kept as context only by editor decision",
+    "editor_promotion": "Marked promotional by editor decision",
+    "editor_profanity": "Marked profanity/abuse by editor decision",
+}
+
+EDITOR_OVERRIDE_CHOICES = {
+    "include": "Include in story processing",
+    "exclude": "Exclude from story processing",
+    "context_only": "Include as context only",
+    "promotion": "Mark as promotional",
+    "profanity": "Mark as profanity/abuse",
 }
 
 RISK_TERMS = {

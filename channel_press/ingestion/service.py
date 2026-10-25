@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth import audit
+from ..auth import active_rights, audit
 from ..models import (
     Channel,
     PostFragment,
@@ -19,11 +19,20 @@ from ..models import (
     RightsGrant,
     SourceImport,
     SourcePost,
+    User,
 )
 from ..security import safe_filename, sha256_bytes, sha256_text
 from ..timeutil import utcnow
-from .adapters import normalize_messages
-from .normalize import clean_text, detect_language, exclusion_reason, split_segments
+from dataclasses import replace as _dataclass_replace
+
+from ..editorial.moderation import (
+    CLASSIFIER_VERSION,
+    EDITOR_OVERRIDES,
+    classify_message,
+    exclusion_for,
+)
+from .adapters import NormalizedMessage, normalize_messages
+from .normalize import clean_text, detect_language, split_segments
 
 
 @dataclass
@@ -102,6 +111,56 @@ def _copy_media(
     return record
 
 
+def _add_fragments(
+    db: Session,
+    post: SourcePost,
+    message: NormalizedMessage,
+    channel_id: int,
+) -> int:
+    """Create attributable fragments for an included post.
+
+    Fragments are rebuilt only when none exist, so a re-import or a
+    reclassification pass never destroys a manual story decision.
+    """
+    unit_key = (
+        f"g:{channel_id}:{message.grouped_id}" if message.grouped_id else f"p:{post.id}"
+    )
+    processing_message = message
+    if message.translation_en:
+        # The original remains in raw_json; a source-provided translation is
+        # labelled rather than silently replaced by model output.
+        processing_message = replace(message, text=message.translation_en, segments=None)
+    created = 0
+    for fragment in split_segments(processing_message):
+        db.add(
+            PostFragment(
+                post_id=post.id,
+                story_id=None,
+                text=fragment["text"],
+                start_offset=fragment["start"],
+                end_offset=fragment["end"],
+                language=post.language,
+                topics_json=json.dumps(
+                    {
+                        "topics": fragment["topics"],
+                        "title": fragment["title"],
+                        "incident_key": fragment["incident_key"],
+                        "location": fragment["location"],
+                        "genre": fragment["genre"],
+                        "article_seed": fragment.get("article_seed"),
+                        "translation": message.translator if message.translation_en else "",
+                        "original_text": message.text if message.translation_en else "",
+                    },
+                    ensure_ascii=False,
+                ),
+                sequence=fragment["sequence"],
+                editorial_unit_key=unit_key,
+            )
+        )
+        created += 1
+    return created
+
+
 def import_payload(
     db: Session,
     channel: Channel,
@@ -135,7 +194,13 @@ def import_payload(
     by_message_id: dict[int, SourcePost] = {}
     created = updated = rejected = media_count = 0
     for message in messages:
-        reason = exclusion_reason(message, rights_ok=rights_ok)
+        moderation = classify_message(message, rights_ok=rights_ok)
+        service_event = bool(
+            message.raw
+            and message.raw.get("type") in {"service", "messageService"}
+            and not message.text.strip()
+        )
+        reason = exclusion_for(moderation, deleted=message.deleted, service_event=service_event)
         existing = db.scalar(
             select(SourcePost).where(
                 SourcePost.channel_id == channel.id,
@@ -143,6 +208,21 @@ def import_payload(
             )
         )
         text = clean_text(message.text)
+        content_hash = sha256_text(text)
+        if existing is None and not message.deleted and not message.forward_origin and text.strip():
+            # A repeated copy of an already accepted post adds no new evidence.
+            twin = db.scalar(
+                select(SourcePost).where(
+                    SourcePost.channel_id == channel.id,
+                    SourcePost.content_hash == content_hash,
+                    SourcePost.telegram_message_id != message.message_id,
+                )
+            )
+            if twin is not None and twin.classification == "editorially_relevant":
+                reason = "repeated_copy"
+                moderation = _dataclass_replace(
+                    moderation, classification="duplicate", reason="repeated_copy", score=0
+                )
         if message.translation_en:
             # The original remains in raw_json; a source-provided translation is
             # labelled rather than silently replaced by model output.
@@ -164,15 +244,20 @@ def import_payload(
                 posted_at=message.posted_at,
                 edited_at=message.edited_at,
                 text=text,
-                language=detect_language(text),
+                language=moderation.language or detect_language(text),
                 source_url=source_url,
                 reply_to_message_id=message.reply_to_message_id,
                 forward_origin=message.forward_origin,
                 is_forwarded=bool(message.forward_origin),
                 inclusion_status="excluded" if reason else "included",
                 exclusion_reason=reason or "",
+                classification=moderation.classification,
+                classification_reason=moderation.reason,
+                classification_version=CLASSIFIER_VERSION,
+                classified_at=utcnow(),
+                moderation_status=moderation.profanity,
                 raw_json=json.dumps(raw, ensure_ascii=False, default=str),
-                content_hash=sha256_text(text),
+                content_hash=content_hash,
                 deleted_at=utcnow() if message.deleted else None,
             )
             db.add(post)
@@ -189,7 +274,7 @@ def import_payload(
             created += 1
         else:
             post = existing
-            new_hash = sha256_text(text)
+            new_hash = content_hash
             deletion_is_new = bool(message.deleted and post.deleted_at is None)
             if new_hash != post.content_hash or deletion_is_new:
                 previous_versions = db.scalar(
@@ -211,8 +296,27 @@ def import_payload(
                     )
                 )
                 updated += 1
-            post.inclusion_status = "excluded" if reason else "included"
-            post.exclusion_reason = reason or ""
+            if post.editor_override:
+                # An editor's explicit decision survives re-imports and
+                # classifier upgrades; it is recorded in the audit log.
+                status, override_reason, classification = EDITOR_OVERRIDES.get(
+                    post.editor_override, ("excluded", "editor_excluded", "low_information")
+                )
+                post.inclusion_status = status
+                post.exclusion_reason = override_reason
+                post.classification = classification
+                post.classification_reason = f"editor_override:{post.editor_override}"
+                post.classification_version = CLASSIFIER_VERSION
+                post.classified_at = utcnow()
+            else:
+                post.inclusion_status = "excluded" if reason else "included"
+                post.exclusion_reason = reason or ""
+                post.classification = moderation.classification
+                post.classification_reason = moderation.reason
+                post.classification_version = CLASSIFIER_VERSION
+                post.classified_at = utcnow()
+                post.moderation_status = moderation.profanity
+            post.language = moderation.language or post.language or "en"
             if message.grouped_id:
                 post.grouped_id = message.grouped_id
         by_message_id[message.message_id] = post
@@ -223,36 +327,7 @@ def import_payload(
         # decisions are not silently destroyed by an identical re-import.
         existing_fragments = db.scalar(select(PostFragment).where(PostFragment.post_id == post.id).limit(1))
         if existing_fragments is None:
-            unit_key = f"g:{channel.id}:{message.grouped_id}" if message.grouped_id else f"p:{post.id}"
-            processing_message = message
-            if message.translation_en:
-                processing_message = replace(message, text=message.translation_en, segments=None)
-            for fragment in split_segments(processing_message):
-                db.add(
-                    PostFragment(
-                        post_id=post.id,
-                        story_id=None,
-                        text=fragment["text"],
-                        start_offset=fragment["start"],
-                        end_offset=fragment["end"],
-                        language=post.language,
-                        topics_json=json.dumps(
-                            {
-                                "topics": fragment["topics"],
-                                "title": fragment["title"],
-                                "incident_key": fragment["incident_key"],
-                                "location": fragment["location"],
-                                "genre": fragment["genre"],
-                                "article_seed": fragment.get("article_seed"),
-                                "translation": message.translator if message.translation_en else "",
-                                "original_text": message.text if message.translation_en else "",
-                            },
-                            ensure_ascii=False,
-                        ),
-                        sequence=fragment["sequence"],
-                        editorial_unit_key=unit_key,
-                    )
-                )
+            _add_fragments(db, post, message, channel.id)
         existing_media = db.scalar(select(PostMedia).where(PostMedia.post_id == post.id).limit(1))
         if existing_media is None:
             for media in message.media or []:
@@ -293,6 +368,223 @@ def import_payload(
         updated=updated,
         media=media_count,
     )
+
+
+@dataclass
+class ReclassifyStats:
+    """Outcome of re-running the deterministic classifier over stored posts."""
+
+    scanned: int = 0
+    out_of_scope: int = 0
+    current: int = 0
+    reclassified: int = 0
+    included: int = 0
+    excluded: int = 0
+    overrides: int = 0
+    duplicates: int = 0
+    fragments_created: int = 0
+    by_classification: dict[str, int] = field(default_factory=dict)
+
+
+def _stored_message(post: SourcePost, kinds: list[str]) -> NormalizedMessage:
+    """Rebuild the classifier input from a stored post without altering it."""
+    try:
+        raw = json.loads(post.raw_json or "{}")
+    except (TypeError, ValueError):
+        raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    segments = raw.get("segments")
+    segment_meta = raw.get("segment_meta")
+    tags = raw.get("tags")
+    translation = raw.get("translation_en")
+    return NormalizedMessage(
+        message_id=post.telegram_message_id,
+        posted_at=post.posted_at,
+        text=post.text or "",
+        edited_at=post.edited_at,
+        grouped_id=post.grouped_id,
+        reply_to_message_id=post.reply_to_message_id,
+        forward_origin=post.forward_origin or "",
+        deleted=post.deleted_at is not None,
+        segments=segments if isinstance(segments, list) else None,
+        segment_meta=segment_meta if isinstance(segment_meta, dict) else None,
+        media=[{"kind": kind} for kind in kinds],
+        tags=tags if isinstance(tags, list) else None,
+        translation_en=translation if isinstance(translation, str) else None,
+        translator=str(raw.get("translator") or ""),
+        raw=raw,
+    )
+
+
+def _remember_accepted(post: SourcePost, seen_hashes: set[str]) -> None:
+    """Track content already accepted so a later copy is labelled a duplicate.
+
+    Media-only posts can have no text; an empty string is not evidence and must
+    never make unrelated posts look like repeated copies.
+    """
+    if (
+        post.inclusion_status == "included"
+        and post.deleted_at is None
+        and not post.forward_origin
+        and post.content_hash
+        and (post.text or "").strip()
+    ):
+        seen_hashes.add(post.content_hash)
+
+
+def reclassify_posts(
+    db: Session,
+    channel: Channel,
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    force: bool = False,
+    rights_ok: bool | None = None,
+    actor_id: int | None = None,
+) -> ReclassifyStats:
+    """Re-run the current classifier over stored posts before story building.
+
+    Legacy imports (and posts classified by an older ruleset) otherwise bypass
+    new exclusion rules because story building only reads ``inclusion_status``.
+    This pass recomputes classification, language and moderation status for any
+    stale row, preserves explicit editor overrides, keeps repeated copies out,
+    and creates missing fragments for posts that are newly includable.
+
+    All channel posts are walked in chronological order so repeated-copy
+    detection sees earlier accepted evidence even when only one window is being
+    reclassified. Rows already at :data:`CLASSIFIER_VERSION` are left untouched
+    unless ``force`` is set.
+    """
+    rights = rights_ok
+    if rights is None:
+        rights = channel.is_demo or active_rights(db, channel.id) is not None
+    posts = list(
+        db.scalars(
+            select(SourcePost)
+            .where(SourcePost.channel_id == channel.id)
+            .order_by(
+                SourcePost.posted_at.asc(),
+                SourcePost.telegram_message_id.asc(),
+                SourcePost.id.asc(),
+            )
+        )
+    )
+    stats = ReclassifyStats(scanned=len(posts))
+    if not posts:
+        return stats
+
+    kinds_by_post: dict[int, list[str]] = {}
+    for post_id, kind in db.execute(
+        select(PostMedia.post_id, PostMedia.kind).where(
+            PostMedia.post_id.in_([post.id for post in posts])
+        )
+    ):
+        kinds_by_post.setdefault(post_id, []).append(str(kind or ""))
+
+    seen_hashes: set[str] = set()
+    for post in posts:
+        in_scope = (start is None or post.posted_at >= start) and (
+            end is None or post.posted_at < end
+        )
+        if not in_scope:
+            stats.out_of_scope += 1
+            _remember_accepted(post, seen_hashes)
+            continue
+        stale = (
+            force
+            or post.classification_version != CLASSIFIER_VERSION
+            or post.classified_at is None
+        )
+        if not stale:
+            stats.current += 1
+            _remember_accepted(post, seen_hashes)
+            continue
+
+        if not post.content_hash and (post.text or "").strip():
+            post.content_hash = sha256_text(post.text or "")
+        message = _stored_message(post, kinds_by_post.get(post.id, []))
+        moderation = classify_message(message, rights_ok=rights)
+        reason = exclusion_for(moderation, deleted=message.deleted)
+
+        if post.editor_override:
+            # An editor's explicit decision survives classifier upgrades.
+            status, override_reason, classification = EDITOR_OVERRIDES.get(
+                post.editor_override,
+                ("excluded", "editor_excluded", "low_information"),
+            )
+            post.inclusion_status = status
+            post.exclusion_reason = override_reason
+            post.classification = classification
+            post.classification_reason = f"editor_override:{post.editor_override}"
+            post.classification_version = CLASSIFIER_VERSION
+            post.classified_at = utcnow()
+            stats.overrides += 1
+        else:
+            if (
+                reason is None
+                and moderation.classification == "editorially_relevant"
+                and post.content_hash
+                and (post.text or "").strip()
+                and post.content_hash in seen_hashes
+            ):
+                # A repeated copy adds no new evidence; the first accepted
+                # version stays the citable source.
+                moderation = replace(
+                    moderation,
+                    classification="duplicate",
+                    reason="repeated_copy",
+                    score=0,
+                )
+                reason = "repeated_copy"
+                stats.duplicates += 1
+            post.inclusion_status = "excluded" if reason else "included"
+            post.exclusion_reason = reason or ""
+            post.classification = moderation.classification
+            post.classification_reason = moderation.reason
+            post.classification_version = CLASSIFIER_VERSION
+            post.classified_at = utcnow()
+            post.moderation_status = moderation.profanity
+
+        post.language = moderation.language or post.language or "en"
+        stats.reclassified += 1
+        stats.by_classification[post.classification] = (
+            stats.by_classification.get(post.classification, 0) + 1
+        )
+        if post.inclusion_status == "included":
+            stats.included += 1
+            if post.deleted_at is None and not post.forward_origin:
+                existing = db.scalar(
+                    select(PostFragment.id).where(PostFragment.post_id == post.id).limit(1)
+                )
+                if existing is None:
+                    stats.fragments_created += _add_fragments(db, post, message, channel.id)
+        else:
+            stats.excluded += 1
+        _remember_accepted(post, seen_hashes)
+
+    if stats.reclassified:
+        actor = db.get(User, actor_id) if actor_id else None
+        audit(
+            db,
+            actor,
+            "source.reclassify",
+            "channel",
+            channel.id,
+            {
+                "classifier": CLASSIFIER_VERSION,
+                "scanned": stats.scanned,
+                "reclassified": stats.reclassified,
+                "included": stats.included,
+                "excluded": stats.excluded,
+                "overrides": stats.overrides,
+                "duplicates": stats.duplicates,
+                "fragments_created": stats.fragments_created,
+                "by_classification": stats.by_classification,
+            },
+        )
+    db.flush()
+    return stats
 
 
 def apply_deletion(db: Session, post: SourcePost, reason: str = "deleted") -> None:

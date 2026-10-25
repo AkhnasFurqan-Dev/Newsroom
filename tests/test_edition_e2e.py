@@ -80,6 +80,14 @@ def test_fixture_to_printable_edition_and_epaper(db, demo_channel, owner, tmp_pa
     assert manifest["pdf"]["sha256"] == _sha256(published.pdf_path)
     assert manifest["sources"]
     assert manifest["articles"]
+    assert manifest["media_cleanup"]["at"]
+    assert manifest["media_cleanup"]["deleted"] == 0
+
+    print_html = (published.output_dir / "print.html").read_text(encoding="utf-8")
+    assert "By Editorial Desk" in print_html
+    assert "editorial roundup based primarily on authorized posts" in print_html
+    epaper_text = published.epaper_dir.joinpath("text.html").read_text(encoding="utf-8")
+    assert "By Editorial Desk" in epaper_text
 
     checksums = json.loads((published.output_dir / "checksums.json").read_text(encoding="utf-8"))
     for relative, expected in checksums.items():

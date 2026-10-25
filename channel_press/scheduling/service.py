@@ -71,8 +71,9 @@ logger = get_logger("worker")
 _PROGRESS_RE = re.compile(r"\b(\d+)\s*/\s*(\d+)\b")
 _STAGE_BASE = {
     "queued": 0, "source_validation": 3, "collection": 12,
-    "normalization": 20, "clustering": 28, "drafting": 35,
-    "auditing": 72, "layout": 84, "quality_check": 95,
+    "normalization": 20, "classification": 22, "clustering": 28, "drafting": 35,
+    "auditing": 72, "media_prepare": 75, "media_download": 77, "media_process": 82,
+    "layout": 84, "quality_check": 95, "clean_media": 99,
     "layout_prepare": 84, "layout_compile_html": 85, "layout_launch_browser": 86,
     "layout_load_page": 87, "layout_wait_for_pagination": 89,
     "layout_generate_pdf": 92, "layout_validate_pdf": 94,
@@ -672,7 +673,7 @@ def finalize_auto_publish(db: Session, edition: Edition, *, actor_id: int | None
         return False
     edition.status = "published"
     edition.published_at = utcnow()
-    from ..publishing.service import record_manifest_release
+    from ..publishing.service import finalize_media_cleanup, record_manifest_release
 
     record_manifest_release(edition)
     commit_edition_window(db, edition)
@@ -685,6 +686,8 @@ def finalize_auto_publish(db: Session, edition: Edition, *, actor_id: int | None
             completed_at=utcnow(),
         )
     )
+    # Safe now: the PDF and e-paper bundle are already written and checked.
+    finalize_media_cleanup(db, edition)
     audit(db, None, "edition.auto_publish", "edition", edition.id, {"actor": actor_id})
     db.flush()
     return True

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import uuid
 from typing import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from ..models import (
     EditionWatermark,
     PublicationAttempt,
     PublicationProfile,
+    PostMedia,
     ReviewFlag,
     SourceAppendix,
 )
@@ -59,6 +61,7 @@ class PublishResult:
     manifest_path: Path
     warnings: list[str]
     version: int
+    media_cleanup: dict = field(default_factory=dict)
 
 
 def _sha256(path: Path) -> str:
@@ -307,6 +310,72 @@ def edition_review_blockers(db: Session, edition_id: int) -> list[str]:
     ]
 
 
+def record_media_cleanup(edition: Edition, result: dict) -> None:
+    """Persist the cleanup outcome in the edition manifest without hiding failures.
+
+    A non-zero ``pending`` value means the publication is still valid but a
+    retry is required; it is never reported as a failed publication.
+    """
+    if not edition.manifest_json:
+        return
+    try:
+        manifest = json.loads(edition.manifest_json)
+    except (TypeError, ValueError):
+        return
+    manifest["media_cleanup"] = {
+        key: result.get(key, 0)
+        for key in ("deleted", "bytes", "failed", "protected", "pending")
+    }
+    manifest["media_cleanup"]["at"] = iso_utc(utcnow())
+    edition.manifest_json = json.dumps(manifest, ensure_ascii=False)
+    if not edition.output_dir:
+        return
+    path = Path(edition.output_dir) / "manifest.json"
+    if not path.exists():
+        return
+    path.write_text(edition.manifest_json, encoding="utf-8")
+    # ``checksums.json`` covers the manifest, so refreshing the manifest after
+    # publication must refresh its recorded digest too. Otherwise a correct
+    # publication would fail its own integrity check.
+    checksums_path = path.parent / "checksums.json"
+    if checksums_path.exists():
+        try:
+            checksums = json.loads(checksums_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        checksums["manifest.json"] = _sha256(path)
+        checksums_path.write_text(json.dumps(checksums, indent=2), encoding="utf-8")
+
+
+def finalize_media_cleanup(db: Session, edition: Edition, *, actor=None) -> dict:
+    """Run the idempotent post-publication cleanup and record its outcome.
+
+    Only call this after the PDF, e-paper bundle, manifest and checksums are
+    written and the published state is durable. A cleanup failure is recorded as
+    pending for a retry; it must never turn a successful publication into a
+    failed one.
+    """
+    from ..auth import audit
+    from ..media.service import cleanup_published_media
+
+    # File deletion cannot be rolled back. Make the release durable first, so a
+    # later transaction failure can never leave a published edition pointing at
+    # media that was already removed.
+    db.commit()
+    result = cleanup_published_media(db, edition.id)
+    record_media_cleanup(edition, result)
+    audit(
+        db,
+        actor,
+        "edition.media_cleanup",
+        "edition",
+        edition.id,
+        {key: result.get(key, 0) for key in ("deleted", "bytes", "failed", "protected", "pending")},
+    )
+    db.commit()
+    return result
+
+
 def record_manifest_release(edition: Edition) -> None:
     """Keep the on-disk manifest and checksums truthful when release happens later.
 
@@ -376,6 +445,23 @@ def publish_edition(
         )
         if render.qa.get("warnings") and not allow_quality_warnings:
             raise LayoutQualityError(list(render.qa["warnings"]))
+        # Attribution audit: the publication/source channel must never be
+        # written as an individual reporter or eyewitness, and no staff writer
+        # may be invented. Scans the exact text that becomes the PDF and the
+        # e-paper transcript before anything can be released.
+        from ..editorial.moderation import attribution_issues
+
+        scan_text = re.sub(r"<[^>]+>", " ", render.html_path.read_text(encoding="utf-8"))
+        attribution_findings: set[str] = set()
+        for name in {profile.name.strip(), (profile.channel_handle or "").strip()}:
+            if name:
+                attribution_findings.update(attribution_issues(scan_text, name))
+        if attribution_findings:
+            render.qa.setdefault("warnings", []).extend(
+                f"attribution: {issue}" for issue in sorted(attribution_findings)
+            )
+            if not allow_quality_warnings:
+                raise LayoutQualityError(list(render.qa["warnings"]))
         plan = create_plan(
             db,
             edition,
@@ -394,6 +480,15 @@ def publish_edition(
             target=epaper_dir,
             demo_edition=demo_edition,
         )
+        for package in plan.packages:
+            if package.media_id is not None:
+                media = db.get(PostMedia, package.media_id)
+                if media is not None and media.download_state == "downloaded":
+                    # Only fetched source media is an edition working file. An
+                    # owner-supplied local import may be the only copy and is
+                    # cleared only by an explicit cache command.
+                    media.edition_id = edition.id
+                    media.retention_state = "edition_working_media"
         # Copy the print artefacts into a predictable layout.
         pdf_target = staging / "sample_issue.pdf"
         shutil.copy2(render.pdf_path, pdf_target)
@@ -531,6 +626,23 @@ def publish_edition(
             edition.status = "awaiting_review"
         if mark_published:
             record_manifest_release(edition)
+            # The published PDF and e-paper bundle are self-contained; only now
+            # is the edition's working media deleted. Cleanup is a separate,
+            # idempotent step: a failure here is reported as pending and never
+            # turns a successful publication into a failed one.
+            if layout_progress:
+                layout_progress("clean_media", "Publication durable; cleaning edition working media")
+            media_cleanup = finalize_media_cleanup(db, edition)
+            if layout_progress:
+                layout_progress(
+                    "clean_media",
+                    f"Media cleanup: {media_cleanup['deleted']} files, "
+                    f"{media_cleanup['bytes']} bytes freed"
+                    + (f", {media_cleanup['pending']} pending" if media_cleanup.get("pending") else "")
+                    + (f", {media_cleanup['failed']} failed" if media_cleanup.get("failed") else ""),
+                )
+        else:
+            media_cleanup = {}
         db.flush()
         return PublishResult(
             edition_id=edition.id,
@@ -541,6 +653,7 @@ def publish_edition(
             manifest_path=manifest_path,
             warnings=list(render.qa.get("warnings", [])),
             version=edition.version,
+            media_cleanup=media_cleanup,
         )
     except Exception:
         if staging.exists() and staging.name.startswith(".staging-"):

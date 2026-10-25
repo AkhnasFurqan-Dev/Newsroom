@@ -19,6 +19,25 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
   login and retrieval still need the owner's Telegram API values and consent; see
   [Live Telegram setup](#live-telegram-setup-owner-only) and
   [Limitations](#limitations).
+- **Moderation and source languages.** Every post is classified before drafting:
+  greetings, emoji, promotions, link-only reposts and number-only posts are
+  excluded with a persisted reason, while short casualty, correction and emergency
+  alerts are retained. English, Urdu script, Roman Urdu and mixed Urdu/English are
+  detected separately. Profanity is detected in plain and obfuscated forms, but a
+  report that quotes abuse is not discarded; threats and targeted abuse are routed
+  to review. An editor decision survives re-imports and classifier upgrades. Before
+  clustering, the pipeline reclassifies stored posts written by an older ruleset and
+  creates missing fragments for newly includable posts; `classify-posts` exposes the
+  same backfill on the command line.
+- **Institutional attribution.** The publication is identified as the source, never
+  as an individual reporter or eyewitness. The byline and source disclosure are
+  configurable, and the attribution scan flags invented scene reporting, staff
+  correspondents and fabricated journalist identities before release.
+- **Media lifecycle.** Relevant, rights-cleared source media is downloaded in a
+  bounded pre-layout stage with retry and size limits. Layout and PDF rendering use
+  local files only and never call Telegram. Downloads stay for drafts, review,
+  failed or interrupted editions and are removed only after a verified publication;
+  provenance, checksums, rights links and source records are retained.
 - **Story memory.** Post splitting, duplicate clustering, reply linking,
   correction reconciliation, a claim ledger with chronology and a separate
   deterministic evidence audit.
@@ -150,6 +169,9 @@ session-present states without printing any secret value.
 | Import an authorized export | `python -m channel_press.cli import --channel <slug> --file <export.json> --media-root <folder>` |
 | Build the latest window now | `python -m channel_press.cli run-now --channel <slug>` |
 | Run one worker pass | `python -m channel_press.cli worker --once` |
+| Inspect media cache (no deletion) | `python -m channel_press.cli media-cache --dry-run` |
+| Clear unused media cache | `python -m channel_press.cli media-cache --clear-unused --confirm` |
+| Retry cleanup for one published edition | `python -m channel_press.cli media-cache --finalize-edition <id>` |
 | Start the UI | `python -m channel_press.cli serve` |
 | Check an edition | `python -m channel_press.cli check-edition --edition-id 1` |
 | Back up | `python -m channel_press.cli backup` |
@@ -161,6 +183,24 @@ session-present states without printing any secret value.
 | Controlled restart | `powershell -ExecutionPolicy Bypass -File .\scripts\restart-services.ps1` |
 
 All Python commands use `.\.venv\Scripts\python.exe` on Windows.
+
+### Media cache and source retention
+
+`data/media` holds downloaded source files and generated derivatives. The
+**Media cache** page and `media-cache` command remove local files only; source
+posts, media rows, captions, credits, checksums, rights links and audit events
+remain. Both default to a dry run and require explicit confirmation before
+deletion.
+
+Protected files are never removed: anything used by a draft, awaiting-review,
+failed or running edition; media under an editor lock; media referenced by an
+active job; files inside the configured `media_retention_hours` window; and the
+working media of a published edition whose PDF or e-paper bundle is incomplete.
+After a verified publication, the edition's downloaded working media is removed
+automatically. A cleanup failure is recorded as `pending` and can be retried with
+`media-cache --finalize-edition <id>`; it never reverses a successful release.
+Owner-supplied imported files are treated as a source library and are only
+removed by an explicit cache command.
 
 Two helper scripts cover the automation path:
 
@@ -195,27 +235,6 @@ results and `TROUBLESHOOTING.md` for failures.
   retried with backoff and then reported as a friendly `503`, never a raw `500`.
 - One Telegram session owner. The web app and the worker share a serialised
   gateway with a cross-process lease on the `.session` file; rendering a page never
-  contacts Telegram.
-- One collector per channel/window. An edition that finds its window already being
-  collected waits (`waiting_for_collector`) instead of failing or duplicating it.
-- Queue Build performs a bounded, read-only Telegram preflight when live collection
-  is requested and refuses to queue a job with a concrete reason if it fails.
-  Fixture and manual-import builds need no Telegram connection.
-
-`stop-services.ps1` requests a graceful stop and waits; it never kills unrelated
-processes. `restart-services.ps1` validates configuration and the database, stops
-what is managed, resumes, checks the local model, starts the web app detached and
-polls it until it answers. `service-health.ps1 -Validate -Probe` adds a bounded,
-read-only Telegram check. See `docs/CONCURRENCY_RECOVERY_REPORT.md` for verified
-results and `TROUBLESHOOTING.md` for failures.
-
-### Concurrency and live safety
-
-- One SQLite writer, short transactions. Network, model, media and PDF work never
-  run inside an open write transaction; a transient `database is locked` is
-  retried with backoff and then reported as a friendly `503`, never a raw `500`.
-- One Telegram session owner. The web app and the worker share a serialised
-gateway with a cross-process lease on the `.session` file; rendering a page never
   contacts Telegram.
 - One collector per channel/window. An edition that finds its window already being
   collected waits (`waiting_for_collector`) instead of failing or duplicating it.
@@ -318,15 +337,20 @@ cutoff-to-release window.
 
 # Lint (dev extra)
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m ruff check channel_press tests
+.\.venv\Scripts\python.exe -m ruff check .
 ```
 
-Last recorded run: **125 passed** (plus live-marked tests that skip without
-credentials). The slow suite renders actual PDFs, checks exact page geometry,
-verifies searchable text, inspects every page proof for blank/overflow defects
-and confirms the e-paper bundle and checksums. Collection tests cover window
-boundaries, pagination resume, duplicate windows, context backfill and watermark
-commits.
+Last recorded run: **202 passed, 2 skipped** in 105 s. The skips are the two
+Ollama live tests because no model server was running. The suite renders actual
+PDFs, checks exact page geometry, verifies searchable text, inspects every page
+proof for blank/overflow defects and confirms the e-paper bundle and checksums.
+The moderation/media regression file covers meaningless-post exclusion, English,
+Urdu script, Roman Urdu and mixed-language alerts, obfuscated profanity, threats,
+institutional attribution, legacy stored-post backfill before clustering,
+rights-gated bounded downloads, local-only rendering, cache protection/path
+traversal, post-publication cleanup and the protected web and CLI controls.
+Collection tests cover window boundaries, pagination resume, duplicate windows,
+context backfill and watermark commits.
 
 ```powershell
 # Real local model proof (needs Ollama running with the configured model)
@@ -338,10 +362,12 @@ commits.
 
 ## Limitations
 
-- **Live Telegram was not tested.** No API values, user login or content rights
-  were supplied. Login, handle resolution, windowed collection and resume are
-  implemented and covered by fixtures; the live path stays `blocked` until the
-  owner completes the steps above.
+- **Live Telegram was not verified in this pass.** The fixture and owner-import
+  paths are covered by automated tests. Login, handle resolution, windowed
+  collection and resume are implemented, but the real target channel
+  (`The Pakistan News`) still requires the owner's Telegram login, content rights
+  and a supervised run. No claim in this README treats a fixture result as live
+  evidence.
 - **Real-model coverage is 30 posts only.** A 70- or 150-post real-model build was
   not run. The deterministic fixture composer remains the fallback and is always
   labelled as such.

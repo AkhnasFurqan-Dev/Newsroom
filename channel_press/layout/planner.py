@@ -163,6 +163,13 @@ def _build_package(
         existing = db.scalar(
             select(ArticleMedia).where(ArticleMedia.article_id == article.id, ArticleMedia.selected.is_(True)).limit(1)
         )
+        if existing is not None and (not existing.path or not Path(existing.path).is_file()):
+            # A cleared cache or removed output folder must never leave the
+            # template pointing at a missing image. Drop the stale selection
+            # and try to build a fresh derivative from local media.
+            db.delete(existing)
+            db.flush()
+            existing = None
         if existing is None:
             choice = select_lead_media(
                 db,
@@ -231,7 +238,7 @@ def create_plan(
     profile: PublicationProfile,
     *,
     media_dir: Path | None = None,
-    download_media: bool = True,
+    download_media: bool = False,
 ) -> EditionPlan:
     links = list(
         db.scalars(

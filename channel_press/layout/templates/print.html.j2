@@ -14,6 +14,7 @@
   {% if chunk.index == 1 %}
   <div class="kicker">{{ section_label(section) }}{% if chunk.package.genre != 'news' and chunk.package.genre != section %} · {{ genre_label(chunk.package.genre) }}{% endif %}</div>
   <h2 class="story__headline">{{ chunk.package.article.title }}</h2>
+  {% if profile.byline %}<div class="story__byline">By {{ profile.byline }}</div>{% endif %}
   {% if chunk.package.article.deck %}<p class="story__deck">{{ chunk.package.article.deck }}</p>{% endif %}
   {% if chunk.package.article.standfirst %}<p class="story__standfirst">{{ chunk.package.article.standfirst }}</p>{% endif %}
   {% if tmpl == 'analysis_feature' %}<div class="genre-label">Analysis · interpretation of verified reporting</div>{% endif %}
@@ -59,6 +60,7 @@
       <article class="story story--front" data-story-id="{{ lead.story.id }}" data-article-id="{{ lead.article.id }}" data-chunk="1" data-chunk-count="{{ lead_chunks|length }}" data-template="{{ front_template }}">
         <div class="kicker">{{ section_label(lead.section) }}{% if lead.genre != 'news' %} · {{ genre_label(lead.genre) }}{% endif %}</div>
         <h2 class="story__headline story__headline--{{ lead.headline_size }}">{{ lead.article.title }}</h2>
+        {% if profile.byline %}<div class="story__byline">By {{ profile.byline }}</div>{% endif %}
         {% if lead.article.deck %}<p class="story__deck">{{ lead.article.deck }}</p>{% endif %}
         {% if lead.article.standfirst %}<p class="story__standfirst">{{ lead.article.standfirst }}</p>{% endif %}
         {% if media_html(lead) %}{{ media_html(lead) }}{% endif %}

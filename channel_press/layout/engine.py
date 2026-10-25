@@ -493,8 +493,12 @@ def build_print_html(
         if demo_edition
         else "This edition is an editorial roundup of the owner's authorized source channel."
     )
+    byline = (plan.profile.byline or "").strip()
+    disclosure = (plan.profile.source_disclosure or "").strip()
     provenance_note = (
-        f"Compiled from {plan.profile.channel_handle or 'the authorized channel'} by the publication desk. "
+        (disclosure + " ") if disclosure else ""
+    ) + (
+        f"Compiled from {plan.profile.channel_handle or 'the authorized channel'} by the {byline or 'publication desk'}. "
         "Every factual statement is traced to a dated source message in the appendix; analysis and "
         "opinion are labelled. " + demo_note
     )

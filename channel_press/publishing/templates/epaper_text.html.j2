@@ -16,11 +16,13 @@
     Text edition generated from the same edition data and quality-checked layout as the PDF. Source references
     point to the appendix below. This accessible transcript is not a substitute for the print proof when checking
     typography and page geometry.
+    {% if profile.source_disclosure %}{{ profile.source_disclosure }}{% endif %}
   </p>
   {% for article in articles %}
   <article id="article-{{ loop.index }}" class="transcript__article">
     <div class="transcript__kicker">{{ article.section }} · {{ article.genre }}{% if article.pages %} · page {{ article.pages|join(', ') }}{% endif %}</div>
     <h2>{{ article.title }}</h2>
+    {% if profile.byline %}<p class="transcript__byline">By {{ profile.byline }}</p>{% endif %}
     {% if article.deck %}<p class="transcript__deck">{{ article.deck }}</p>{% endif %}
     {% if article.standfirst %}<p class="transcript__standfirst">{{ article.standfirst }}</p>{% endif %}
     {% for paragraph in article.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}

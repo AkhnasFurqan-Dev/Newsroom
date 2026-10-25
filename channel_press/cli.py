@@ -38,7 +38,7 @@ from .bootstrap import (
 from .config import BASE_DIR, settings
 from .db import SessionLocal
 from .ingestion.adapters import load_json
-from .ingestion.service import ensure_import_media_dir, import_payload
+from .ingestion.service import ensure_import_media_dir, import_payload, reclassify_posts
 from .migrations import current_revision, upgrade_database
 from .models import (
     Article,
@@ -57,6 +57,7 @@ from .models import (
 )
 from .pipeline import PipelineRequest, run_pipeline
 from .publishing.service import edition_review_blockers
+from .media.service import clear_media_cache, media_cache_summary
 from .scheduling.service import (
     WorkerBusy,
     enqueue_manual_job,
@@ -424,6 +425,38 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_classify_posts(args: argparse.Namespace) -> int:
+    from .editorial.moderation import CLASSIFIER_VERSION
+
+    settings.ensure_dirs()
+    upgrade_database()
+    with SessionLocal() as db:
+        owner = _get_owner(db)
+        channel = _get_channel(db, args.channel)
+        stats = reclassify_posts(
+            db,
+            channel,
+            start=args.window_start,
+            end=args.window_end,
+            force=args.force,
+            actor_id=owner.id if owner else None,
+        )
+        db.commit()
+        _print(
+            f"Classifier {CLASSIFIER_VERSION}: {stats.scanned} stored posts, "
+            f"{stats.reclassified} reclassified, {stats.current} already current, "
+            f"{stats.out_of_scope} outside the requested window."
+        )
+        _print(
+            f"  Included: {stats.included}; excluded: {stats.excluded}; "
+            f"editor overrides preserved: {stats.overrides}; "
+            f"repeated copies: {stats.duplicates}; fragments created: {stats.fragments_created}."
+        )
+        for label, count in sorted(stats.by_classification.items(), key=lambda item: (-item[1], item[0])):
+            _print(f"  {label:<28} {count}")
+    return 0
+
+
 def cmd_run_now(args: argparse.Namespace) -> int:
     settings.ensure_dirs()
     upgrade_database()
@@ -504,6 +537,80 @@ def cmd_worker(args: argparse.Namespace) -> int:
         telegram_service.close()
 
 
+def cmd_media_cache(args: argparse.Namespace) -> int:
+    settings.ensure_dirs()
+    upgrade_database()
+    with SessionLocal() as db:
+        if args.finalize_edition:
+            from .models import Edition
+            from .publishing.service import finalize_media_cleanup
+
+            edition = db.get(Edition, args.finalize_edition)
+            if edition is None:
+                raise SystemExit(f"No edition with id {args.finalize_edition}.")
+            if edition.status not in {"published", "archived"}:
+                raise SystemExit("Refusing cleanup: the edition is not published.")
+            result = finalize_media_cleanup(db, edition)
+            db.commit()
+            _print(
+                f"Edition {args.finalize_edition} media cleanup: "
+                f"deleted={result['deleted']} files ({result['bytes']} bytes), "
+                f"protected={result['protected']} pending={result['pending']} failed={result['failed']}"
+            )
+            return 1 if result["failed"] else 0
+        # Determine which clear mode to use. The default is the safest mode.
+        if args.clear_edition_working:
+            mode = "edition_working"
+            mode_name = "edition working media"
+            include_derivatives = True
+        elif args.clear_derivatives:
+            mode = "derivatives"
+            mode_name = "derivatives"
+            include_derivatives = True
+        elif args.clear_all_deletable:
+            mode = "all"
+            mode_name = "all deletable media"
+            include_derivatives = not args.no_derivatives
+        else:
+            mode = "unused"
+            mode_name = "unused cache"
+            include_derivatives = not args.no_derivatives
+        summary = media_cache_summary(db, include_derivatives=include_derivatives, mode=mode)
+        _print(
+            f"Clearing {mode_name}: {summary['files']} files, {summary['bytes']} bytes "
+            f"(protected: {summary['protected_files']} files, {summary['protected_bytes']} bytes)"
+        )
+        _print(
+            "Protected files belong to draft/review/running editions, editor locks, "
+            "active jobs, recent ingestion retention or incomplete published output; "
+            "provenance is never deleted."
+        )
+        _print(f"- {summary['protected_refs']} media record(s) are currently protected by active work or retention.")
+        _print("- Media may need to be downloaded again after clearing.")
+        if args.dry_run:
+            return 0
+        if not args.confirm:
+            raise SystemExit("Refusing to delete media without --confirm.")
+        from .auth import audit
+
+        result = clear_media_cache(db, include_derivatives=include_derivatives, mode=mode)
+        audit(
+            db,
+            None,
+            "media.cache_clear",
+            "media_cache",
+            0,
+            {"mode": mode, "deleted": result["deleted"], "bytes": result["bytes"],
+             "skipped": result["skipped"], "failed": result["failed"], "source": "cli"},
+        )
+        db.commit()
+        _print(
+            f"Deleted {result['deleted']} files ({result['bytes']} bytes); "
+            f"skipped={result['skipped']} failed={result['failed']}"
+        )
+        return 1 if result["failed"] else 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -556,12 +663,17 @@ def cmd_backup(args: argparse.Namespace) -> int:
             dest.close()
             source.close()
         counts = {}
-        with sqlite3.connect(str(snapshot)) as conn:
+        conn = sqlite3.connect(str(snapshot))
+        try:
             for table in ("source_posts", "story_clusters", "articles", "editions", "jobs"):
                 try:
                     counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 except sqlite3.Error:
                     counts[table] = 0
+        finally:
+            # Windows will not let ZipFile read a SQLite file while a handle is
+            # still open; a context manager alone only ends the transaction.
+            conn.close()
         with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.write(snapshot, "channel_press.db")
             for name in ("secret.key",):
@@ -787,6 +899,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rights-notes", default="")
     p.set_defaults(func=cmd_import)
 
+    p = sub.add_parser(
+        "classify-posts",
+        help="Re-run deterministic moderation over stored posts (legacy backfill).",
+    )
+    p.add_argument("--channel", required=True, help="Channel slug.")
+    p.add_argument("--window-start", type=_parse_dt, default=None)
+    p.add_argument("--window-end", type=_parse_dt, default=None)
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Reclassify posts already at the current classifier version.",
+    )
+    p.set_defaults(func=cmd_classify_posts)
+
     p = sub.add_parser("run-now", help="Queue and immediately process one edition job.")
     p.add_argument("--channel", required=True)
     p.add_argument("--window-start", type=_parse_dt, default=None)
@@ -798,6 +924,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--interval", type=int, default=60)
     p.add_argument("--max-jobs", type=int, default=5)
     p.set_defaults(func=cmd_worker)
+
+    p = sub.add_parser("media-cache", help="Inspect or clear unused local media cache.")
+    p.add_argument("--dry-run", action="store_true", help="Show deletable files and bytes without deleting.")
+    p.add_argument("--confirm", action="store_true", help="Confirm deletion.")
+    p.add_argument("--no-derivatives", action="store_true", help="Keep derivative files.")
+    p.add_argument("--clear-unused", action="store_true", help="Clear only unused cache files (default safe option).")
+    p.add_argument("--clear-edition-working", action="store_true", help="Clear edition working media only.")
+    p.add_argument("--clear-derivatives", action="store_true", help="Clear derivative files only.")
+    p.add_argument("--clear-all-deletable", action="store_true", help="Clear all deletable media (with active-job protection).")
+    p.add_argument("--finalize-edition", type=int, default=0, help="Retry the post-publication media cleanup for one published edition id.")
+    p.set_defaults(func=cmd_media_cache)
 
     p = sub.add_parser("serve", help="Start the local newsroom web UI.")
     p.add_argument("--host", default=settings.host)

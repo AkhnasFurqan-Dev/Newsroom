@@ -11,8 +11,11 @@ from ..ingestion.adapters import extract_links
 from .entities import numbers, sentence_split
 
 INJECTION_PATTERNS = [
-    r"(?i)ignore (all )?(previous|prior) instructions",
-    r"(?i)ignore (all )?(the )?(above|system)",
+    r"(?i)ignore (all )?(previous|prior|following|these|the) instructions",
+    r"(?i)ignore (all )?(the )?(above|system|rules)",
+    r"(?i)forget (all )?(previous )?instructions",
+    r"(?i)پرانی\s*ہدایات\s*کو?\s*(نظرانداز|بھولو)",
+    r"(?i)(purani|pichli)\s+(hidayat|instructions)\s+ko\s+(bhool|nazar\s+andaz)",
     r"(?i)reveal (the )?(api|secret|password|token|key)",
     r"(?i)publish (the )?(administrator|admin) password",
     r"(?i)system prompt",

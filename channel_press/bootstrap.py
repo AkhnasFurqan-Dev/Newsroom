@@ -47,6 +47,11 @@ def ensure_defaults(db: Session) -> PublicationProfile:
                 "An editorial roundup prepared from the owner's authorized Telegram channel. "
                 "Demonstration edition produced from synthetic fixtures."
             ),
+            byline="Editorial Desk",
+            source_disclosure=(
+                "This edition is an editorial roundup based primarily on authorized posts "
+                "published by the owner's source channel; it is not staffed eyewitness journalism."
+            ),
             city="Karachi",
             timezone="Asia/Karachi",
             accent="#7b1f24",

@@ -1,13 +1,13 @@
 # Prompt version index
 # Update the version when changing instructions; the version is stored on each model run.
-news_article: news-article-v3
-analysis_article: analysis-article-v2
+news_article: news-article-v4
+analysis_article: analysis-article-v3
 editorial_note: editorial-note-v2
-headlines: headlines-v1
+headlines: headlines-v2
 style_revision: style-revision-v1
 fact_audit: fact-audit-v1
-language_translation: translation-v1
-post_classification: classification-v1
+language_translation: translation-v2
+post_classification: classification-v2
 story_fragment_split: split-v1
 story_cluster_adjudication: cluster-v1
 claim_extraction: claims-v1

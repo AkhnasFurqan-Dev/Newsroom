@@ -619,3 +619,147 @@ auto-release off; then mark C17/C18.
   worker console visibly, while the durable JSON log remains under `data/logs`.
 - **Verification:** focused web/scheduling/queue tests — 28 passed; `ruff check
   channel_press tests` — passed.
+
+## Post-M14 moderation, language, attribution and media lifecycle (2026-10-25)
+
+**Trigger.** A review of the partially implemented intake prompt found that basic
+classification existed, but meaningless-post reasons, Urdu/Roman Urdu handling,
+institutional attribution, bounded media preparation, cache clearing and
+post-publication cleanup were incomplete, inconsistent or untested.
+
+**Implemented**
+
+1. **Classification and moderation.** `channel_press/editorial/moderation.py` is a
+   deterministic, versioned classifier. It distinguishes event reports from bare
+   numbers, greetings, prayers, slogans, emoji, promotions, link-only posts and
+   unsupported media, and persists a specific reason. Short casualty, correction
+   and emergency alerts remain eligible in English, Urdu script, Roman Urdu and
+   mixed Urdu/English. Unrecognised scripts are retained as
+   `language_needs_review`, never silently dropped.
+2. **Profanity and abuse.** Plain and obfuscated forms are detected, including
+   leetspeak, spaced letters, repeated characters and intra-word `@`. A report that
+   quotes abuse is retained and flagged; abuse with no report is excluded. Threats,
+   targeted abuse and hate/dehumanising language are routed to review.
+   Sexual-violence reporting terms are treated as sensitive editorial material,
+   not automatic profanity. The word lists are self-authored and versioned.
+3. **Persistence and editor control.** Posts store classification, reason,
+   classifier version, language, moderation status and classification time.
+   Repeated copies get `repeated_copy`. The source page shows the result and offers
+   audited editor decisions (include, exclude, context only, promotional,
+   profanity/abuse); these survive re-imports and rebuilds. Before clustering,
+   `run_pipeline` reclassifies any stored rows still at `legacy`/an older
+   classifier version, creates missing fragments for newly includable posts and
+   preserves editor overrides. `channel-press classify-posts --channel <slug>`
+   exposes the same backfill for older databases, with optional
+   `--window-start`/`--window-end` and `--force`.
+4. **Attribution.** Byline and source disclosure are configurable. The publication
+   is an institutional source, never an individual reporter or eyewitness. The
+   evidence audit and prompts reject invented staff, scene reporting and unnamed
+   “our correspondent” claims. Print and e-paper render the byline and roundup
+   disclosure.
+5. **Media preparation.** Live media is downloaded only with an active rights
+   grant, credentials, a resolved handle, documentary/relevant metadata, size
+   limits, a per-story asset cap and a retry budget. Downloads are relevance-ranked
+   and bounded before layout. Layout and PDF rendering accept local files only and
+   never call Telegram. Provenance records filename, bytes, checksum, attempts,
+   download time, rights grant and errors.
+6. **Cache and cleanup.** The media cache has dry-run, unused, derivative,
+   edition-working and all-deletable modes. File deletion is confined to
+   `data/media`; protected media includes draft/review/failed/running editions,
+   editor locks, active jobs, the retention window and incomplete published
+   bundles. Provenance is retained after file deletion. Publication cleanup runs
+   only after a verified release, is idempotent, and records failures as `pending`
+   without reversing publication. `finalize_media_cleanup` commits the release
+   before deleting any file, because file deletion cannot be rolled back.
+7. **Controls and visibility.** `/media-cache` is editor-only, CSRF-protected and
+   audited. `media-cache` supports `--dry-run`, explicit modes, `--confirm` and
+   `--finalize-edition`. Jobs report `classification`, `media_prepare`,
+   `media_download`, `media_process` and `clean_media` in the browser and worker
+   CLI.
+8. **Migrations.** Added `c1d4e6f8a901` (moderation/media lifecycle),
+   `d2e5f7a8b902` (attribution identity) and `e3f6a9c0d013` (classification time
+   and media provenance).
+
+**Verification**
+
+- `.\.venv\Scripts\python.exe -m pytest tests/test_moderation_media_lifecycle.py -q -p no:warnings`
+  → **32 passed**. Covers exclusions, short alerts, four language families,
+  obfuscated profanity, threats, sexual-violence reporting, repeated copies,
+  overrides, legacy-stored-post backfill before clustering, media-only posts not
+  mistaken for copies, institutional attribution, rights-gated downloads, bounds,
+  retries, local-only rendering, cache protection, path traversal,
+  post-publication cleanup, idempotency and the protected web/CLI controls.
+- `.\.venv\Scripts\python.exe -m pytest -p no:warnings` → **202 passed, 2 skipped
+  in 104.92 s**. The skips are the two Ollama live tests because no model server
+  was running.
+- `.\.venv\Scripts\python.exe -m ruff check .` → **All checks passed!**
+- Fresh-database migration check:
+  `.\.venv\Scripts\python.exe -m alembic upgrade head` applied all five revisions
+  and reported `e3f6a9c0d013 (head)`.
+- The existing fixture-to-PDF e2e remains green and asserts the printed byline,
+  source disclosure, `media_cleanup` manifest entry and e-paper text byline.
+
+**Fixture vs real channel**
+
+The results above are fixture and owner-import evidence. **The Pakistan News was
+not collected or published in this pass.** Live validation still requires the
+owner's Telegram API values, completed local login, an active rights grant and one
+supervised window/build. No fixture result is presented as live Telegram proof,
+and no live attribution, profanity or media-cleanup claim is made.
+
+The stored archive was checked separately. Before this change, 1,597 of the
+channel's 1,661 stored posts still had `classification_version = "legacy"`, a blank
+reason and no `classified_at`; story building only read `inclusion_status`, so those
+rows bypassed the new rules. A transactional dry run of the new backfill produced
+1,213 relevant, 307 duplicate, 115 low-information, 13 promotion, 7 profanity-only,
+3 context-only, 2 unsupported-media and 1 empty post. That matched the earlier
+independent read-only pass exactly once a defect was fixed: media-only posts with no
+text must not share the hash of an empty string and be mistaken for repeated
+copies. The owner database was backed up, then the CLI persisted the upgrade:
+
+```text
+classify-posts --channel regional-desk
+1661 stored, 1661 reclassified, 1213 included, 448 excluded,
+0 editor overrides, 0 repeated copies, 0 fragments created
+```
+
+This is stored-data validation, not live Telegram collection. Existing text,
+message ids, source links, rights records, media metadata, story/article snapshots
+and editor overrides were preserved; the pass is recorded as `source.reclassify`
+in the audit log. While preparing the backup, a Windows defect was also fixed:
+`backup` left a SQLite snapshot handle open, so `ZipFile` could not read it. The
+connection now closes explicitly, and `tests/test_cli_backup.py` checks that the
+archive is written and readable.
+
+**Known limits**
+
+- The classifier is rule-based and deliberately conservative; an unfamiliar slang
+  or script variant may need an editor override. That decision is recorded.
+- Live media can be skipped by policy or size. The text article still renders; the
+  build does not fail solely because a download failed.
+- Post-publication cleanup removes downloaded source media. The published PDF and
+  e-paper bundle are the durable record; archived raw media must be backed up
+  before release.
+- Two skipped Ollama tests still require a local model run to mark live-model
+  coverage complete.
+
+**Files:** `channel_press/editorial/moderation.py` (new),
+`channel_press/media/service.py`, `channel_press/publishing/service.py`,
+`channel_press/ingestion/service.py`, `channel_press/ingestion/normalize.py`,
+`channel_press/layout/planner.py`, `channel_press/layout/engine.py`,
+`channel_press/layout/templates/print.html.j2`,
+`channel_press/publishing/templates/epaper_text.html.j2`,
+`channel_press/scheduling/service.py`, `channel_press/pipeline.py`,
+`channel_press/config.py`, `channel_press/constants.py`, `channel_press/models.py`,
+`channel_press/cli.py`, `channel_press/web/app.py`,
+`channel_press/web/templates/{source,media_cache,base,branding}.html.j2`,
+`channel_press/ai/prompts/*` and `VERSIONS.yaml`, migrations
+`c1d4e6f8a901`/`d2e5f7a8b902`/`e3f6a9c0d013`,
+`tests/test_moderation_media_lifecycle.py` (new), `tests/test_edition_e2e.py`,
+`tests/test_ingestion.py`, `tests/test_live_media.py`, `.env.example`, README,
+manuals and this log.
+
+**Next step:** owner completes the local Telegram login, records rights for
+`The Pakistan News`, runs one supervised cutoff with auto-release off, then
+inspects the generated PDF/e-paper for language, attribution and media behavior
+before enabling the schedule.

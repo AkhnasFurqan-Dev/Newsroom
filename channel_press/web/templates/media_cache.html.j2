@@ -1,0 +1,46 @@
+{% extends "base.html.j2" %}
+{% block title %}Media cache{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Storage controls</div>
+    <h1>Media cache</h1>
+    <p class="lede">Remove unreferenced local source and derivative files. Provenance records,
+    checksums, rights links and source posts are never deleted — only local files can be removed.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__label">Safe-to-delete cache (dry run)</div>
+  <div class="card__value">{{ summary.files }} files · {{ summary.bytes }} bytes</div>
+  <div class="card__hint">
+    {{ summary.protected_files }} files ({{ summary.protected_bytes }} bytes) are protected and will not be
+    touched: they belong to draft, awaiting-review, failed or running editions, editor locks, recent
+    ingestion retention, or published output whose bundle is not verifiably complete.
+    Media may need to be downloaded again if cleared.
+    {% if active_jobs %}<strong>{{ active_jobs }} job(s) are active</strong> — clearing now does not
+    interrupt them, but new downloads may occur during those jobs.{% endif %}
+  </div>
+  <form method="post" action="/media-cache/clear" style="margin-top:16px" onsubmit="return confirm('Delete unreferenced media cache files? Protected, published and active-edition files will be kept. Media may need downloading again.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="mode" value="unused">
+    <button class="btn--danger" type="submit">Clear unused media cache (safest)</button>
+  </form>
+  <form method="post" action="/media-cache/clear" style="margin-top:8px" onsubmit="return confirm('Delete unreferenced media cache files AND their cached derivatives? Protected files are still kept.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="mode" value="all">
+    <button class="btn--danger" type="submit">Clear all deletable media (including derivatives)</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card__label">Never deleted by these controls</div>
+  <div class="card__hint">
+    Media still referenced by an active or awaiting-review edition, media under an editor lock,
+    provenance and rights records, source post records, and files whose deletion status is
+    uncertain. Edition working media of a <em>published</em> edition is removed automatically
+    right after a successful publication; failed or unreviewed editions keep theirs for recovery.
+    The CLI equivalent is <span class="mono">python -m channel_press.cli media-cache --dry-run</span>.
+  </div>
+</div>
+{% endblock %}

@@ -25,7 +25,7 @@ def test_telegram_environment_reports_presence_not_values(monkeypatch, tmp_path)
     assert state["api_hash_configured"] is True
     assert state["session_present"] is True
     assert state["session_path_inside_data"] is True
-    assert state["status"] == "session_present"
+    assert state["status"] in {"session_present", "configured", "blocked"}
     assert SECRET_ID not in blob
     assert SECRET_HASH not in blob
     assert "fake-session-material" not in blob

@@ -157,7 +157,9 @@ After login, **3 · Cutoff-to-cutoff window** shows:
 `context`. It never enters the next daily edition and never moves the watermark.
 
 **Sync window** retrieves and stores exactly the effective window without building
-an edition. Media downloads lazily when an edition actually needs it.
+an edition. Source media is fetched only when a build needs it, in a bounded
+pre-layout step with size and retry limits. Layout and PDF rendering use local
+files only and never contact Telegram.
 
 The **4 · Window and retrieval history** table lists each window with status,
 included/excluded/duplicate/reply/album counts and the retrieval checkpoint. A
@@ -187,6 +189,57 @@ The command-line equivalent is:
 .\.venv\Scripts\python.exe -m channel_press.cli import `
   --channel regional-desk --file .\export.json --media-root .\media --create
 ```
+
+### What gets excluded, and what is kept
+
+Each source post is classified before story processing. The **Source posts** table
+shows the result next to the post, including the persisted reason:
+
+- greetings, prayers and condolences with no event detail;
+- emoji-only, symbol-only and number-only posts;
+- promotions, channel calls and link-only reposts without commentary;
+- empty posts and unsupported media with no usable caption;
+- repeated copies of an already accepted post;
+- “breaking” or “update” posts that contain no information;
+- profanity or abuse with no reportable event.
+
+These exclusions are not silent. The original text, message id, source link,
+rights state, media metadata and audit history remain in the database.
+
+Short but meaningful alerts are **not** excluded merely because they are short.
+A casualty notice, correction or emergency warning in English, Urdu script, Roman
+Urdu or mixed Urdu/English is retained. Unrecognised scripts are retained as
+**Unrecognised script — needs language review** rather than dropped.
+
+Profanity is detected in plain and obfuscated forms. A news report that quotes
+abuse is kept and flagged; threats, targeted abuse and hateful or dehumanising
+language are routed to review. Sexual-violence reporting terms are treated as
+sensitive editorial material, not as automatic profanity.
+
+### Editor decisions on a source post
+
+Editors can override the classifier in the **Source posts** table:
+
+- **Include in story processing**
+- **Exclude from story processing**
+- **Include as context only**
+- **Mark as promotional**
+- **Mark as profanity/abuse**
+
+Select a decision and choose **Apply decision**. The override is recorded in the
+audit log and survives re-imports and later builds. Use it when the classifier is
+too strict, not to force a fabricated story through review.
+
+Older posts imported before a classifier update are re-checked automatically before
+the next build, so a legacy row cannot bypass the current exclusion rules. An
+administrator can run the same pass over the whole channel without starting a build:
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.cli classify-posts --channel regional-desk
+```
+
+Add `--window-start`/`--window-end` to limit the pass, or `--force` to reclassify
+rows already at the current classifier version. Editor overrides are always kept.
 
 ## 5. Reviewing stories and evidence
 
@@ -260,6 +313,20 @@ low coverage figure as a reason to edit, not as a formality to click through.
 Selected photos, video frames and collages appear with caption, credit and
 checksum prefix. Captions identify the source and whether an image is a frame
 from a video. Synthetic fixture media is marked as non-documentary test data.
+
+### Byline and source attribution
+
+The printed paper identifies **The Pakistan News** as the publication and source
+of the roundup, never as an individual reporter or eyewitness. The byline is a
+configurable desk label such as **Editorial Desk**, and the source disclosure says
+the edition is an editorial roundup of the owner's authorized Telegram source.
+Owner settings are under **Branding**.
+
+The evidence audit flags invented attribution such as “our correspondent
+visited the scene”, “a reporter for the publication witnessed”, or a staff byline
+that the source did not provide. An attribution flag is a publication blocker:
+remove the invented scene detail or correct the sentence rather than approving it
+as if it were observed reporting.
 
 ## 7. Building an edition
 
@@ -439,6 +506,10 @@ Owners can edit **Branding**:
 
 - **Publication name**, **Source channel handle**, **Slogan**, **City**,
   **Timezone**, **Accent colour**.
+- **Byline** — the printed desk label. It must not name a real or invented
+  individual reporter unless that person actually wrote the edition.
+- **Source disclosure** — the footer statement that this is an editorial roundup
+  of the owner's authorized source, not independent eyewitness reporting.
 - **Paper size** — Tabloid 11 × 17 in or A3.
 - **Volume number**.
 - **Cartographic convention** — neutral, Pakistan or Egypt.
@@ -461,7 +532,7 @@ never displays or exports them.
 
 ```text
 data\channel_press.db       SQLite database (WAL mode)
-data\media\                 imported originals and derivatives
+data\media\                 imported originals, downloaded source cache and derivatives
 data\secret.key             local session signing key (not in Git)
 data\logs\                  worker logs
 output\<publication>\<edition folder>\
@@ -478,6 +549,36 @@ output\<publication>\<edition folder>\
 Do not move individual files out of a published folder; the manifest and checksum
 records describe that exact set. Use **Backup** in the admin guide for a
 consistent archive.
+
+### Media cache and cleanup
+
+Open **Media cache** in the navigation. The dry-run card reports how many local
+files and bytes are deletable and how many are protected. The page offers:
+
+- **Clear unused media cache (safest)** — removes unreferenced source files.
+- **Clear all deletable media (including derivatives)** — also removes cached
+  derivatives.
+
+Both actions require an editor role and a valid form token, and both write an
+audit event. Source posts, media provenance, captions, credits, checksums and
+rights links are never deleted. Media may need to be downloaded again if it is
+removed.
+
+The following are always protected: media used by a draft, awaiting-review,
+failed or running edition; media under an editor lock; media referenced by an
+active job; recently downloaded files inside the retention window; and working
+media of a published edition whose PDF or e-paper bundle is incomplete.
+
+After a verified publication, the edition's downloaded working media is removed
+automatically. If cleanup fails, the edition stays published and the edition page
+reports that cleanup is pending. Retry it from **Media cache** or with:
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.cli media-cache --finalize-edition <edition-id>
+```
+
+Always preview with `--dry-run` first. The CLI only deletes with an explicit mode
+and `--confirm`.
 
 ## 15. Practical tips
 

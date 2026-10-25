@@ -56,11 +56,52 @@ server is running.
 | `A rights declaration is required` | No active grant for a live channel | Owner records the grant on the channel page |
 | `Unsupported export format` | JSON is not Telegram Desktop or owner format | Export again from Telegram Desktop, or use the documented owner format |
 | `Import exceeds 40 MB` | File too large | Split the export or raise `CHANNEL_PRESS_MAX_IMPORT_BYTES` deliberately |
-| Accepted count is lower than raw | Forwards, promotion-only posts and empty messages are excluded by policy | Check the exclusion reason in **Source posts** |
+| Accepted count is lower than raw | Forwards, promotion-only posts, greetings, link-only posts, number-only posts or empty messages are excluded by policy | Check the persisted reason in **Source posts** |
 | Media not shown | Files were not selected with the import | Re-import with **Referenced media files**, or copy files into `data\media` with the expected names |
 
 Edited posts keep versions; the latest pre-cutoff version is used. A deleted or
 withdrawn post is excluded from new builds.
+
+### A post was excluded but looks newsworthy
+
+Open the channel's **Source posts** table and read the small reason line under the
+classification. Every exclusion is persisted; the app does not silently drop
+text. Common reasons:
+
+- `greeting_or_condolence_no_event` — a greeting or prayer with no event detail;
+- `promotion_only` — a channel call, advertisement or discount;
+- `link_only_no_commentary` — a link with no source commentary;
+- `repeated_copy` — an identical accepted post already exists;
+- `unsupported_media_no_caption` — media type with no usable caption;
+- `abuse_without_reportable_content` — profanity or abuse without a report;
+- `number_without_event_context` — digits, scores or dates without a report.
+
+If the decision is wrong, choose an **Editor decision** in the same table. It is
+audited and survives re-imports. If a legitimate short alert is still excluded,
+record the exact text and reason in a bug report; do not edit the database.
+
+### An older imported post still shows “legacy” or bypasses the current rules
+
+The pipeline reclassifies stored rows before clustering, so a normal build repairs
+the window automatically. To repair the whole channel immediately:
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.cli classify-posts --channel regional-desk
+```
+
+Use `--window-start`/`--window-end` to limit the pass. The command prints how many
+posts were reclassified, included, excluded, deduplicated and given new fragments.
+Add `--force` only when you intentionally want to recheck rows already at the
+current classifier version. Editor overrides are preserved; the pass appears in
+**Audit** as `source.reclassify`.
+
+### A legitimate report contains profanity or a threat
+
+A report that quotes abuse is kept and flagged; only abuse with no reportable
+event is excluded. Threats, targeted abuse and hateful language are routed to
+review. Do not delete the post to clear the flag: open the article review item and
+record an editorial decision. Sexual-violence reporting terms are sensitive
+content, not automatic profanity.
 
 ## Rights or consent denial
 
@@ -106,6 +147,15 @@ in chat or `.env`.
 - **Signed in but Sync window does nothing** — check that a daily schedule exists
   (the window preview comes from it), that the channel is not the fixture desk,
   and that the rights declaration is active.
+- **Some media is skipped during a build** — the media panel and job result report
+  `non_documentary_asset`, `over_size_limit`, `rights_blocked` or a failed
+  download. The article text still renders. Keep the limits unless there is a
+  documented reason to raise `CHANNEL_PRESS_TELEGRAM_MAX_MEDIA_MB`,
+  `CHANNEL_PRESS_TELEGRAM_MAX_VIDEO_MB`, `CHANNEL_PRESS_MEDIA_MAX_ASSETS_PER_STORY`
+  or `CHANNEL_PRESS_MEDIA_DOWNLOAD_ATTEMPTS`.
+- **Downloads retry then stop** — the per-file attempt budget is deliberate. A
+  transient gateway or FloodWait error leaves the media row `failed`; rebuild after
+  the wait. Do not loop the worker to force repeated downloads.
 
 If live access remains blocked, use the rights-cleared JSON import. It is the
 verified path and needs no Telegram credentials.
@@ -444,6 +494,50 @@ on a different network before release. A QR that cannot be reached is a defect.
   PDF shows an empty image box, record it as a layout defect.
 - Video frames use OpenCV because FFmpeg is absent. A black frame means the
   timestamp selection failed; inspect the source video and re-render.
+
+## Media cache and cleanup
+
+### The cache page says files are protected
+
+Protection is intentional. Files stay when they belong to a draft,
+awaiting-review, failed or running edition; an editor lock; an active job; the
+`media_retention_hours` window; or a published edition whose PDF/e-paper bundle is
+incomplete. Wait for the job or retention window, release the lock, or finish the
+missing bundle. Do not delete protected files by hand.
+
+### Cleanup is pending after a successful release
+
+The edition is still published. A file was open, locked or temporarily
+unavailable. Retry:
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.cli media-cache --finalize-edition <edition-id>
+```
+
+The operation is idempotent. If it still reports pending, check the edition's
+`manifest.json`, the PDF and `epaper/index.html` are present and readable. An
+incomplete bundle deliberately keeps its working media.
+
+### A source file disappeared after release
+
+That is expected for downloaded edition working media once publication is
+complete. The PDF and e-paper bundle are self-contained; provenance, checksums,
+captions and rights records remain. Owner-supplied imported files are not removed
+by publication cleanup. A later re-render may download the source again if the
+rights grant and Telegram connection are still active.
+
+### `media-cache` refuses to delete
+
+The CLI requires an explicit mode and `--confirm`; `--dry-run` never deletes. The
+web route requires an editor role and a CSRF token. A file outside
+`data\media` is treated as unsafe and counted as failed rather than followed.
+
+### Attribution flag: “reporter”, “correspondent” or “witnessed”
+
+The printed publication is an institutional source, never an eyewitness. Remove
+invented scene reporting or a staff byline the source did not provide. The byline
+and source disclosure under **Branding** must describe an editorial roundup, not
+independent reporting.
 
 ## Timezone and date confusion
 

@@ -67,6 +67,7 @@ The first account is created by **Set up Channel Press** or:
 | Queue builds and run jobs | — | Yes | Yes | Yes |
 | Import content, edit articles, resolve flags | — | — | Yes | Yes |
 | Release editions, manage schedules | — | — | Yes | Yes |
+| Inspect and clear the media cache | — | — | Yes | Yes |
 | Register channels, manage users, branding | — | — | — | Yes |
 | Record or revoke rights declarations | — | — | — | Yes |
 | Inspect diagnostics/audit | — | — | — | Yes |
@@ -144,10 +145,11 @@ The flow is implemented in the app, not a detached script:
 - a session file behaves like a password. **Sign out** deletes it; revoke the
   session in Telegram if the device is lost.
 
-**Live login and retrieval are still unverified** because no API values, user
-login or content rights were supplied. Fixture and rights-cleared JSON import are
-the verified intake routes. Do not report the live path as working until an
-authorized run is completed.
+**Live login and retrieval remain unverified in this build.** The fixture and
+rights-cleared JSON import routes are the verified intake paths. The real target
+channel (`The Pakistan News`) still needs the owner's API values, session login,
+an active rights grant and one supervised collection/build. Do not report the live
+path as working until that run is completed and its output inspected.
 
 ## 4. Secrets
 
@@ -342,9 +344,66 @@ is Channel Press.
 - `run-now --channel <slug>` does the same from the command line.
 - `check-edition --edition-id N` prints status, page count, QA warnings, PDF path
   and any review blockers.
+- `classify-posts --channel <slug>` re-runs the deterministic post classifier over
+  stored rows without building an edition. The pipeline does this automatically for
+  the build window; the command is useful after a classifier upgrade or for older
+  imported archives. Add `--force` to recheck rows already at the current version.
+  Editor overrides are preserved and the pass is recorded as `source.reclassify` in
+  the audit log.
 
 Do not edit `manifest.json`, `checksums.json` or files inside a published folder.
 Create a new version instead.
+
+### Media lifecycle and cache
+
+Live source media is downloaded only when an edition build needs it, before
+layout, under all of these gates:
+
+- an active rights grant covering ingest, AI processing and publication;
+- a resolved channel handle and configured Telegram credentials;
+- a documentary/relevant asset with usable metadata;
+- a per-file size below `CHANNEL_PRESS_TELEGRAM_MAX_MEDIA_MB` (25 MB default;
+  video uses `CHANNEL_PRESS_TELEGRAM_MAX_VIDEO_MB`, 120 MB default);
+- at most `CHANNEL_PRESS_MEDIA_MAX_ASSETS_PER_STORY` assets per story (3 default);
+- at most `CHANNEL_PRESS_MEDIA_DOWNLOAD_ATTEMPTS` attempts per file (2 default).
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `CHANNEL_PRESS_TELEGRAM_DOWNLOAD_MEDIA` | `true` | Master switch for live media downloads |
+| `CHANNEL_PRESS_TELEGRAM_MAX_MEDIA_MB` | `25` | Per-photo/document limit |
+| `CHANNEL_PRESS_TELEGRAM_MAX_VIDEO_MB` | `120` | Per-video limit |
+| `CHANNEL_PRESS_MEDIA_MAX_ASSETS_PER_STORY` | `3` | Bounded download count |
+| `CHANNEL_PRESS_MEDIA_DOWNLOAD_ATTEMPTS` | `2` | Retry budget before marking failed |
+| `CHANNEL_PRESS_MEDIA_RETENTION_HOURS` | `72` | New-file protection from cache clearing |
+
+Layout and PDF rendering never contact Telegram; they use local files only. A
+missing or failed download leaves the article text renderable.
+
+Downloaded source media is edition working material. It is removed only after the
+PDF, e-paper bundle, manifest and checksums are written, verified and the release
+is committed. Owner-supplied files imported from disk are a source library, not
+edition working material, and are not removed by publication cleanup.
+
+Cleanup is idempotent and skips anything still needed by another draft,
+awaiting-review, failed or running edition, an editor lock, an active job, the
+retention window, or a published edition with an incomplete bundle. Provenance
+rows, captions, credits, checksums, rights links and audit events stay after file
+deletion. A cleanup failure is recorded as `pending` in the manifest and an audit
+event; it never turns a successful publication into a failed one.
+
+Inspect before deleting:
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.cli media-cache --dry-run
+.\.venv\Scripts\python.exe -m channel_press.cli media-cache --clear-unused --confirm
+.\.venv\Scripts\python.exe -m channel_press.cli media-cache --finalize-edition <edition-id>
+```
+
+The **Media cache** page is restricted to editors, requires CSRF, and audits each
+clear as `media.cache_clear`. The CLI refuses deletion without `--confirm`.
+Because publication cleanup can remove downloaded media, a backup taken after
+release may contain provenance but not every original download. Back up before a
+release if the raw source files must be retained indefinitely.
 
 ## 8. Backup and restore
 
@@ -362,7 +421,9 @@ Writes `data\backups\channel-press-<timestamp>.zip` containing:
 - `backup-manifest.json` with schema, revision, counts and included components.
 
 Published `output/` folders are **not** included. Archive them separately if the
-PDF/e-paper history matters; they are reproducible from the database and media.
+PDF/e-paper history matters. They are reproducible from the database and retained
+media only while that media still exists: post-publication cleanup deliberately
+removes downloaded source files, so a released edition is the durable record.
 
 Options:
 

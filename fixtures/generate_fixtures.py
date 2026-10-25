@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import math
-import random
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -40,7 +39,6 @@ def font(size: int, bold: bool = False):
 
 
 def test_plate(name: str, title: str, subtitle: str, seed: int) -> None:
-    rng = random.Random(seed)
     width, height = 1600, 1067
     image = Image.new("RGB", (width, height), "#d9d5cc")
     draw = ImageDraw.Draw(image)
@@ -649,7 +647,6 @@ PLACES = [
 
 
 def large_dataset(count: int, seed: int) -> dict:
-    rng = random.Random(seed)
     messages = []
     start = BASE - timedelta(hours=19)
     for index in range(count):

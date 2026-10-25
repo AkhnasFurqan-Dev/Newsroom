@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from channel_press.config import settings
 from channel_press.media.service import ensure_media_files
-from channel_press.models import Channel, PostFragment, PostMedia, SourcePost, StoryCluster
+from channel_press.models import Channel, PostFragment, PostMedia, RightsGrant, SourcePost, StoryCluster
 from channel_press.telegram.service import telegram_service
 
 
@@ -28,6 +28,17 @@ def _live_channel(db) -> Channel:
         is_demo=False,
     )
     db.add(channel)
+    db.flush()
+    # Downloading source media requires an active rights grant; an API login
+    # alone is never treated as permission.
+    db.add(
+        RightsGrant(
+            channel_id=channel.id,
+            grantor_name="Owner",
+            authority_basis="Documented permission",
+            scope_json='["ingest", "ai_process", "publish"]',
+        )
+    )
     db.flush()
     return channel
 

@@ -156,14 +156,29 @@
           {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
           {% if post.exclusion_reason %}<div class="small error-text">{{ exclusion_reasons.get(post.exclusion_reason, post.exclusion_reason) }}</div>{% endif %}
         </td>
-        <td>{% if post.inclusion_status == 'included' %}<span class="badge badge--published">Included</span>{% else %}<span class="badge">Excluded</span>{% endif %}</td>
+        <td>
+          {% if post.inclusion_status == 'included' %}<span class="badge badge--published">Included</span>{% else %}<span class="badge">Excluded</span>{% endif %}
+          <div class="small">{{ classification_labels.get(post.classification, post.classification) }}{% if post.classification_reason %} · {{ exclusion_reasons.get(post.classification_reason, post.classification_reason.replace('_', ' ')) }}{% endif %}</div>
+          {% if post.moderation_status and post.moderation_status != 'none' %}<div class="small error-text">Moderation: {{ post.moderation_status.replace('_', ' ') }}</div>{% endif %}
+          {% if post.editor_override %}<div class="small">Editor override: {{ post.editor_override }}</div>{% endif %}
+        </td>
         <td class="small">
           {% set count = media_counts.get(post.id, 0) %}
           {% if count %}{{ count }} file{{ '' if count == 1 else 's' }}{% else %}—{% endif %}
         </td>
         <td>
-          {% if can.edit and post.inclusion_status == 'included' %}
-          <form method="post" action="/sources/{{ channel.id }}/posts/{{ post.id }}/withdraw" class="stack" style="min-width:150px">
+          {% if can.edit %}
+          <form method="post" action="/sources/{{ channel.id }}/posts/{{ post.id }}/override" class="stack" style="min-width:170px">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <select name="decision">
+              {% for key, label in override_choices.items() %}
+              <option value="{{ key }}" {% if post.editor_override == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn--small" type="submit">Apply decision</button>
+          </form>
+          {% if post.inclusion_status == 'included' %}
+          <form method="post" action="/sources/{{ channel.id }}/posts/{{ post.id }}/withdraw" class="stack" style="min-width:170px;margin-top:6px">
             <input type="hidden" name="csrf_token" value="{{ csrf }}">
             <select name="reason">
               <option value="rights_withdrawn">Rights withdrawn</option>
@@ -173,6 +188,7 @@
             </select>
             <button class="btn--danger btn--small" type="submit">Withdraw</button>
           </form>
+          {% endif %}
           {% endif %}
         </td>
       </tr>
