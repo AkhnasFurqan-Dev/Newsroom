@@ -502,6 +502,37 @@ contain credentials, session material or post bodies in error text.
 
 ## 12. Branding and edition policy
 
+### Switching newspapers
+
+The **Newspaper** selector in the header switches the working publication. Each
+newspaper has its own branding, source list, schedules, drafts, editions, archive
+and editor membership. Switching changes the dashboard and the build target; it
+never publishes, releases or deletes anything. An owner creates a newspaper under
+**Branding → Newspapers on this computer → New newspaper**. A non-owner only sees
+papers they have been granted, and opening another paper's edition URL returns
+**403** rather than showing its content.
+
+Owners and editors of a newspaper manage its sources under **Branding → Sources
+for …**. A source must already be an authorized channel with rights recorded in
+the source desk.
+
+- **Priority 1** is used first when the paper is listed or attributed.
+- **Weight** scales story prominence when the same event arrives from several
+  sources; the higher weighted report becomes the kept story.
+- **Enabled** controls whether the next build and scheduled run include that
+  source. Disabling keeps its archive, posts and Telegram access intact.
+- Removing a source link stops future use by this newspaper. It does not delete
+  the channel, its posts or any edition that already credits it.
+
+On **Build**, **Use every enabled source of this newspaper** collects each source
+separately over the same cutoff window. Identical reports are folded into one
+story with attribution, and the edition records which channels were used. If one
+source fails or has no content, the edition is marked **partial sources**; a
+failed source is never silently replaced by another channel. Uncheck the option
+to build from the primary channel only.
+
+### Newspaper identity and edition policy
+
 Owners can edit **Branding**:
 
 - **Publication name**, **Source channel handle**, **Slogan**, **City**,

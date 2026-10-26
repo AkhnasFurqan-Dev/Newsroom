@@ -88,7 +88,26 @@
       <p class="muted">No saved revisions.</p>
     {% endfor %}
 
-    <h2>Review items</h2>
+    {% if article_sources %}
+<h2>Sources used</h2>
+<p class="help">Attribution recorded when the article was drafted. A merged cross-source story credits every contributing channel; disabling or removing a source later does not rewrite this record.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Channel</th><th>Posts</th><th>Earliest post</th></tr></thead>
+    <tbody>
+    {% for source_row, source_channel in article_sources %}
+      <tr>
+        <td><strong>{{ source_channel.title }}</strong><div class="small">{{ source_channel.handle }}</div></td>
+        <td class="num">{{ source_row.post_count }}</td>
+        <td class="small">{{ source_row.first_posted_at|localtime(profile.timezone if profile else 'Asia/Karachi') if source_row.first_posted_at else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<h2>Review items</h2>
     {% if flags %}
     <div class="table-wrap">
       <table>

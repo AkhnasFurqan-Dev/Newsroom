@@ -20,13 +20,20 @@
     <form method="post" action="/build" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <div class="field">
-        <label for="channel_id">Source channel</label>
+        <label for="channel_id">Primary source channel</label>
         <select id="channel_id" name="channel_id" required>
           {% for channel in channels %}
           <option value="{{ channel.id }}" {% if selected and selected.id == channel.id %}selected{% endif %}>{{ channel.title }}{% if channel.is_demo %} (fixture){% endif %}</option>
           {% endfor %}
         </select>
       </div>
+      <input type="hidden" name="all_sources" value="0">
+      {% if source_count > 1 %}
+      <div class="field">
+        <label class="field--inline"><input type="checkbox" name="all_sources" value="1" checked> Use every enabled source of this newspaper</label>
+        <p class="help">Shared cutoff and window. Each enabled source is collected separately, cross-source duplicates are folded into one story with attribution, and a source failure leaves a partial edition instead of silently dropping it. Uncheck to build from the primary channel only.</p>
+      </div>
+      {% endif %}
       {% if not is_demo and not rights %}
       <div class="notice notice--danger"><h3>Rights declaration missing</h3><p>This channel cannot be built until an owner records an active grant. <a href="/sources/{{ selected.id if selected else '' }}">Open source desk</a>.</p></div>
       {% endif %}

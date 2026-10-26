@@ -215,7 +215,7 @@
           <td class="ref">{{ entry.ref }}</td>
           <td>{{ entry.date }}</td>
           <td>{{ entry.message_id if entry.message_id is not none else '—' }}</td>
-          <td>{{ entry.article }}{% if entry.language and entry.language != 'en' %} <span class="lang">[{{ entry.language }}]</span>{% endif %}{% if entry.kind == 'external_link_unverified' %}<div class="qr-label">{{ entry.title or entry.publisher or 'External reference' }} · not independently verified</div>{% endif %}</td>
+          <td>{{ entry.article }}{% if entry.language and entry.language != 'en' %} <span class="lang">[{{ entry.language }}]</span>{% endif %}{% if entry.channel %}<div class="qr-label">{{ entry.channel }}</div>{% endif %}{% if entry.kind == 'external_link_unverified' %}<div class="qr-label">{{ entry.title or entry.publisher or 'External reference' }} · not independently verified</div>{% endif %}</td>
           <td class="qr">
             {% if entry.qr_data_uri %}
             <img class="source-qr" src="{{ entry.qr_data_uri }}" alt="QR code for source message {{ entry.message_id }} from {{ profile.channel_handle or 'the source channel' }}" width="84" height="84">

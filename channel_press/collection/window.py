@@ -52,6 +52,10 @@ class EditionWindow:
     end: datetime
     timezone: str = "Asia/Karachi"
     cutoff_local: str = "05:00"
+    # A newspaper-scoped window keeps two titles that share one primary channel
+    # from colliding on the same durable window record. Legacy single-paper
+    # windows leave this unset and keep their original key format.
+    publication_id: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "start", as_utc(self.start))
@@ -61,7 +65,13 @@ class EditionWindow:
 
     @property
     def key(self) -> str:
-        return window_key(self.channel_id, self.kind, self.start, self.end)
+        return window_key(
+            self.channel_id,
+            self.kind,
+            self.start,
+            self.end,
+            publication_id=self.publication_id,
+        )
 
     def contains(self, posted_at: datetime) -> bool:
         moment = as_utc(posted_at)
@@ -82,6 +92,7 @@ class EditionWindow:
         return {
             "key": self.key,
             "channel_id": self.channel_id,
+            "publication_id": self.publication_id,
             "kind": self.kind,
             "start_utc": self.start.isoformat(),
             "end_utc": self.end.isoformat(),
@@ -94,10 +105,18 @@ class EditionWindow:
         }
 
 
-def window_key(channel_id: int, kind: str, start: datetime, end: datetime) -> str:
+def window_key(
+    channel_id: int,
+    kind: str,
+    start: datetime,
+    end: datetime,
+    *,
+    publication_id: int | None = None,
+) -> str:
     begin = as_utc(start).isoformat()
     finish = as_utc(end).isoformat()
-    return f"{channel_id}:{kind}:{begin}:{finish}"
+    scope = f"pub{publication_id}:" if publication_id is not None else ""
+    return f"{scope}{channel_id}:{kind}:{begin}:{finish}"
 
 
 def enabled_weekdays(value: str) -> set[int]:

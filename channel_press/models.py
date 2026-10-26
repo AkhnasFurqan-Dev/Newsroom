@@ -465,7 +465,9 @@ class PublicationProfile(Base):
     __tablename__ = "publication_profiles"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, default="main")
     name: Mapped[str] = mapped_column(String(160), default="The Channel Dispatch")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     channel_handle: Mapped[str] = mapped_column(String(120), default="@channel")
     byline: Mapped[str] = mapped_column(String(120), default="Editorial Desk")
     source_disclosure: Mapped[str] = mapped_column(Text, default="")
@@ -483,6 +485,70 @@ class PublicationProfile(Base):
     allow_closing_light: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
+class PublicationSource(Base):
+    """An authorized channel that feeds one newspaper.
+
+    ``priority`` is 1-based and lower wins; ``weight`` scales a source's story
+    importance so an editor can say a wire is secondary without disabling it.
+    """
+
+    __tablename__ = "publication_sources"
+    __table_args__ = (
+        UniqueConstraint("publication_id", "channel_id", name="uq_publication_source"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    publication_id: Mapped[int] = mapped_column(
+        ForeignKey("publication_profiles.id", ondelete="CASCADE"), index=True
+    )
+    channel_id: Mapped[int] = mapped_column(
+        ForeignKey("channels.id", ondelete="CASCADE"), index=True
+    )
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class PublicationEditor(Base):
+    """Per-newspaper editorial access, independent of global user role."""
+
+    __tablename__ = "publication_editors"
+    __table_args__ = (
+        UniqueConstraint("publication_id", "user_id", name="uq_publication_editor"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    publication_id: Mapped[int] = mapped_column(
+        ForeignKey("publication_profiles.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(30), default="editor")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class ArticleSource(Base):
+    """Cross-source attribution for a drafted article.
+
+    A merged story can draw on more than one authorized channel; this table
+    records which channels contributed and how many posts each supplied.
+    """
+
+    __tablename__ = "article_sources"
+    __table_args__ = (UniqueConstraint("article_id", "channel_id", name="uq_article_source"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    article_id: Mapped[int] = mapped_column(
+        ForeignKey("articles.id", ondelete="CASCADE"), index=True
+    )
+    channel_id: Mapped[int] = mapped_column(
+        ForeignKey("channels.id", ondelete="CASCADE"), index=True
+    )
+    post_count: Mapped[int] = mapped_column(Integer, default=0)
+    first_posted_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
 class CartographicProfile(Base):
@@ -505,6 +571,9 @@ class EditionSchedule(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), index=True)
+    publication_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("publication_profiles.id"), nullable=True, index=True
+    )
     kind: Mapped[str] = mapped_column(String(30), default="daily")
     timezone: Mapped[str] = mapped_column(String(80), default="Asia/Karachi")
     cutoff_time: Mapped[str] = mapped_column(String(5), default="05:00")
@@ -586,6 +655,11 @@ class Edition(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), index=True)
+    publication_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("publication_profiles.id"), nullable=True, index=True
+    )
+    source_channel_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    source_status: Mapped[str] = mapped_column(String(20), default="complete")
     kind: Mapped[str] = mapped_column(String(30), default="daily")
     title: Mapped[str] = mapped_column(String(240), default="")
     volume: Mapped[int] = mapped_column(Integer, default=1)
@@ -711,6 +785,9 @@ class Job(Base):
     key: Mapped[str] = mapped_column(String(160), unique=True, index=True)
     kind: Mapped[str] = mapped_column(String(40), default="edition")
     channel_id: Mapped[Optional[int]] = mapped_column(ForeignKey("channels.id"), nullable=True)
+    publication_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("publication_profiles.id"), nullable=True, index=True
+    )
     edition_id: Mapped[Optional[int]] = mapped_column(ForeignKey("editions.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(30), default="scheduled", index=True)
     stage: Mapped[str] = mapped_column(String(40), default="queued")

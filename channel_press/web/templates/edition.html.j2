@@ -5,6 +5,11 @@
 <div class="page-head">
   <div>
     <div class="kicker">{{ edition.kind|status_label }} · Vol. {{ edition.volume }} No. {{ edition.issue_number }} · <strong>Version {{ edition.version }}</strong>{% if edition.parent_edition_id %} of edition #{{ edition.parent_edition_id }}{% endif %}</div>
+{% if source_channels %}
+<div class="small">Sources: {% for source in source_channels %}{{ source.title }}{% if not loop.last %} · {% endif %}{% endfor %}
+  {% if edition.source_status == 'partial' %}<span class="badge badge--review">partial sources</span>{% endif %}
+</div>
+{% endif %}
     <h1>{{ edition.title }}</h1>
     <p class="lede">Window {{ edition.window_start|localtime(edition.timezone) }} to {{ edition.window_end|localtime(edition.timezone) }} · cutoff {{ edition.cutoff_at|localtime(edition.timezone) }}</p>
   </div>

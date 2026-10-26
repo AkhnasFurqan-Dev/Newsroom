@@ -54,6 +54,15 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
 - **Newsroom UI.** Source desk, rights declarations, stories, article editing and
   review, edition page studio, schedules, jobs, branding, users, audit and
   diagnostics.
+- **Multiple newspapers on one computer.** Each publication keeps its own
+  branding, source list, schedules, drafts, editions, archive and editor
+  membership. The header selector switches the working newspaper; the server
+  enforces access on every page and edition download.
+- **Multiple authorized sources per newspaper.** Priority and weighting decide
+  which report leads a shared story; each edition can include every enabled
+  source or one channel only. Duplicate reports are folded into one attributed
+  story, and a per-source collection failure leaves a clearly marked partial
+  edition rather than silently dropping that source.
 - **Scheduling and publication.** Deterministic job keys, exact
   `[previous cutoff, current cutoff)` windows, watermark catch-up, leases and a
   single-worker file lock, atomic release, manifest and checksums, immutable

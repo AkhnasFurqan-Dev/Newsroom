@@ -15,6 +15,7 @@ from ..models import (
     Article,
     ArticleMedia,
     CartographicProfile,
+    Channel,
     Edition,
     EditionArticle,
     ExternalReference,
@@ -106,6 +107,13 @@ def _first_sentence(article: Article, limit: int = 220) -> str:
     return value
 
 
+def _channel_label(db: Session, channel_id: int) -> str:
+    channel = db.get(Channel, channel_id)
+    if channel is None:
+        return ""
+    return (channel.handle or channel.title or "").strip()
+
+
 def _source_entries(db: Session, article: Article) -> list[dict]:
     rows = db.execute(
         select(PostFragment, SourcePost)
@@ -125,6 +133,8 @@ def _source_entries(db: Session, article: Article) -> list[dict]:
             "source_url": post.source_url,
             "language": post.language,
             "text": post.text[:240],
+            "channel_id": post.channel_id,
+            "channel": _channel_label(db, post.channel_id),
         }
     return list(seen.values())
 
@@ -426,6 +436,8 @@ def create_plan(
                     "date": source["date_label"],
                     "url": source["source_url"],
                     "language": source["language"],
+                    "channel": source.get("channel", ""),
+                    "channel_id": source.get("channel_id"),
                     "kind": "fixture" if not source["source_url"] else "telegram",
                 }
             )

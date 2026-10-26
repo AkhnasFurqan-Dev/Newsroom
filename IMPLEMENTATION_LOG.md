@@ -914,3 +914,123 @@ pictures the paper prints, and never expose a private asset as a public link.
 QR tests use a synthetic `https://t.me/example_channel/101` target attached to
 a fixture post and a demo edition. No real Telegram post was downloaded,
 published or linked in this phase.
+
+---
+
+## Phase C — multiple newspapers and multiple authorized sources (2026-10-25)
+
+**Goal:** let one installation run more than one newspaper, let each paper draw
+on several authorized Telegram sources over one shared cutoff window, keep every
+paper's data server-side isolated, and never lose a source silently.
+
+**Publication identity**
+
+- `PublicationProfile` gained `slug` and `is_active`; a real
+  `publication_sources` table links authorized channels with `priority`,
+  `weight` and `is_enabled`; `publication_editors` grants a newspaper role per
+  user. Editions, schedules and jobs now record `publication_id`.
+- `channel_press/publications.py` owns resolution and access:
+  `resolve_publication` (query parameter, then `cp_publication` cookie, then the
+  first paper the user may open), `can_access_publication`, source membership,
+  unassigned-channel detection and per-edition source lookup.
+- Every scoped page re-checks the paper on the server: dashboard counts,
+  editions, stories, articles, schedules and jobs. Opening an edition from a
+  paper the user cannot access returns 403. A user who could already open one of
+  a paper's channels keeps access after an in-place upgrade, so an existing
+  single-paper installation does not lock out its editors.
+- The header selector and **Branding → Newspapers on this computer** create,
+  switch and (owner only) deactivate papers and manage source links and editor
+  membership. New sources are auto-linked to the active paper; channels with no
+  link are treated as unassigned and remain buildable for compatibility.
+
+**Multi-source pipeline**
+
+- `PipelineRequest.channels` is authoritative when set; otherwise the legacy
+  single-channel path is untouched.
+- Each source is reclassified, clustered and cleared independently before the
+  weighted cross-source merge. `merge_cross_source_stories` folds a duplicate
+  report into the higher `importance × source weight` story, moves fragments,
+  claims, external references, timeline events, relationships and review flags,
+  and keeps the absorbed row as a `merged_into_id` audit pointer.
+- `record_article_sources` stores which channels and how many distinct posts each
+  article actually draws on. The article page shows that attribution; the printed
+  appendix and manifest record the source channel per entry.
+- Edition issue numbers count per publication and volume comes from the paper's
+  profile. Source ids and `source_status` (`complete` / `partial`) are stored on
+  the edition and shown in the archive and edition header.
+
+**Scheduling and failure isolation**
+
+- Manual builds can include every enabled source (`all_sources=1`) or one
+  channel. Manual job keys and durable window keys are publication-scoped, so two
+  papers sharing a primary channel cannot collide.
+- A due schedule expands that schedule's newspaper enabled sources at enqueue
+  time and records the list on the job. The worker collects each source with its
+  own rights check, window record and failure boundary. A failed or empty source
+  is reported per source and excluded from the pipeline; the resulting edition is
+  marked `partial` instead of pretending every source was used. If every source
+  fails, the job fails rather than publishing an empty edition.
+
+**Migration and live data**
+
+- `alembic/versions/b5d7e1a9c234_multi_publication.py` backfills the existing
+  single-paper installation: all editions, schedules and jobs are linked to the
+  default publication, existing channels become enabled sources, and new columns
+  default without rewriting row counts.
+- Backup before migration:
+  `data/backups/channel-press-20261025-122846.zip` (13.2 MB).
+- Live `data/channel_press.db` upgraded `f4b8c2d6e123 → b5d7e1a9c234` with
+  counts preserved: 1 user, 2 channels, 1,687 posts, 81 stories, 81 articles,
+  7 editions, 1 schedule, 8 jobs, 1 publication profile; 7 editions, 1 schedule
+  and 8 jobs linked, 2 source links created.
+
+**Verification**
+
+- `tests/test_publications.py` (9 tests) covers publication creation/switching,
+  non-member story/edition isolation, weighted cross-source merge and
+  attribution, publication-scoped and legacy manual jobs, due-schedule source
+  expansion, migration downgrade/upgrade backfill, publication resolution, and a
+  full two-source fixture build. That last test imports the same synthetic wire
+  report into two demo channels, runs the real pipeline, and asserts: one folded
+  story, both channels on `ArticleSource`, both channel ids in the manifest,
+  `source_status=complete`, an 8-page tabloid PDF with no blank page, both
+  channel labels in the appendix, and no localhost/file URL in print.
+- `.\\.venv\\Scripts\\python.exe -m pytest -q -p no:warnings` → **229 tests,
+  0 failures, 0 errors, 2 skipped** (the two live-Ollama tests; no model server
+  is running).
+- `.\\.venv\\Scripts\\python.exe -m ruff check channel_press tests alembic` →
+  **All checks passed!**
+- `.\\.venv\\Scripts\\python.exe -m channel_press.cli init-db` → revision
+  `b5d7e1a9c234`.
+
+**Visual inspection finding (deferred to Phase E)**
+
+The two-source edition produced a real 8-page PDF. Page 1 and the section
+openings are composed and readable, and the appendix carries both channel
+labels. Inspection also found three real layout defects that Phase E must fix
+before the paper can be called print-ready:
+
+1. body text is clipped mid-sentence at the bottom of columns on the Conflict &
+   War page when the chronology block follows the story;
+2. chronology rows repeat the same message twice (attributed and reported copy of
+   one event);
+3. Analysis and Opinion section openings leave more than 80% of the page blank
+   because every section forces a new page.
+
+These are recorded as defects, not accepted behaviour. Phase C's data and
+attribution contract is working; Phase E owns page composition.
+
+**Fixture vs real channel**
+
+All Phase C tests use synthetic demo channels and fixture imports. The migration
+was applied to the live local database, but no live Telegram account was used, no
+rights grant was verified, and no real newspaper was published in this phase.
+
+**Known limits at this checkpoint**
+
+- The optional local model and live Telegram collection still require owner
+  credentials, a completed login and a running Ollama server.
+- A source that fails during a scheduled run produces a partial edition; it is
+  visible but it is not automatically retried as a standalone source job.
+- Per-source weight changes apply to the next build; an already published edition
+  keeps its source record and manifest.

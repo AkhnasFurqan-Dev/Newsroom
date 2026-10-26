@@ -74,7 +74,29 @@ The first account is created by **Set up Channel Press** or:
 
 Roles are ranked (`viewer` < `operator` < `editor` < `owner`). Channel-level
 permissions can grant a user access to one channel without making them a global
-editor. Owners always have access.
+editor. Publication membership (`PublicationEditor`) grants a role on one
+newspaper without exposing any other paper. A user who can already open one of a
+paper's channels keeps that access after an in-place upgrade, so a single-paper
+installation does not lock its existing editors out. Owners always have access.
+
+Every page, edition download and action resolves the working newspaper from the
+request (query parameter, then the `cp_publication` cookie, then the first paper
+the user may open). The server re-checks the resolved paper; a cookie or URL
+parameter cannot widen access.
+
+### Newspapers and sources
+
+- An owner creates a newspaper under **Branding → Newspapers on this computer**.
+  Deactivating a newspaper keeps its records and archive but removes it from the
+  selector and from due-schedule expansion.
+- A newspaper's source list is explicit. Newly registered channels are linked to
+  the newspaper that was active when they were created; older channels with no
+  link are treated as **unassigned** and remain buildable for compatibility.
+- Source priority and weight are operational choices, not rights. Rights are
+  still recorded per channel and checked for every non-demo source in a build.
+- A schedule belongs to one newspaper. A due run expands that paper's enabled
+  sources and records the source list on the job and edition. Removing a source
+  later does not rewrite the edition's source record.
 
 ### Users page
 

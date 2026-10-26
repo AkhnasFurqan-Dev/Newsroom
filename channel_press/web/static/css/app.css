@@ -420,3 +420,8 @@ form.is-dirty .field > label { color: var(--accent); }
   .workspace { display: block; }
   .workspace__list, .workspace__preview { display: none; }
 }
+
+/* Newspaper selector in the top bar */
+.pub-select { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 24px; font-size: 12px; }
+.pub-select label { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.pub-select select { padding: 4px 6px; border: 1px solid var(--rule-strong); background: #fffdf8; font-family: var(--sans); font-size: 12px; max-width: 240px; }

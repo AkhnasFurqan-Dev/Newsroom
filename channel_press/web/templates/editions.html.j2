@@ -11,15 +11,24 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Edition</th><th>Date</th><th>Kind</th><th>Status</th><th class="num">Pages</th><th class="num">Version</th><th>Released</th><th>Files</th></tr></thead>
+    <thead><tr><th>Edition</th><th>Date</th><th>Kind</th><th>Status</th><th>Sources</th><th class="num">Pages</th><th class="num">Version</th><th>Released</th><th>Files</th></tr></thead>
     <tbody>
     {% for edition in editions %}
       {% set manifest = edition.manifest_json|json_loads({}) %}
+      {% set source_ids = edition.source_channel_ids_json|json_loads([]) %}
       <tr>
         <td><a href="/editions/{{ edition.id }}">{{ edition.title }}</a><div class="small">#{{ edition.issue_number }}</div></td>
         <td class="small">{{ edition.window_end|shortdate(edition.timezone) }}</td>
         <td>{{ edition.kind|status_label }}</td>
         <td><span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span></td>
+        <td class="small">
+          {% if edition.source_status == 'partial' %}
+          <span class="badge badge--review">partial sources</span>
+          {% else %}
+          <span class="badge badge--approved">all sources</span>
+          {% endif %}
+          <div>{{ source_ids|length or 1 }} channel{{ '' if (source_ids|length or 1) == 1 else 's' }}</div>
+        </td>
         <td class="num">{{ manifest.get('pdf', {}).get('page_count', '—') }}</td>
         <td class="num">{{ edition.version }}</td>
         <td class="small">{{ edition.published_at|localtime(edition.timezone) if edition.published_at else '—' }}</td>
@@ -29,7 +38,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="8" class="muted">No editions yet. <a href="/build">Build the first edition</a>.</td></tr>
+      <tr><td colspan="9" class="muted">No editions yet. <a href="/build">Build the first edition</a>.</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -35,13 +35,20 @@ from .editorial.clustering import build_stories, clear_editorial_drafts
 from .editorial.drafting import draft_story
 from .models import (
     Article,
+    ArticleSource,
     Channel,
     Edition,
     EditionArticle,
     Job,
+    PostFragment,
     PublicationProfile,
     ReviewFlag,
     StoryCluster,
+)
+from .publications import (
+    default_publication,
+    serialise_channel_ids,
+    source_priority_map,
 )
 from .publishing.service import PublishResult, publish_edition
 from .media.service import prepare_edition_media
@@ -80,6 +87,10 @@ class PipelineRequest:
     output_root: Path | None = None
     progress: ProgressCallback | None = None
     source_label: str = "manual"
+    # Multi-source support. ``channels`` is the authoritative list when set;
+    # ``channel`` stays the primary channel for legacy keys and paths.
+    channels: list[Channel] | None = None
+    publication: PublicationProfile | None = None
 
 
 @dataclass
@@ -105,15 +116,30 @@ def next_issue_number(db: Session, channel_id: int, kind: str) -> int:
     return int(value or 0) + 1
 
 
+def next_issue_number_for_publication(
+    db: Session, publication: PublicationProfile, kind: str
+) -> int:
+    """Issue numbers belong to the newspaper, not to one source channel."""
+    value = db.scalar(
+        select(func.max(Edition.issue_number)).where(
+            Edition.publication_id == publication.id, Edition.kind == kind
+        )
+    )
+    return int(value or 0) + 1
+
+
 def next_volume(db: Session, channel_id: int) -> int:
     profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
     return int(profile.issue_volume if profile else 1)
 
 
-def select_provider(channel: Channel, requested: DraftProvider | None = None) -> tuple[DraftProvider, str]:
+def select_provider(
+    channel: Channel | list[Channel], requested: DraftProvider | None = None
+) -> tuple[DraftProvider, str]:
+    channels = channel if isinstance(channel, list) else [channel]
     if requested is not None:
         return requested, ""
-    if channel.is_demo:
+    if channels and all(item.is_demo for item in channels):
         return FixtureDraftProvider(), "fixture deterministic composer"
     candidate = OllamaDraftProvider()
     available, message = candidate.available()
@@ -144,28 +170,211 @@ def _open_flags(db: Session, article_ids: list[int]) -> list[ReviewFlag]:
     )
 
 
+_STORY_STOPWORDS = {
+    "the", "and", "for", "with", "from", "after", "before", "over", "into",
+    "that", "this", "says", "said", "amid", "will", "have", "has", "were",
+    "was", "are", "its", "his", "her", "their", "they", "them", "been",
+    "more", "than", "about", "against", "across", "under", "near", "new",
+}
+
+
+def _story_tokens(value: str) -> set[str]:
+    import re
+
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", (value or "").casefold())
+        if len(token) > 2 and token not in _STORY_STOPWORDS
+    }
+
+
+def _same_story_title(left: str, right: str) -> bool:
+    """Conservative duplicate test for two channels reporting one event.
+
+    Requires at least three shared significant words and either strong
+    containment or a close whole-title match. A shared dateline alone never
+    merges two different incidents.
+    """
+    from difflib import SequenceMatcher
+
+    a = _story_tokens(left)
+    b = _story_tokens(right)
+    if len(a & b) < 3:
+        return False
+    containment = len(a & b) / min(len(a), len(b))
+    ratio = SequenceMatcher(None, " ".join(sorted(a)), " ".join(sorted(b))).ratio()
+    return containment >= 0.62 or ratio >= 0.74
+
+
+def _absorb_story(db: Session, primary: StoryCluster, duplicate: StoryCluster) -> None:
+    """Move evidence from a duplicate story onto the kept story, keeping history."""
+    from sqlalchemy import delete, update
+
+    from .models import ExternalReference, StoryClaim, StoryRelationship, StoryTimelineEvent
+
+    db.execute(
+        update(PostFragment)
+        .where(PostFragment.story_id == duplicate.id)
+        .values(story_id=primary.id)
+    )
+    existing_claims = {
+        (claim.text or "").strip().casefold()
+        for claim in db.scalars(select(StoryClaim).where(StoryClaim.story_id == primary.id))
+    }
+    for claim in db.scalars(select(StoryClaim).where(StoryClaim.story_id == duplicate.id)):
+        key = (claim.text or "").strip().casefold()
+        if key and key in existing_claims:
+            db.execute(delete(StoryClaim).where(StoryClaim.id == claim.id))
+            continue
+        claim.story_id = primary.id
+        existing_claims.add(key)
+    existing_urls = {
+        (ref.url or "").strip()
+        for ref in db.scalars(
+            select(ExternalReference).where(ExternalReference.story_id == primary.id)
+        )
+    }
+    for ref in db.scalars(
+        select(ExternalReference).where(ExternalReference.story_id == duplicate.id)
+    ):
+        if ref.url and ref.url.strip() in existing_urls:
+            db.execute(delete(ExternalReference).where(ExternalReference.id == ref.id))
+            continue
+        ref.story_id = primary.id
+        existing_urls.add((ref.url or "").strip())
+    db.execute(
+        update(StoryTimelineEvent)
+        .where(StoryTimelineEvent.story_id == duplicate.id)
+        .values(story_id=primary.id)
+    )
+    db.execute(
+        update(StoryRelationship)
+        .where(StoryRelationship.story_id == duplicate.id)
+        .values(story_id=primary.id)
+    )
+    db.execute(
+        update(StoryRelationship)
+        .where(StoryRelationship.related_story_id == duplicate.id)
+        .values(related_story_id=primary.id)
+    )
+    db.execute(
+        update(ReviewFlag)
+        .where(ReviewFlag.story_id == duplicate.id)
+        .values(story_id=primary.id)
+    )
+    # The secondary row stays as an audit pointer rather than disappearing, so a
+    # later investigation can see which channel's version was folded in.
+    duplicate.merged_into_id = primary.id
+    duplicate.status = "merged"
+    primary.importance = max(primary.importance, duplicate.importance)
+    if len((duplicate.summary or "")) > len((primary.summary or "")):
+        primary.summary = duplicate.summary
+
+
+def merge_cross_source_stories(
+    db: Session,
+    stories: list[StoryCluster],
+    *,
+    priorities: dict[int, tuple[int, float]] | None = None,
+) -> tuple[list[StoryCluster], dict[int, list[StoryCluster]]]:
+    """Fold duplicate reports from different channels into one story."""
+    priorities = priorities or {}
+
+    def rank(story: StoryCluster) -> tuple[float, int]:
+        weight = priorities.get(story.channel_id, (100, 1.0))[1]
+        return (-(story.importance * max(weight, 0.1)), story.id)
+
+    kept: list[StoryCluster] = []
+    absorbed: dict[int, list[StoryCluster]] = {}
+    for story in sorted(stories, key=rank):
+        if story.merged_into_id:
+            continue
+        primary = next(
+            (
+                candidate
+                for candidate in kept
+                if candidate.section == story.section
+                and _same_story_title(candidate.canonical_title, story.canonical_title)
+            ),
+            None,
+        )
+        if primary is None:
+            kept.append(story)
+            continue
+        _absorb_story(db, primary, story)
+        absorbed.setdefault(primary.id, []).append(story)
+    db.flush()
+    return kept, absorbed
+
+
+def record_article_sources(db: Session, article: Article) -> None:
+    """Persist which channels and posts an article actually draws on."""
+    from sqlalchemy import delete
+
+    from .models import SourcePost
+
+    rows = db.execute(
+        select(
+            SourcePost.channel_id,
+            func.count(func.distinct(SourcePost.id)),
+            func.min(SourcePost.posted_at),
+        )
+        .join(PostFragment, PostFragment.post_id == SourcePost.id)
+        .where(PostFragment.story_id == article.story_id)
+        .group_by(SourcePost.channel_id)
+    ).all()
+    db.execute(delete(ArticleSource).where(ArticleSource.article_id == article.id))
+    for channel_id, count, first_posted in rows:
+        db.add(
+            ArticleSource(
+                article_id=article.id,
+                channel_id=channel_id,
+                post_count=int(count or 0),
+                first_posted_at=first_posted,
+            )
+        )
+    db.flush()
+
+
 def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
     started = time.monotonic()
     channel = request.channel
+    publication = request.publication or default_publication(db)
     if request.window_start >= request.window_end:
         raise PipelineError("Edition window start must be before window end.")
-    if not channel.is_demo and active_rights(db, channel.id) is None:
-        raise RightsError(
-            "This channel has no active content-rights declaration. Importing and AI processing "
-            "are blocked until an owner records a grant."
-        )
+    # One newspaper can draw on several authorized channels. The explicit list
+    # wins; otherwise the legacy single channel is used so existing callers are
+    # unchanged.
+    channels = list(request.channels or [channel])
+    seen_channels: set[int] = set()
+    channels = [item for item in channels if not (item.id in seen_channels or seen_channels.add(item.id))]
+    if not channels:
+        raise PipelineError("An edition needs at least one enabled source channel.")
+    primary = channels[0]
+    for source_channel in channels:
+        if not source_channel.is_demo and active_rights(db, source_channel.id) is None:
+            raise RightsError(
+                f"{source_channel.title} has no active content-rights declaration. "
+                "Importing and AI processing for this newspaper are blocked until an owner "
+                "records a grant."
+            )
 
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
-    if profile is None:
+    if publication is None:
         raise PipelineError("Publication profile is missing; run setup first.")
 
-    issue_number = request.issue_number or next_issue_number(db, channel.id, request.kind)
-    volume = request.volume or next_volume(db, channel.id)
-    title = request.title.strip() or f"{profile.name} — {request.kind.replace('_', ' ').title()}"
+    issue_number = request.issue_number or next_issue_number_for_publication(
+        db, publication, request.kind
+    )
+    volume = request.volume or int(publication.issue_volume or 1)
+    title = request.title.strip() or f"{publication.name} — {request.kind.replace('_', ' ').title()}"
     job = db.get(Job, request.job_id) if request.job_id else None
     resumed = db.get(Edition, job.edition_id) if job and job.edition_id else None
+    source_ids_json = serialise_channel_ids(channels)
     edition = resumed or Edition(
-        channel_id=channel.id,
+        channel_id=primary.id,
+        publication_id=publication.id,
+        source_channel_ids_json=source_ids_json,
+        source_status="complete",
         kind=request.kind,
         title=title[:240],
         volume=volume,
@@ -175,68 +384,120 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         window_end=request.window_end,
         cutoff_at=request.cutoff_at,
         target_release_at=request.target_release_at,
-        timezone=profile.timezone,
+        timezone=publication.timezone,
         version=1,
         profile_snapshot_json=json.dumps(
             {
-                "name": profile.name,
-                "handle": profile.channel_handle,
-                "city": profile.city,
-                "timezone": profile.timezone,
-                "accent": profile.accent,
-                "paper_size": profile.paper_size,
-                "map_profile": profile.map_profile,
-                "qr_strategy": profile.qr_strategy,
+                "name": publication.name,
+                "handle": publication.channel_handle,
+                "city": publication.city,
+                "timezone": publication.timezone,
+                "accent": publication.accent,
+                "paper_size": publication.paper_size,
+                "map_profile": publication.map_profile,
+                "qr_strategy": publication.qr_strategy,
             },
             ensure_ascii=False,
         ),
-        qr_policy=profile.qr_strategy,
+        qr_policy=publication.qr_strategy,
         created_by=request.actor_id,
     )
+    if resumed:
+        edition.channel_id = primary.id
+        edition.publication_id = publication.id
+        edition.source_channel_ids_json = source_ids_json
     db.add(edition)
     db.flush()
 
     cleared = 0
     reclassification = None
+    reclassification_totals = {
+        "scanned": 0,
+        "reclassified": 0,
+        "included": 0,
+        "excluded": 0,
+        "overrides": 0,
+        "duplicates": 0,
+        "fragments_created": 0,
+        "by_classification": {},
+    }
+    story_errors: list[str] = []
     if resumed:
         ids = json.loads(job.result_json or "{}").get("story_ids", [])
         stories = list(db.scalars(select(StoryCluster).where(StoryCluster.id.in_(ids))))
     else:
-        # Stored posts imported before the current ruleset would otherwise
-        # bypass new exclusion rules because clustering only reads
-        # inclusion_status. Reclassify the window before any draft is cleared
-        # or built; explicit editor overrides are preserved.
-        _notify(request, "classification", "Re-checking stored posts with the current moderation rules")
-        reclassification = reclassify_posts(
+        collected_stories: list[StoryCluster] = []
+        for source_index, source_channel in enumerate(channels, start=1):
+            # Stored posts imported before the current ruleset would otherwise
+            # bypass new exclusion rules because clustering only reads
+            # inclusion_status. Reclassify every source window before any draft
+            # is cleared or built; explicit editor overrides are preserved.
+            _notify(
+                request,
+                "classification",
+                f"Source {source_index}/{len(channels)}: re-checking {source_channel.title}",
+            )
+            channel_reclassification = reclassify_posts(
+                db,
+                source_channel,
+                start=request.window_start,
+                end=request.window_end,
+                actor_id=request.actor_id,
+            )
+            reclassification = channel_reclassification
+            for key in ("scanned", "reclassified", "included", "excluded", "overrides", "duplicates", "fragments_created"):
+                reclassification_totals[key] += int(getattr(channel_reclassification, key, 0) or 0)
+            for name, count in (channel_reclassification.by_classification or {}).items():
+                reclassification_totals["by_classification"][name] = (
+                    reclassification_totals["by_classification"].get(name, 0) + count
+                )
+            if channel_reclassification.fragments_created == 0 and channel_reclassification.included == 0:
+                story_errors.append(f"{source_channel.title}: no includable posts in this window")
+            _notify(
+                request,
+                "classification",
+                f"{source_channel.title}: {channel_reclassification.reclassified} checked, "
+                f"{channel_reclassification.included} included, "
+                f"{channel_reclassification.excluded} excluded",
+            )
+            _notify(request, "normalization", f"Clearing unpublished drafts for {source_channel.title}")
+            cleared += clear_editorial_drafts(
+                db, source_channel.id, request.window_start, request.window_end
+            )
+            _notify(request, "clustering", f"Building story clusters from {source_channel.title}")
+            collected_stories.extend(
+                build_stories(
+                    db,
+                    source_channel.id,
+                    request.window_start,
+                    request.window_end,
+                    job_id=request.job_id,
+                )
+            )
+        _notify(request, "clustering", "Checking cross-source duplicates")
+        stories, absorbed = merge_cross_source_stories(
             db,
-            channel,
-            start=request.window_start,
-            end=request.window_end,
-            actor_id=request.actor_id,
+            collected_stories,
+            priorities=source_priority_map(db, publication),
         )
-        _notify(
-            request,
-            "classification",
-            f"Classified {reclassification.reclassified} stored posts "
-            f"({reclassification.included} included, {reclassification.excluded} excluded, "
-            f"{reclassification.overrides} editor overrides, "
-            f"{reclassification.duplicates} repeated copies)",
-        )
-        _notify(request, "normalization", "Clearing unpublished drafts for the window")
-        cleared = clear_editorial_drafts(db, channel.id, request.window_start, request.window_end)
-        _notify(request, "clustering", "Building story clusters from source fragments")
-        stories = build_stories(db, channel.id, request.window_start, request.window_end, job_id=request.job_id)
+        if absorbed:
+            _notify(
+                request,
+                "clustering",
+                f"Merged {sum(len(items) for items in absorbed.values())} duplicate cross-source reports",
+            )
     if not stories:
+        detail = "; ".join(story_errors[:3]) if story_errors else ""
         raise PipelineError(
             "No includable source fragments were found in this window. Import authorized posts "
-            "or widen the reporting window."
+            "or widen the reporting window." + (f" {detail}" if detail else "")
         )
 
     if job:
         job.edition_id = edition.id
         job.result_json = json.dumps({"story_ids": [story.id for story in stories]})
         db.commit()
-    provider, provider_note = select_provider(channel, request.provider)
+    provider, provider_note = select_provider(channels, request.provider)
     _notify(request, "drafting", f"Drafting {len(stories)} stories with {getattr(provider, 'name', 'provider')}")
     articles: list[Article] = []
     draft_errors: list[str] = []
@@ -254,6 +515,7 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
                     job_id=request.job_id,
                     actor_id=request.actor_id,
                 )
+                record_article_sources(db, article)
                 articles.append(article)
                 if job:
                     db.commit()
@@ -349,20 +611,16 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
             "open_review_flags": len(flag_rows),
             "cleared_drafts": cleared,
             "reclassification": (
-                {
-                    "scanned": reclassification.scanned,
-                    "reclassified": reclassification.reclassified,
-                    "included": reclassification.included,
-                    "excluded": reclassification.excluded,
-                    "overrides": reclassification.overrides,
-                    "duplicates": reclassification.duplicates,
-                    "fragments_created": reclassification.fragments_created,
-                    "by_classification": reclassification.by_classification,
-                }
+                dict(reclassification_totals, channels=len(channels))
                 if reclassification
                 else None
             ),
             "draft_errors": draft_errors,
+            "source_errors": story_errors,
+            "sources": [
+                {"id": item.id, "title": item.title, "handle": item.handle}
+                for item in channels
+            ],
             "media": media_stats,
             "window_start": request.window_start.isoformat(),
             "window_end": request.window_end.isoformat(),

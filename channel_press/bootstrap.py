@@ -13,10 +13,13 @@ from .models import (
     ChannelOwnership,
     EditionSchedule,
     ExportTarget,
+    PublicationEditor,
     PublicationProfile,
+    PublicationSource,
     RightsGrant,
     User,
 )
+from .publications import default_publication
 from .timeutil import utcnow
 
 FIXTURES = BASE_DIR / "fixtures"
@@ -40,6 +43,7 @@ def ensure_defaults(db: Session) -> PublicationProfile:
     profile = db.scalar(select(PublicationProfile).order_by(PublicationProfile.id.asc()))
     if profile is None:
         profile = PublicationProfile(
+            slug="main",
             name="The Channel Dispatch",
             channel_handle="@fixture_newsroom",
             slogan="A source-transparent roundup for the region",
@@ -187,6 +191,49 @@ def get_or_create_demo_channel(db: Session, owner: User) -> Channel:
             )
         )
         db.flush()
+    publication = default_publication(db)
+    if publication is not None:
+        link = db.scalar(
+            select(PublicationSource).where(
+                PublicationSource.publication_id == publication.id,
+                PublicationSource.channel_id == channel.id,
+            )
+        )
+        if link is None:
+            next_priority = (
+                db.scalar(
+                    select(PublicationSource.priority)
+                    .where(PublicationSource.publication_id == publication.id)
+                    .order_by(PublicationSource.priority.desc())
+                    .limit(1)
+                )
+                or 0
+            ) + 1
+            db.add(
+                PublicationSource(
+                    publication_id=publication.id,
+                    channel_id=channel.id,
+                    priority=next_priority,
+                    weight=1.0,
+                    is_enabled=True,
+                )
+            )
+            db.flush()
+        membership = db.scalar(
+            select(PublicationEditor).where(
+                PublicationEditor.publication_id == publication.id,
+                PublicationEditor.user_id == owner.id,
+            )
+        )
+        if membership is None:
+            db.add(
+                PublicationEditor(
+                    publication_id=publication.id,
+                    user_id=owner.id,
+                    role="owner",
+                )
+            )
+            db.flush()
     return channel
 
 

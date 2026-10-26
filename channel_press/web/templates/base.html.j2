@@ -11,6 +11,18 @@
 {% set tz = profile.timezone if profile else 'Asia/Karachi' %}
 <header class="topbar">
   <a class="brand" href="/">{{ profile.name if profile else app_name }}<span>.</span></a>
+  {% if user and publications %}
+  <form class="pub-select" method="post" action="/publications/select">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label for="publication-select">Newspaper</label>
+    <select id="publication-select" name="publication_id">
+      {% for paper in publications %}
+      <option value="{{ paper.id }}" {% if profile and paper.id == profile.id %}selected{% endif %}>{{ paper.name }}{% if not paper.is_active %} (inactive){% endif %}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn--small btn--ghost">Switch</button>
+  </form>
+  {% endif %}
   <div class="topbar__meta">
     <div>{{ app_name }} newsroom</div>
     <div>{{ today|localtime(tz, '%A, %d %B %Y') }} · {{ tz }}</div>

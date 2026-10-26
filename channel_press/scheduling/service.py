@@ -20,7 +20,7 @@ import socket
 import threading
 import traceback
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
@@ -57,9 +57,15 @@ from ..models import (
     Job,
     JobStep,
     PublicationAttempt,
+    PublicationProfile,
     RetryAttempt,
 )
 from ..pipeline import PipelineError, PipelineResult, run_pipeline
+from ..publications import (
+    default_publication,
+    publication_channels,
+    publication_for_edition,
+)
 from ..timeutil import to_local, utcnow
 from ..publishing.service import PublicationError, edition_review_blockers
 
@@ -233,6 +239,20 @@ def enqueue_due_jobs(
         channel = db.get(Channel, schedule.channel_id)
         if channel is None:
             continue
+        publication = (
+            db.get(PublicationProfile, schedule.publication_id)
+            if schedule.publication_id
+            else default_publication(db)
+        )
+        sources = (
+            publication_channels(db, publication, enabled_only=True)
+            if publication is not None
+            else []
+        )
+        if not sources:
+            sources = [channel]
+        source_ids = [item.id for item in sources]
+        scope = f"pub{publication.id}:" if publication is not None else ""
         watermark = db.scalar(
             select(EditionWatermark).where(
                 EditionWatermark.channel_id == schedule.channel_id,
@@ -249,6 +269,8 @@ def enqueue_due_jobs(
         # weeks must not leave an invisible gap in the record.
         for missed in skipped:
             missed_window = window_math.window_for_schedule(schedule, missed)
+            if publication is not None:
+                missed_window = replace(missed_window, publication_id=publication.id)
             get_or_create_window(
                 db,
                 missed_window,
@@ -260,7 +282,9 @@ def enqueue_due_jobs(
             )
         for cutoff in cutoffs:
             window = window_math.window_for_schedule(schedule, cutoff)
-            key = f"edition:{schedule.channel_id}:{schedule.kind}:{window.end.isoformat()}"
+            if publication is not None:
+                window = replace(window, publication_id=publication.id)
+            key = f"edition:{scope}{schedule.channel_id}:{schedule.kind}:{window.end.isoformat()}"
             existing = db.scalar(select(Job).where(Job.key == key))
             record = get_or_create_window(db, window)
             if existing is not None:
@@ -272,6 +296,7 @@ def enqueue_due_jobs(
                 key=key,
                 kind="edition",
                 channel_id=schedule.channel_id,
+                publication_id=publication.id if publication is not None else None,
                 status="scheduled",
                 stage="queued",
                 scheduled_for=cutoff,
@@ -279,6 +304,8 @@ def enqueue_due_jobs(
                 payload_json=json.dumps(
                     {
                         "schedule_id": schedule.id,
+                        "publication_id": publication.id if publication is not None else None,
+                        "channel_ids": source_ids,
                         "cutoff": cutoff.isoformat(),
                         "release_at": release_at.isoformat(),
                         "window_start": window.start.isoformat(),
@@ -286,7 +313,7 @@ def enqueue_due_jobs(
                         "window_key": window.key,
                         "timezone": schedule.timezone,
                         "cutoff_local": schedule.cutoff_time,
-                        "collect": not channel.is_demo,
+                        "collect": any(not item.is_demo for item in sources),
                         "requires_review": bool(schedule.requires_review),
                         "auto_publish_nonrisk": bool(schedule.auto_publish_nonrisk),
                         "edition_kind": schedule.kind,
@@ -305,7 +332,12 @@ def enqueue_due_jobs(
                 "job.enqueue",
                 "job",
                 job.id,
-                {"channel": schedule.channel_id, "cutoff": cutoff.isoformat()},
+                {
+                    "channel": schedule.channel_id,
+                    "publication": publication.id if publication is not None else None,
+                    "sources": source_ids,
+                    "cutoff": cutoff.isoformat(),
+                },
             )
         # NOTE: the committed watermark is intentionally *not* advanced here.
         # It moves only when a window is committed (released edition or a
@@ -327,16 +359,36 @@ def enqueue_manual_job(
     collect: bool | None = None,
     timezone: str | None = None,
     cutoff_local: str = "05:00",
+    publication: PublicationProfile | None = None,
+    channels: list[Channel] | None = None,
 ) -> Job:
     """Queue exactly one durable job for a manual cutoff window.
 
-    The job key is deterministic (channel + kind + exact half-open interval), so
-    a double-click, a refreshed form or a retried POST cannot create a second
-    job or a duplicate edition. A failed or cancelled job for the same window is
+    ``channels`` selects the source set for a multi-source newspaper build. When
+    omitted, a publication-aware call uses that newspaper's enabled sources and
+    a legacy call keeps the single-channel behaviour. The job key is
+    deterministic (publication/channel + kind + exact half-open interval), so a
+    double-click, a refreshed form or a retried POST cannot create a second job
+    or a duplicate edition. A failed or cancelled job for the same window is
     re-armed in place instead of duplicated.
     """
     now = utcnow()
     tz_name = timezone or settings.timezone
+    if channels:
+        source_channels: list[Channel] = []
+        seen: set[int] = set()
+        for item in channels:
+            if item.id not in seen:
+                seen.add(item.id)
+                source_channels.append(item)
+    elif publication is not None:
+        source_channels = publication_channels(db, publication, enabled_only=True)
+    else:
+        source_channels = []
+    if not source_channels:
+        source_channels = [channel]
+    source_ids = [item.id for item in source_channels]
+    scope = f"pub{publication.id}:" if publication is not None else ""
     window = EditionWindow(
         channel_id=channel.id,
         kind=kind,
@@ -344,13 +396,19 @@ def enqueue_manual_job(
         end=window_end,
         timezone=tz_name,
         cutoff_local=cutoff_local,
+        publication_id=publication.id if publication is not None else None,
     )
-    key = f"manual:{channel.id}:{kind}:{window.start.isoformat()}:{window.end.isoformat()}"
+    key = (
+        f"manual:{scope}{channel.id}:{kind}:"
+        f"{window.start.isoformat()}:{window.end.isoformat()}"
+    )
     payload = json.dumps(
         {
             "manual": True,
             "actor_id": actor_id,
             "title": title,
+            "publication_id": publication.id if publication is not None else None,
+            "channel_ids": source_ids,
             "cutoff": window.end.isoformat(),
             "release_at": (release_at or now).isoformat(),
             "window_start": window.start.isoformat(),
@@ -358,7 +416,9 @@ def enqueue_manual_job(
             "window_key": window.key,
             "timezone": tz_name,
             "cutoff_local": cutoff_local,
-            "collect": (not channel.is_demo) if collect is None else bool(collect),
+            "collect": (
+                any(not item.is_demo for item in source_channels) if collect is None else bool(collect)
+            ),
             # A manual build is always staged for editorial review. Only an
             # explicit release action may publish it.
             "requires_review": True,
@@ -392,11 +452,19 @@ def enqueue_manual_job(
         existing.lock_owner = ""
         existing.lock_expires_at = None
         existing.channel_id = channel.id
+        existing.publication_id = publication.id if publication is not None else None
         existing.payload_json = payload
         get_or_create_window(db, window, job_id=existing.id)
         db.flush()
         existing.requeued_existing = True  # type: ignore[attr-defined]
-        audit(db, None, "job.manual_requeue", "job", existing.id, {"channel": channel.id})
+        audit(
+            db,
+            None,
+            "job.manual_requeue",
+            "job",
+            existing.id,
+            {"channel": channel.id, "sources": source_ids},
+        )
         return existing
     if record is not None and (
         record.edition_id or record.status in {"committed", "awaiting_review"}
@@ -409,6 +477,7 @@ def enqueue_manual_job(
         key=key,
         kind="edition",
         channel_id=channel.id,
+        publication_id=publication.id if publication is not None else None,
         status="scheduled",
         stage="queued",
         scheduled_for=now,
@@ -418,7 +487,14 @@ def enqueue_manual_job(
     db.add(job)
     db.flush()
     get_or_create_window(db, window, job_id=job.id)
-    audit(db, None, "job.manual", "job", job.id, {"channel": channel.id, "window": window.key})
+    audit(
+        db,
+        None,
+        "job.manual",
+        "job",
+        job.id,
+        {"channel": channel.id, "publication": job.publication_id, "sources": source_ids},
+    )
     return job
 
 
@@ -494,10 +570,12 @@ def enqueue_republish_job(
 ) -> Job:
     """Queue a versioned re-render of an existing edition's article set."""
     now = utcnow()
+    resolved = publication_for_edition(db, edition)
     job = Job(
         key=f"republish:{edition.id}:{uuid.uuid4().hex[:8]}",
         kind="republish_edition",
         channel_id=edition.channel_id,
+        publication_id=edition.publication_id or (resolved.id if resolved else None),
         edition_id=edition.id,
         status="scheduled",
         stage="queued",
@@ -802,18 +880,48 @@ def process_job(
     edition_kind = str(payload.get("edition_kind") or "daily")
     from ..pipeline import PipelineRequest
 
+    resumed_edition = db.get(Edition, job.edition_id) if job.edition_id else None
+    if job.publication_id:
+        publication = db.get(PublicationProfile, job.publication_id)
+    elif resumed_edition is not None:
+        publication = publication_for_edition(db, resumed_edition)
+    else:
+        publication = default_publication(db)
+    requested_ids = [int(value) for value in (payload.get("channel_ids") or []) if value]
+    source_channels: list[Channel] = []
+    if requested_ids:
+        rows = {
+            item.id: item
+            for item in db.scalars(select(Channel).where(Channel.id.in_(requested_ids)))
+        }
+        source_channels = [rows[value] for value in requested_ids if value in rows]
+    elif publication is not None:
+        source_channels = publication_channels(db, publication, enabled_only=True)
+    if not source_channels:
+        source_channels = [channel]
+    if channel.id not in {item.id for item in source_channels}:
+        source_channels.insert(0, channel)
+
     stages: list[tuple[str, str]] = []
     collection_stats: dict = {}
+    source_results: list[dict] = []
+    failed_sources: set[int] = set()
+    empty_sources: set[int] = set()
     window_start = datetime.fromisoformat(payload["window_start"])
     window_end = datetime.fromisoformat(payload["window_end"])
-    window = EditionWindow(
-        channel_id=channel.id,
-        kind=edition_kind,
-        start=window_start,
-        end=window_end,
-        timezone=str(payload.get("timezone") or settings.timezone),
-        cutoff_local=str(payload.get("cutoff_local") or settings.cutoff_local_time),
-    )
+
+    def _source_window(item: Channel) -> EditionWindow:
+        return EditionWindow(
+            channel_id=item.id,
+            kind=edition_kind,
+            start=window_start,
+            end=window_end,
+            timezone=str(payload.get("timezone") or settings.timezone),
+            cutoff_local=str(payload.get("cutoff_local") or settings.cutoff_local_time),
+            publication_id=publication.id if publication is not None else None,
+        )
+
+    window = _source_window(channel)
 
     def on_progress(stage: str, detail: str) -> None:
         from ..operations import check_job_control
@@ -826,64 +934,173 @@ def process_job(
             progress(stage, detail)
         db.commit()
 
-    want_collect = bool(payload.get("collect")) and not channel.is_demo and not job.edition_id
+    want_collect = bool(payload.get("collect")) and not job.edition_id
     if want_collect:
-        record = get_or_create_window(db, window, job_id=job.id)
-        previous = db.scalar(select(EditionWindowRecord).where(
-            EditionWindowRecord.channel_id == channel.id,
-            EditionWindowRecord.window_start == window.start,
-            EditionWindowRecord.window_end == window.end,
-            EditionWindowRecord.status.in_(["collected", "built", "awaiting_review", "committed"]),
-        ).order_by(EditionWindowRecord.id.desc()))
-        saved = json.loads(previous.stats_json or "{}") if previous else {}
-        if saved.get("complete"):
-            if active_rights(db, channel.id) is None:
-                raise PublicationError("Source authorization missing.")
-            stats = CollectionStats(**saved)
-            record.status = "collected"
-            record.stats_json = json.dumps(saved)
-        else:
-            if not claim_window(db, record, owner=worker_id):
-                raise CollectionBusy("Collection already active. Waiting for the window owner.")
-            db.commit()
-            on_progress("collection", f"Retrieving {window.label()}")
-            db.commit()
-            rights = active_rights(db, channel.id)
-            source = LiveTelegramSource(channel.handle or settings.telegram_source_username)
-            stats = collect_window(
-                db, channel, window, source, rights=rights,
-                actor_id=payload.get("actor_id"), job_id=job.id, record=record,
-            )
-        collection_stats = stats.as_dict()
+        for index, item in enumerate(source_channels, start=1):
+            if item.is_demo:
+                source_results.append(
+                    {
+                        "channel_id": item.id,
+                        "title": item.title,
+                        "status": "fixture",
+                        "message": "Synthetic fixture source; no Telegram retrieval.",
+                    }
+                )
+                continue
+            source_window = _source_window(item)
+            try:
+                record = get_or_create_window(db, source_window, job_id=job.id)
+                previous = db.scalar(
+                    select(EditionWindowRecord)
+                    .where(
+                        EditionWindowRecord.window_key == source_window.key,
+                        EditionWindowRecord.status.in_(
+                            ["collected", "built", "awaiting_review", "committed"]
+                        ),
+                    )
+                    .order_by(EditionWindowRecord.id.desc())
+                )
+                saved = json.loads(previous.stats_json or "{}") if previous else {}
+                if saved.get("complete"):
+                    if active_rights(db, item.id) is None:
+                        raise PublicationError("Source authorization missing.")
+                    stats = CollectionStats(**saved)
+                    record.status = "collected"
+                    record.stats_json = json.dumps(saved)
+                    reused = True
+                else:
+                    if not claim_window(db, record, owner=worker_id):
+                        raise CollectionBusy(
+                            "Collection already active. Waiting for the window owner."
+                        )
+                    db.commit()
+                    on_progress(
+                        "collection",
+                        f"Source {index}/{len(source_channels)}: retrieving {item.title}",
+                    )
+                    db.commit()
+                    rights = active_rights(db, item.id)
+                    source = LiveTelegramSource(item.handle or settings.telegram_source_username)
+                    stats = collect_window(
+                        db,
+                        item,
+                        source_window,
+                        source,
+                        rights=rights,
+                        actor_id=payload.get("actor_id"),
+                        job_id=job.id,
+                        record=record,
+                    )
+                    reused = False
+                stats_dict = stats.as_dict()
+                collection_stats[item.id] = stats_dict
+                db.flush()
+                if stats.fetched == 0 or stats.included == 0:
+                    empty_sources.add(item.id)
+                    if not reused:
+                        mark_no_content(db, record, stats)
+                    source_results.append(
+                        {
+                            "channel_id": item.id,
+                            "title": item.title,
+                            "status": "no_content",
+                            "message": (
+                                "No includable source posts were published in this window."
+                                if stats.fetched
+                                else "The source channel published nothing in this window."
+                            ),
+                            "collection": stats_dict,
+                        }
+                    )
+                else:
+                    source_results.append(
+                        {
+                            "channel_id": item.id,
+                            "title": item.title,
+                            "status": "collected",
+                            "message": "Collection complete.",
+                            "collection": stats_dict,
+                        }
+                    )
+                job.result_json = json.dumps(
+                    {"collection": collection_stats, "sources": source_results},
+                    ensure_ascii=False,
+                )
+                db.commit()
+            except CollectionBusy:
+                raise
+            except Exception as exc:  # one source must not silently vanish
+                failed_sources.add(item.id)
+                source_results.append(
+                    {
+                        "channel_id": item.id,
+                        "title": item.title,
+                        "status": "failed",
+                        "message": str(exc)[:400],
+                    }
+                )
+                logger.warning(
+                    "source_collection_failed",
+                    extra={"job_id": job.id, "channel_id": item.id},
+                    exc_info=True,
+                )
+                on_progress(
+                    "collection",
+                    f"Source {index}/{len(source_channels)}: {item.title} failed; continuing with collected sources",
+                )
+
+    available_sources = [item for item in source_channels if item.id not in failed_sources]
+    if not available_sources:
+        detail = "; ".join(
+            f"{row['title']}: {row['message']}"
+            for row in source_results
+            if row.get("status") == "failed"
+        )
+        raise PublicationError(
+            "No source channel could be collected for this edition. " + detail
+        )
+    if want_collect and all(item.id in empty_sources for item in available_sources):
+        aggregate = CollectionStats()
+        for payload_stats in collection_stats.values():
+            for key in (
+                "fetched",
+                "included",
+                "excluded",
+                "duplicates",
+                "replies",
+                "albums",
+                "media",
+                "created",
+                "updated",
+                "pages",
+            ):
+                setattr(aggregate, key, getattr(aggregate, key) + int(payload_stats.get(key) or 0))
+            aggregate.errors.extend(payload_stats.get("errors") or [])
+            aggregate.notes.extend(payload_stats.get("notes") or [])
+        mark_no_content(db, get_or_create_window(db, window, job_id=job.id), aggregate)
+        job.status = "no_content"
+        job.stage = "completed"
+        job.finished_at = utcnow()
+        job.heartbeat_at = job.finished_at
+        job.lock_owner = ""
+        job.lock_expires_at = None
+        job.result_json = json.dumps(
+            {
+                "collection": collection_stats,
+                "sources": source_results,
+                "status": "no_content",
+                "message": "No includable source posts were published in this window.",
+            },
+            ensure_ascii=False,
+        )
+        _job_steps(db, job, stages + [("collection", "Verified empty window")])
         db.flush()
-        job.result_json = json.dumps({"collection": collection_stats}, ensure_ascii=False)
-        db.commit()
-        if stats.fetched == 0 or stats.included == 0:
-            mark_no_content(db, record, stats)
-            job.status = "no_content"
-            job.stage = "completed"
-            job.finished_at = utcnow()
-            job.heartbeat_at = job.finished_at
-            job.lock_owner = ""
-            job.lock_expires_at = None
-            job.result_json = json.dumps(
-                {
-                    "collection": collection_stats,
-                    "status": "no_content",
-                    "message": (
-                        "No includable source posts were published in this window."
-                        if stats.fetched
-                        else "The source channel published nothing in this window."
-                    ),
-                },
-                ensure_ascii=False,
-            )
-            _job_steps(db, job, stages + [("collection", "Verified empty window")])
-            db.flush()
-            return json.loads(job.result_json)
+        return json.loads(job.result_json)
 
     request = PipelineRequest(
         channel=channel,
+        channels=available_sources,
+        publication=publication,
         window_start=window_start,
         window_end=window_end,
         cutoff_at=datetime.fromisoformat(payload.get("cutoff") or payload["window_end"]),
@@ -898,6 +1115,10 @@ def process_job(
     )
     result: PipelineResult = run_pipeline(db, request)
     edition = result.edition
+    partial_sources = bool(failed_sources or empty_sources) or (
+        want_collect and len(available_sources) < len(source_channels)
+    )
+    edition.source_status = "partial" if partial_sources else "complete"
     requires_review = bool(payload.get("requires_review", True))
     auto_ok = False
     if not requires_review:
@@ -932,6 +1153,9 @@ def process_job(
             "status": edition.status,
             "output_dir": edition.output_dir,
             "collection": collection_stats,
+            "sources": source_results,
+            "source_status": edition.source_status,
+            "source_channel_ids": json.loads(edition.source_channel_ids_json or "[]"),
             "pages": (result.publish_result and result.publish_result.warnings is not None)
             and json.loads(edition.manifest_json or "{}").get("pdf", {}).get("page_count"),
             "stories": result.stats.get("stories"),

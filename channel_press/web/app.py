@@ -92,9 +92,22 @@ from ..ingestion.adapters import ImportFormatError, normalize_messages
 from ..ingestion.service import ensure_import_media_dir, import_payload
 from ..migrations import upgrade_database
 from ..preflight import build_preflight
+from ..publications import (
+    PUBLICATION_COOKIE,
+    accessible_publications,
+    can_access_publication,
+    channel_is_unassigned,
+    edition_source_channels,
+    publication_channels,
+    publication_for_edition,
+    resolve_publication,
+    unassigned_channels,
+    unique_slug,
+)
 from ..models import (
     Article,
     ArticleMedia,
+    ArticleSource,
     AuditEvent,
     CartographicProfile,
     Channel,
@@ -107,7 +120,9 @@ from ..models import (
     JobStep,
     PostFragment,
     PostMedia,
+    PublicationEditor,
     PublicationProfile,
+    PublicationSource,
     ReviewFlag,
     RightsGrant,
     SourceImport,
@@ -255,11 +270,13 @@ def _redirect(url: str, message: str = "", error: str = "") -> RedirectResponse:
 
 
 def _ctx(db: Session, request: Request, user: User, active: str, **extra) -> dict:
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    profile = extra.pop("profile", None) or resolve_publication(db, request, user)
     login = getattr(request.state, "login_session", None)
     return {
         "user": user,
         "profile": profile,
+        "publication": profile,
+        "publications": accessible_publications(db, user),
         "csrf": login.csrf_token if login else "",
         "active": active,
         "can": {
@@ -269,6 +286,33 @@ def _ctx(db: Session, request: Request, user: User, active: str, **extra) -> dic
         },
         **extra,
     }
+
+
+def _publication_or_404(
+    db: Session, publication_id: int, user: User, minimum: str = "viewer"
+) -> PublicationProfile:
+    publication = db.get(PublicationProfile, publication_id)
+    if publication is None:
+        raise HTTPException(404, "Publication not found.")
+    if not can_access_publication(db, user, publication, minimum):
+        raise HTTPException(403, "You do not have access to this publication.")
+    return publication
+
+
+def _scope_channels(
+    db: Session,
+    publication: PublicationProfile | None,
+    user: User,
+    minimum: str = "viewer",
+) -> list[Channel]:
+    """Channels that belong to the selected newspaper *and* are visible to the user."""
+    if publication is None:
+        return []
+    return [
+        channel
+        for channel in publication_channels(db, publication, enabled_only=False)
+        if can_access_channel(db, user, channel, minimum)
+    ]
 
 
 def _timezone(profile: PublicationProfile | None) -> str:
@@ -402,7 +446,19 @@ def _edition_or_404(db: Session, edition_id: int, user: User) -> Edition:
     channel = db.get(Channel, edition.channel_id)
     if channel and not can_access_channel(db, user, channel, "viewer"):
         raise HTTPException(403, "You do not have access to this edition.")
+    publication = publication_for_edition(db, edition)
+    if publication is not None and not can_access_publication(db, user, publication):
+        raise HTTPException(403, "You do not have access to this newspaper.")
     return edition
+
+
+def _check_job_access(db: Session, job: Job, user: User, minimum: str = "viewer") -> None:
+    """Apply the same newspaper boundary to job pages and job actions."""
+    if not job.publication_id:
+        return
+    publication = db.get(PublicationProfile, job.publication_id)
+    if publication is not None and not can_access_publication(db, user, publication, minimum):
+        raise HTTPException(403, "You do not have access to this newspaper's jobs.")
 
 
 def _edition_link_or_404(
@@ -689,30 +745,68 @@ def media_cache_clear(
 
 @app.get("/")
 def dashboard(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
-    channels = list(db.scalars(select(Channel).order_by(Channel.id)))
-    accessible = [channel for channel in channels if can_access_channel(db, user, channel)]
+    publication = resolve_publication(db, request, user)
+    channels = _scope_channels(db, publication, user) if publication is not None else []
+    if publication is None:
+        channels = [channel for channel in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, channel)]
+    channel_ids = [channel.id for channel in channels] or [-1]
+    story_ids = select(StoryCluster.id).where(StoryCluster.channel_id.in_(channel_ids))
+    article_ids = select(Article.id).join(StoryCluster, Article.story_id == StoryCluster.id).where(
+        StoryCluster.channel_id.in_(channel_ids)
+    )
+    edition_scope = Edition.channel_id.in_(channel_ids)
+    job_scope = Job.channel_id.in_(channel_ids)
+    if publication is not None:
+        edition_scope = or_(Edition.publication_id == publication.id, edition_scope)
+        job_scope = or_(Job.publication_id == publication.id, job_scope)
     counts = {
-        "posts": db.scalar(select(func.count()).select_from(SourcePost)) or 0,
-        "stories": db.scalar(select(func.count()).select_from(StoryCluster)) or 0,
-        "articles": db.scalar(select(func.count()).select_from(Article)) or 0,
-        "editions": db.scalar(select(func.count()).select_from(Edition)) or 0,
+        "posts": db.scalar(
+            select(func.count()).select_from(SourcePost).where(SourcePost.channel_id.in_(channel_ids))
+        )
+        or 0,
+        "stories": db.scalar(
+            select(func.count()).select_from(StoryCluster).where(StoryCluster.channel_id.in_(channel_ids))
+        )
+        or 0,
+        "articles": db.scalar(select(func.count()).select_from(Article).where(Article.id.in_(article_ids)))
+        or 0,
+        "editions": db.scalar(select(func.count()).select_from(Edition).where(edition_scope)) or 0,
         "review": db.scalar(
-            select(func.count()).select_from(ReviewFlag).where(ReviewFlag.status == "open")
+            select(func.count())
+            .select_from(ReviewFlag)
+            .where(
+                ReviewFlag.status == "open",
+                or_(
+                    ReviewFlag.article_id.in_(article_ids),
+                    ReviewFlag.story_id.in_(story_ids),
+                ),
+            )
         )
         or 0,
         "jobs": db.scalar(
-            select(func.count()).select_from(Job).where(
-                Job.status.in_(["scheduled", "failed_retryable", "running", "resumable"])
+            select(func.count())
+            .select_from(Job)
+            .where(
+                job_scope,
+                Job.status.in_(["scheduled", "failed_retryable", "running", "resumable"]),
             )
         )
         or 0,
     }
-    editions = list(db.scalars(select(Edition).order_by(Edition.created_at.desc()).limit(6)))
-    jobs = list(db.scalars(select(Job).order_by(Job.id.desc()).limit(6)))
+    editions = list(
+        db.scalars(select(Edition).where(edition_scope).order_by(Edition.created_at.desc()).limit(6))
+    )
+    jobs = list(db.scalars(select(Job).where(job_scope).order_by(Job.id.desc()).limit(6)))
     recent_flags = list(
         db.scalars(
             select(ReviewFlag)
-            .where(ReviewFlag.status == "open")
+            .where(
+                ReviewFlag.status == "open",
+                or_(
+                    ReviewFlag.article_id.in_(article_ids),
+                    ReviewFlag.story_id.in_(story_ids),
+                ),
+            )
             .order_by(ReviewFlag.created_at.desc())
             .limit(6)
         )
@@ -726,7 +820,7 @@ def dashboard(request: Request, user: User = Depends(current_user), db: Session 
             user,
             "dashboard",
             counts=counts,
-            channels=accessible,
+            channels=channels,
             editions=editions,
             jobs=jobs,
             flags=recent_flags,
@@ -798,6 +892,34 @@ def source_create(
     )
     db.add(channel)
     db.flush()
+    publication = resolve_publication(db, request, user)
+    if publication is not None and can_access_publication(db, user, publication, "editor"):
+        next_priority = (
+            db.scalar(
+                select(func.max(PublicationSource.priority)).where(
+                    PublicationSource.publication_id == publication.id
+                )
+            )
+            or 0
+        ) + 1
+        db.add(
+            PublicationSource(
+                publication_id=publication.id,
+                channel_id=channel.id,
+                priority=next_priority,
+                weight=1.0,
+                is_enabled=True,
+            )
+        )
+        db.flush()
+        audit(
+            db,
+            user,
+            "publication.source",
+            "publication_profile",
+            publication.id,
+            {"channel": channel.id, "priority": next_priority, "source": "created"},
+        )
     db.add(
         ChannelOwnership(
             channel_id=channel.id,
@@ -1531,7 +1653,10 @@ def stories_page(
     user: User = Depends(current_user),
     db: Session = Depends(session_dependency),
 ):
-    channels = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c)]
+    publication = resolve_publication(db, request, user)
+    channels = _scope_channels(db, publication, user)
+    if publication is None:
+        channels = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c)]
     stmt = select(StoryCluster).order_by(StoryCluster.importance.desc(), StoryCluster.id.desc())
     allowed_ids = [c.id for c in channels]
     stmt = stmt.where(StoryCluster.channel_id.in_(allowed_ids or [-1]))
@@ -1593,7 +1718,10 @@ def articles_page(
     user: User = Depends(current_user),
     db: Session = Depends(session_dependency),
 ):
-    channels = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c)]
+    publication = resolve_publication(db, request, user)
+    channels = _scope_channels(db, publication, user)
+    if publication is None:
+        channels = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c)]
     allowed_ids = [c.id for c in channels]
     stmt = select(Article).join(StoryCluster, Article.story_id == StoryCluster.id).where(
         StoryCluster.channel_id.in_(allowed_ids or [-1])
@@ -1652,6 +1780,14 @@ def article_detail(
             .order_by(Edition.id.desc())
         )
     )
+    article_sources = list(
+        db.execute(
+            select(ArticleSource, Channel)
+            .join(Channel, ArticleSource.channel_id == Channel.id)
+            .where(ArticleSource.article_id == article.id)
+            .order_by(ArticleSource.first_posted_at.asc(), ArticleSource.id.asc())
+        ).all()
+    )
     return render(
         request,
         "article.html",
@@ -1671,6 +1807,7 @@ def article_detail(
             alternatives=alternatives,
             external=external,
             editions=editions,
+            article_sources=article_sources,
             editorial_statuses=EDITORIAL_STATUSES,
             status_labels=STATUS_LABELS,
         ),
@@ -1867,9 +2004,31 @@ def build_page(
     user: User = Depends(current_user),
     db: Session = Depends(session_dependency),
 ):
-    channels = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c, "operator")]
+    profile = resolve_publication(db, request, user)
+    channels = [
+        c
+        for c in (
+            publication_channels(db, profile, enabled_only=True)
+            if profile is not None
+            else []
+        )
+        if can_access_channel(db, user, c, "operator")
+    ]
+    if profile is not None:
+        channels.extend(
+            channel
+            for channel in unassigned_channels(db, user, "operator")
+            if channel.id not in {item.id for item in channels}
+        )
+    if not channels and profile is None:
+        channels = [
+            c
+            for c in db.scalars(select(Channel).order_by(Channel.id))
+            if can_access_channel(db, user, c, "operator")
+        ]
     selected = db.get(Channel, channel) if channel else _default_channel(channels)
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    if selected is not None and selected not in channels:
+        selected = _default_channel(channels)
     tz_name = _timezone(profile)
     schedule = _daily_schedule(db, selected) if selected else None
     cutoff_clock = schedule.cutoff_time if schedule else settings.cutoff_local_time
@@ -1908,6 +2067,7 @@ def build_page(
             preview=preview,
             cutoff_clock=cutoff_clock,
             window_source=window_source,
+            source_count=len(channels),
         ),
     )
 
@@ -1922,12 +2082,29 @@ def build_submit(
     title: str = Form(""),
     publish: str = Form("publish"),
     collect: str = Form(""),
+    all_sources: str = Form("1"),
     user: User = Depends(require_role("operator")),
     db: Session = Depends(session_dependency),
     _csrf: None = Depends(require_csrf),
 ):
     channel = _channel_or_404(db, channel_id, user, "operator")
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    profile = resolve_publication(db, request, user)
+    if profile is None:
+        raise HTTPException(404, "Publication profile missing.")
+    if not can_access_publication(db, user, profile, "operator"):
+        raise HTTPException(403, "You do not have operational access to this publication.")
+    publication_sources = publication_channels(db, profile, enabled_only=True)
+    linked_ids = {item.id for item in publication_sources}
+    unassigned = channel_is_unassigned(db, channel.id)
+    if publication_sources and channel.id not in linked_ids and not unassigned:
+        return _redirect(
+            f"/build?channel={channel.id}",
+            error="That channel is not an enabled source of the selected newspaper.",
+        )
+    if unassigned:
+        channels = [channel]
+    else:
+        channels = publication_sources if (all_sources == "1" and publication_sources) else [channel]
     tz_name = _timezone(profile)
     schedule = _daily_schedule(db, channel)
     cutoff_clock = schedule.cutoff_time if schedule else settings.cutoff_local_time
@@ -1943,11 +2120,15 @@ def build_submit(
             f"/build?channel={channel.id}",
             error="The reporting window is longer than 31 days. Use a cutoff-to-cutoff window.",
         )
-    if not channel.is_demo and active_rights(db, channel.id) is None:
-        return _redirect(
-            f"/build?channel={channel.id}",
-            error="Build blocked: this channel has no active rights declaration.",
-        )
+    for source in channels:
+        if not source.is_demo and active_rights(db, source.id) is None:
+            return _redirect(
+                f"/build?channel={channel.id}",
+                error=(
+                    f"Build blocked: {source.title} has no active rights declaration. "
+                    "Record a grant or disable that source for this newspaper."
+                ),
+            )
     ready = None
     if not channel.is_demo and collect == "1":
         db.commit()
@@ -1966,9 +2147,11 @@ def build_submit(
             kind=kind if kind in {"manual", "special"} else "manual",
             actor_id=user.id,
             title=title.strip()[:240],
-            collect=(not channel.is_demo) and collect == "1",
+            collect=(any(not item.is_demo for item in channels)) and collect == "1",
             timezone=tz_name,
             cutoff_local=cutoff_clock,
+            publication=profile,
+            channels=channels,
         )
     except DuplicateWindowError as exc:
         db.rollback()
@@ -1982,6 +2165,8 @@ def build_submit(
         job.id,
         {
             "channel": channel.id,
+            "publication": profile.id,
+            "sources": [item.id for item in channels],
             "window_start": start.isoformat(),
             "window_end": end.isoformat(),
             "collect": collect == "1",
@@ -1999,16 +2184,24 @@ def build_submit(
 
 @app.get("/editions")
 def editions_page(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
-    allowed = [c.id for c in db.scalars(select(Channel)) if can_access_channel(db, user, c)]
+    publication = resolve_publication(db, request, user)
+    allowed = [c.id for c in _scope_channels(db, publication, user)]
+    scope = Edition.channel_id.in_(allowed or [-1])
+    if publication is not None:
+        scope = or_(Edition.publication_id == publication.id, scope)
     editions = list(
         db.scalars(
             select(Edition)
-            .where(Edition.channel_id.in_(allowed or [-1]))
+            .where(scope)
             .order_by(Edition.created_at.desc())
             .limit(100)
         )
     )
-    return render(request, "editions.html", _ctx(db, request, user, "editions", editions=editions))
+    return render(
+        request,
+        "editions.html",
+        _ctx(db, request, user, "editions", editions=editions, publication=publication),
+    )
 
 
 @app.get("/editions/{edition_id}")
@@ -2175,6 +2368,7 @@ def edition_detail(
             selected_link=selected_link,
             selected=selected,
             selected_context=selected_context,
+            source_channels=edition_source_channels(db, edition),
             flags=flags,
             family=family,
             fingerprint=fingerprint,
@@ -2636,10 +2830,19 @@ def edition_republish(
 
 @app.get("/schedules")
 def schedules_page(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
-    allowed = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c)]
+    publication = resolve_publication(db, request, user)
+    allowed = _scope_channels(db, publication, user)
+    if publication is None:
+        allowed = [c for c in db.scalars(select(Channel).order_by(Channel.id)) if can_access_channel(db, user, c)]
     rows = []
     for channel in allowed:
-        schedules = list(db.scalars(select(EditionSchedule).where(EditionSchedule.channel_id == channel.id).order_by(EditionSchedule.id)))
+        schedules = list(
+            db.scalars(
+                select(EditionSchedule)
+                .where(EditionSchedule.channel_id == channel.id)
+                .order_by(EditionSchedule.id)
+            )
+        )
         for schedule in schedules:
             rows.append(
                 {
@@ -2707,6 +2910,15 @@ def schedule_create(
     _csrf: None = Depends(require_csrf),
 ):
     channel = _channel_or_404(db, channel_id, user, "editor")
+    publication = resolve_publication(db, request, user)
+    if publication is not None:
+        if not can_access_publication(db, user, publication, "editor"):
+            raise HTTPException(403, "You do not have editorial access to this publication.")
+        linked = {item.id for item in publication_channels(db, publication, enabled_only=False)}
+        if linked and channel.id not in linked:
+            return _redirect(
+                "/schedules", error="That channel is not a source of the selected newspaper."
+            )
     if kind not in {"daily", "weekly_roundup", "monthly_roundup"}:
         return _redirect("/schedules", error="Unknown schedule kind.")
     exists = db.scalar(
@@ -2718,6 +2930,7 @@ def schedule_create(
         return _redirect("/schedules", error="That schedule already exists for the channel.")
     schedule = EditionSchedule(
         channel_id=channel.id,
+        publication_id=publication.id if publication is not None else None,
         kind=kind,
         timezone=timezone,
         cutoff_time=_validate_clock(cutoff_time, "05:00"),
@@ -2762,8 +2975,26 @@ def schedule_run(
     if schedule is None:
         raise HTTPException(404, "Schedule not found.")
     channel = _channel_or_404(db, schedule.channel_id, user, "operator")
-    if not channel.is_demo and active_rights(db, channel.id) is None:
-        return _redirect("/schedules", error="Build blocked: no active rights declaration.")
+    publication = (
+        db.get(PublicationProfile, schedule.publication_id)
+        if schedule.publication_id
+        else resolve_publication(db, request, user)
+    )
+    if publication is not None and not can_access_publication(db, user, publication, "operator"):
+        raise HTTPException(403, "You do not have operational access to this publication.")
+    sources = (
+        publication_channels(db, publication, enabled_only=True)
+        if publication is not None
+        else [channel]
+    )
+    if not sources:
+        sources = [channel]
+    for source in sources:
+        if not source.is_demo and active_rights(db, source.id) is None:
+            return _redirect(
+                "/schedules",
+                error=f"Build blocked: {source.title} has no active rights declaration.",
+            )
     cutoff = latest_due_cutoff(schedule, utcnow()) or utcnow()
     from ..scheduling.service import previous_enabled_day
 
@@ -2779,11 +3010,20 @@ def schedule_run(
         window_end=cutoff,
         kind=schedule.kind if schedule.kind in {"daily", "special"} else "manual",
         actor_id=user.id,
-        collect=not channel.is_demo,
+        collect=any(not item.is_demo for item in sources),
         timezone=schedule.timezone,
         cutoff_local=schedule.cutoff_time,
+        publication=publication,
+        channels=sources,
     )
-    audit(db, user, "schedule.run_now", "schedule", schedule.id, {"job": job.id})
+    audit(
+        db,
+        user,
+        "schedule.run_now",
+        "schedule",
+        schedule.id,
+        {"job": job.id, "sources": [item.id for item in sources]},
+    )
     db.commit()
     launched = _launch_worker()
     return _redirect(f"/jobs/{job.id}", f"Build queued. {launched}")
@@ -2791,11 +3031,17 @@ def schedule_run(
 
 @app.get("/jobs")
 def jobs_page(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
-    allowed = [c.id for c in db.scalars(select(Channel)) if can_access_channel(db, user, c)]
+    publication = resolve_publication(db, request, user)
+    allowed = [c.id for c in _scope_channels(db, publication, user)]
+    if publication is None:
+        allowed = [c.id for c in db.scalars(select(Channel)) if can_access_channel(db, user, c)]
+    scope = or_(Job.channel_id.in_(allowed or [-1]), Job.channel_id.is_(None))
+    if publication is not None:
+        scope = or_(Job.publication_id == publication.id, scope)
     jobs = list(
         db.scalars(
             select(Job)
-            .where(or_(Job.channel_id.in_(allowed or [-1]), Job.channel_id.is_(None)))
+            .where(scope)
             .order_by(Job.id.desc())
             .limit(100)
         )
@@ -2822,6 +3068,7 @@ def job_detail(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user)
+    _check_job_access(db, job, user)
     steps = list(db.scalars(select(JobStep).where(JobStep.job_id == job.id).order_by(JobStep.id)))
     result = json.loads(job.result_json or "{}")
     edition = db.get(Edition, job.edition_id) if job.edition_id else None
@@ -2854,6 +3101,7 @@ def job_api(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user)
+    _check_job_access(db, job, user)
     result = json.loads(job.result_json or "{}")
     progress = progress_snapshot(job)
     return JSONResponse(
@@ -2883,6 +3131,7 @@ def job_retry(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
+    _check_job_access(db, job, user, "operator")
     if job.status not in {"failed_retryable", "failed_terminal"}:
         return _redirect(f"/jobs/{job.id}", error="Retry is only for failed jobs. Use Continue for a paused job.")
     job.status = "scheduled"
@@ -2915,6 +3164,7 @@ def job_continue(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
+    _check_job_access(db, job, user, "operator")
     if job.status not in {"paused", "resumable"}:
         return _redirect(f"/jobs/{job.id}", error="Continue is only available for paused jobs.")
     job.status = "scheduled"
@@ -2949,6 +3199,7 @@ def job_stop(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
+    _check_job_access(db, job, user, "operator")
     if job.status == "running":
         job.status = "stop_requested"
         audit(db, user, "job.stop_requested", "job", job.id)
@@ -2978,6 +3229,7 @@ def job_restart(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
+    _check_job_access(db, job, user, "operator")
     if job.status == "running":
         return _redirect(f"/jobs/{job.id}", error="Stop the running job before restarting it.")
     if job.status in {"published", "completed", "no_content", "awaiting_review"}:
@@ -3016,6 +3268,7 @@ def job_cancel(
         raise HTTPException(404, "Job not found.")
     if job.channel_id:
         _channel_or_404(db, job.channel_id, user, "operator")
+    _check_job_access(db, job, user, "operator")
     if job.status == "running":
         job.status = "cancel_requested"
         audit(db, user, "job.cancel_requested", "job", job.id)
@@ -3038,10 +3291,291 @@ def job_cancel(
 # ---------------------------------------------------------------------------
 
 
+@app.post("/publications/select")
+def publication_select(
+    publication_id: int = Form(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _publication_or_404(db, publication_id, user)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        PUBLICATION_COOKIE,
+        str(publication.id),
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 365,
+        path="/",
+    )
+    return response
+
+
+@app.post("/publications/new")
+def publication_create(
+    name: str = Form(...),
+    city: str = Form(""),
+    timezone: str = Form("Asia/Karachi"),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Create another newspaper title. Sources and editors are added explicitly."""
+    from zoneinfo import ZoneInfo
+
+    clean_name = name.strip()[:160]
+    if not clean_name:
+        return _redirect("/branding", error="A publication needs a name.")
+    try:
+        ZoneInfo(timezone)
+    except Exception:
+        return _redirect("/branding", error="Unknown timezone.")
+    publication = PublicationProfile(
+        slug=unique_slug(db, clean_name),
+        name=clean_name,
+        city=city.strip()[:120],
+        timezone=timezone,
+        channel_handle="",
+        byline="Editorial Desk",
+        slogan="A source-transparent roundup",
+        footer_text="",
+        source_disclosure="",
+        accent="#7b1f24",
+        paper_size="tabloid",
+        map_profile="neutral",
+        qr_strategy="appendix",
+        issue_volume=1,
+        section_order_json=json.dumps(
+            ["national", "regional", "international", "defence", "conflict", "analysis", "opinion", "briefs"]
+        ),
+        is_active=True,
+    )
+    db.add(publication)
+    db.flush()
+    db.add(PublicationEditor(publication_id=publication.id, user_id=user.id, role="owner"))
+    db.flush()
+    audit(db, user, "publication.create", "publication_profile", publication.id, {"name": publication.name})
+    db.commit()
+    return _redirect("/branding", f"Created {publication.name}. Add its authorized source channels and editors.")
+
+
+@app.post("/publications/{publication_id}/activate")
+def publication_activate(
+    publication_id: int,
+    active: str = Form(""),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _publication_or_404(db, publication_id, user, "owner")
+    publication.is_active = bool(active)
+    audit(
+        db,
+        user,
+        "publication.activate" if publication.is_active else "publication.deactivate",
+        "publication_profile",
+        publication.id,
+        {"active": publication.is_active},
+    )
+    db.commit()
+    return _redirect("/branding", "Publication availability updated.")
+
+
+@app.post("/publications/{publication_id}/sources")
+def publication_source_save(
+    publication_id: int,
+    channel_id: int = Form(...),
+    priority: int = Form(100),
+    weight: str = Form("1"),
+    enabled: str = Form(""),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Attach an authorized channel or update its priority/weight/enabled state."""
+    publication = _publication_or_404(db, publication_id, user, "editor")
+    channel = _channel_or_404(db, channel_id, user, "operator")
+    try:
+        numeric_weight = max(0.1, min(5.0, float(weight or 1)))
+    except ValueError:
+        return _redirect("/branding", error="Source weight must be a number between 0.1 and 5.")
+    link = db.scalar(
+        select(PublicationSource).where(
+            PublicationSource.publication_id == publication.id,
+            PublicationSource.channel_id == channel.id,
+        )
+    )
+    if link is None:
+        link = PublicationSource(
+            publication_id=publication.id,
+            channel_id=channel.id,
+            priority=max(1, int(priority)),
+            weight=numeric_weight,
+            is_enabled=True,
+        )
+        db.add(link)
+    else:
+        link.priority = max(1, int(priority))
+        link.weight = numeric_weight
+    link.is_enabled = bool(enabled)
+    audit(
+        db,
+        user,
+        "publication.source",
+        "publication_profile",
+        publication.id,
+        {"channel": channel.id, "priority": link.priority, "weight": link.weight, "enabled": link.is_enabled},
+    )
+    db.commit()
+    return _redirect("/branding", f"{channel.title} linked to {publication.name}.")
+
+
+@app.post("/publications/{publication_id}/sources/{link_id}/remove")
+def publication_source_remove(
+    publication_id: int,
+    link_id: int,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _publication_or_404(db, publication_id, user, "editor")
+    link = db.get(PublicationSource, link_id)
+    if link is None or link.publication_id != publication.id:
+        raise HTTPException(404, "Source link not found.")
+    if db.scalar(
+        select(func.count()).select_from(PublicationSource).where(
+            PublicationSource.publication_id == publication.id
+        )
+    ) <= 1:
+        return _redirect("/branding", error="A publication keeps at least one source channel. Disable it instead.")
+    channel_id = link.channel_id
+    db.delete(link)
+    audit(db, user, "publication.source_remove", "publication_profile", publication.id, {"channel": channel_id})
+    db.commit()
+    return _redirect("/branding", "Source removed from this publication. Telegram access is unchanged.")
+
+
+@app.post("/publications/{publication_id}/editors")
+def publication_editor_add(
+    publication_id: int,
+    username: str = Form(...),
+    role: str = Form("editor"),
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _publication_or_404(db, publication_id, user, "owner")
+    target = db.scalar(select(User).where(User.username == username.strip().lower()))
+    if target is None:
+        return _redirect("/branding", error="No user has that username.")
+    if role not in {"editor", "operator", "viewer"}:
+        return _redirect("/branding", error="Publication role must be editor, operator or viewer.")
+    if target.role == "owner":
+        return _redirect("/branding", error="Owners already manage every publication.")
+    membership = db.scalar(
+        select(PublicationEditor).where(
+            PublicationEditor.publication_id == publication.id,
+            PublicationEditor.user_id == target.id,
+        )
+    )
+    if membership is None:
+        membership = PublicationEditor(
+            publication_id=publication.id, user_id=target.id, role=role
+        )
+        db.add(membership)
+    else:
+        membership.role = role
+    audit(
+        db,
+        user,
+        "publication.editor",
+        "publication_profile",
+        publication.id,
+        {"user": target.id, "role": role},
+    )
+    db.commit()
+    return _redirect("/branding", f"{target.display_name} now edits {publication.name}.")
+
+
+@app.post("/publications/{publication_id}/editors/{membership_id}/remove")
+def publication_editor_remove(
+    publication_id: int,
+    membership_id: int,
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _publication_or_404(db, publication_id, user, "owner")
+    membership = db.get(PublicationEditor, membership_id)
+    if membership is None or membership.publication_id != publication.id:
+        raise HTTPException(404, "Editor membership not found.")
+    db.delete(membership)
+    audit(
+        db,
+        user,
+        "publication.editor_remove",
+        "publication_profile",
+        publication.id,
+        {"user": membership.user_id},
+    )
+    db.commit()
+    return _redirect("/branding", "Editor access removed.")
+
+
 @app.get("/branding")
 def branding_page(request: Request, user: User = Depends(current_user), db: Session = Depends(session_dependency)):
     maps = list(db.scalars(select(CartographicProfile).order_by(CartographicProfile.id)))
-    return render(request, "branding.html", _ctx(db, request, user, "branding", maps=maps))
+    publication = resolve_publication(db, request, user)
+    links: list[dict] = []
+    editors: list[dict] = []
+    available_channels: list[Channel] = []
+    available_users: list[User] = []
+    if publication is not None and can_access_publication(db, user, publication):
+        source_rows = db.execute(
+            select(PublicationSource, Channel)
+            .join(Channel, PublicationSource.channel_id == Channel.id)
+            .where(PublicationSource.publication_id == publication.id)
+            .order_by(PublicationSource.priority.asc(), PublicationSource.id.asc())
+        ).all()
+        links = [{"link": link, "channel": channel} for link, channel in source_rows]
+        linked_channels = {channel.id for _link, channel in source_rows}
+        available_channels = [
+            channel
+            for channel in db.scalars(select(Channel).order_by(Channel.id))
+            if channel.id not in linked_channels and can_access_channel(db, user, channel, "operator")
+        ]
+        editor_rows = db.execute(
+            select(PublicationEditor, User)
+            .join(User, PublicationEditor.user_id == User.id)
+            .where(PublicationEditor.publication_id == publication.id)
+            .order_by(PublicationEditor.id.asc())
+        ).all()
+        editors = [{"membership": membership, "user": member} for membership, member in editor_rows]
+        if user.role == "owner":
+            available_users = [
+                member
+                for member in db.scalars(select(User).order_by(User.username))
+                if member.role != "owner" and member.id not in {row["user"].id for row in editors}
+            ]
+    return render(
+        request,
+        "branding.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "branding",
+            maps=maps,
+            source_links=links,
+            publication_editors=editors,
+            available_channels=available_channels,
+            available_users=available_users,
+            can_manage_publication=bool(
+                publication is not None
+                and can_access_publication(db, user, publication, "editor")
+            ),
+        ),
+    )
 
 
 @app.post("/branding")
@@ -3067,9 +3601,11 @@ def branding_save(
     db: Session = Depends(session_dependency),
     _csrf: None = Depends(require_csrf),
 ):
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    profile = resolve_publication(db, request, user)
     if profile is None:
         raise HTTPException(404, "Publication profile missing.")
+    if not can_access_publication(db, user, profile, "editor"):
+        raise HTTPException(403, "You do not have editorial access to this publication.")
     try:
         from zoneinfo import ZoneInfo
 

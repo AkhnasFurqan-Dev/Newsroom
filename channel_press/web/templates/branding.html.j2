@@ -58,6 +58,143 @@
   <div><button type="submit">Save publication profile</button></div>
 </form>
 
+<h2>Newspapers on this computer</h2>
+<p class="help">Each newspaper keeps its own branding, source list, schedules, drafts, editions and archive. Switching changes the dashboard you are working in; it does not publish anything.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Newspaper</th><th>Slug</th><th>Timezone</th><th>Status</th><th>Open</th></tr></thead>
+    <tbody>
+    {% for paper in publications %}
+      <tr>
+        <td><strong>{{ paper.name }}</strong>{% if profile and paper.id == profile.id %} <span class="badge badge--approved">current</span>{% endif %}</td>
+        <td class="mono">{{ paper.slug }}</td>
+        <td>{{ paper.timezone }}</td>
+        <td>{% if paper.is_active %}<span class="badge badge--approved">active</span>{% else %}<span class="badge">inactive</span>{% endif %}</td>
+        <td>
+          {% if not profile or paper.id != profile.id %}
+          <form method="post" action="/publications/select" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input type="hidden" name="publication_id" value="{{ paper.id }}">
+            <button class="btn btn--small" type="submit">Switch</button>
+          </form>
+          {% endif %}
+          {% if can.own and profile and paper.id == profile.id %}
+          <form method="post" action="/publications/{{ paper.id }}/activate" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input type="hidden" name="active" value="{{ '0' if paper.is_active else '1' }}">
+            <button class="btn btn--small btn--ghost" type="submit">{{ 'Deactivate' if paper.is_active else 'Reactivate' }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can.own %}
+<form method="post" action="/publications/new" class="grid grid--4" style="margin:14px 0 26px; align-items:end">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="new_publication_name">New newspaper</label><input id="new_publication_name" name="name" type="text" placeholder="Evening Ledger" required></div>
+  <div class="field"><label for="new_publication_city">City</label><input id="new_publication_city" name="city" type="text" value="{{ profile.city if profile else 'Karachi' }}"></div>
+  <div class="field"><label for="new_publication_tz">Timezone</label><input id="new_publication_tz" name="timezone" type="text" value="{{ profile.timezone if profile else 'Asia/Karachi' }}"></div>
+  <div><button type="submit" class="btn btn--ghost">Create newspaper</button></div>
+</form>
+{% endif %}
+
+{% if profile %}
+<h2>Sources for {{ profile.name }}</h2>
+<p class="help">A source is an authorized channel that may contribute posts to this newspaper. Priority 1 is used first; weight scales story prominence. Disabling a source keeps its archive and Telegram access but excludes it from the next build.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Channel</th><th>Priority</th><th>Weight</th><th>State</th><th>Update</th></tr></thead>
+    <tbody>
+    {% for row in source_links %}
+      <tr>
+        <td><strong>{{ row.channel.title }}</strong><div class="small">{{ row.channel.handle }}{% if row.channel.is_demo %} · demonstration channel{% endif %}</div></td>
+        <td colspan="3">
+          <form method="post" action="/publications/{{ profile.id }}/sources" class="field-row">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input type="hidden" name="channel_id" value="{{ row.channel.id }}">
+            <input name="priority" type="number" min="1" value="{{ row.link.priority }}" style="max-width:80px">
+            <input name="weight" type="number" step="0.1" min="0.1" max="5" value="{{ row.link.weight }}" style="max-width:80px">
+            <label class="field--inline"><input type="checkbox" name="enabled" value="1" {% if row.link.is_enabled %}checked{% endif %}> enabled</label>
+            <button class="btn btn--small" type="submit">Save</button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/publications/{{ profile.id }}/sources/{{ row.link.id }}/remove" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn--small btn--danger" type="submit">Remove</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="small">No source channels linked yet. Add an authorized channel below.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if available_channels %}
+<form method="post" action="/publications/{{ profile.id }}/sources" class="grid grid--4" style="margin:12px 0 26px; align-items:end">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="add_source_channel">Add authorized channel</label>
+    <select id="add_source_channel" name="channel_id">
+      {% for channel in available_channels %}<option value="{{ channel.id }}">{{ channel.title }} ({{ channel.handle }})</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field"><label for="add_source_priority">Priority</label><input id="add_source_priority" name="priority" type="number" min="1" value="100"></div>
+  <div class="field"><label for="add_source_weight">Weight</label><input id="add_source_weight" name="weight" type="number" step="0.1" min="0.1" max="5" value="1"></div>
+  <div><input type="hidden" name="enabled" value="1"><button type="submit" class="btn btn--ghost">Link source</button></div>
+</form>
+{% endif %}
+
+<h2>Editors for {{ profile.name }}</h2>
+<p class="help">Publication editors can work on this newspaper without gaining access to another paper. Telegram rights and channel ownership remain separate grants.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Person</th><th>Newspaper role</th><th>Global role</th><th></th></tr></thead>
+    <tbody>
+    {% for row in publication_editors %}
+      <tr>
+        <td><strong>{{ row.user.display_name }}</strong><div class="small">{{ row.user.username }}</div></td>
+        <td>{{ row.membership.role|status_label }}</td>
+        <td>{{ row.user.role|status_label }}</td>
+        <td>
+          {% if can.own and row.user.role != 'owner' %}
+          <form method="post" action="/publications/{{ profile.id }}/editors/{{ row.membership.id }}/remove" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn--small btn--danger" type="submit">Remove</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="small">Only owners can open this newspaper. Add an editor to delegate it.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if can.own and available_users %}
+<form method="post" action="/publications/{{ profile.id }}/editors" class="grid grid--3" style="margin:12px 0 26px; align-items:end">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="add_editor_user">Add editor</label>
+    <select id="add_editor_user" name="username">
+      {% for member in available_users %}<option value="{{ member.username }}">{{ member.display_name }} ({{ member.username }})</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field"><label for="add_editor_role">Newspaper role</label>
+    <select id="add_editor_role" name="role">
+      <option value="editor">Editor</option>
+      <option value="operator">Operator</option>
+      <option value="viewer">Viewer</option>
+    </select>
+  </div>
+  <div><button type="submit" class="btn btn--ghost">Grant access</button></div>
+</form>
+{% endif %}
+{% endif %}
+
 <h2>Current map conventions</h2>
 <div class="table-wrap">
   <table>
