@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 import pytest
@@ -11,7 +10,6 @@ from channel_press.fonts import (
     catalog,
     glyph_coverage,
     import_font,
-    inspect_font_file,
     resolve_face,
 )
 from channel_press.models import Edition, FontAsset, PublicationProfile, ThemeRevision

@@ -259,8 +259,8 @@ def test_print_proof_is_a_real_tabloid_render_served_only_to_editors(client, own
 
 
 def test_appearance_requires_editor_access(client, owner, demo_channel, auth, db):
-    from channel_press.security import hash_password
     from channel_press.models import User
+    from channel_press.security import hash_password
 
     viewer = User(
         username="viewer",

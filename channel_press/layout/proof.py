@@ -23,7 +23,7 @@ from ..theming import ThemeRender, available_font_assets, compile_payload, compi
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 CSS_PATH = Path(__file__).resolve().parent.parent / "web" / "static" / "css" / "print.css"
-PROOF_VERSION = "3"
+PROOF_VERSION = "4"
 logger = get_logger("layout.proof")
 
 
@@ -48,7 +48,7 @@ def build_proof_html(
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=True,
     )
-    from ..theming import FONT_ROLES
+    from ..theming import COLOR_FIELDS, FONT_ROLES
 
     theme_roles = [
         {
@@ -57,15 +57,23 @@ def build_proof_html(
         }
         for role in FONT_ROLES
     ]
+    palette = [
+        {
+            "label": field["label"],
+            "value": theme.payload["colors"][field["key"]],
+        }
+        for field in COLOR_FIELDS
+    ]
     return environment.get_template("theme_proof.html.j2").render(
         publication=publication,
         theme=theme,
         theme_roles=theme_roles,
+        palette=palette,
         print_css=css,
     )
 
 
-def _launch(playwright):  # noqa: ANN001 - Playwright factory
+def _launch(playwright):
     options = {"headless": True, "args": ["--allow-file-access-from-files", "--disable-gpu"]}
     chrome_candidates = [
         Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))

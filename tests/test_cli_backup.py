@@ -6,7 +6,8 @@ import argparse
 import json
 import zipfile
 
-import channel_press.cli as cli
+from channel_press import cli
+from channel_press.config import settings
 
 
 def test_backup_archive_is_written_and_readable(db, tmp_path):
@@ -30,3 +31,23 @@ def test_backup_archive_is_written_and_readable(db, tmp_path):
         assert manifest["included_media"] is False
         assert manifest["included_secret"] is False
         assert "counts" in manifest
+
+
+def test_backup_carries_imported_fonts(db, tmp_path):
+    """A restore must not leave theme revisions pointing at missing font files."""
+    settings.ensure_dirs()
+    font_file = settings.fonts_dir / "backup-fixture-font.ttf"
+    font_file.write_bytes(b"\x00\x01\x00\x00test-font-placeholder")
+    target = tmp_path / "backup-with-fonts.zip"
+    args = argparse.Namespace(out=str(target), without_media=True, without_secret=True)
+
+    assert cli.cmd_backup(args) == 0
+    with zipfile.ZipFile(target) as archive:
+        names = set(archive.namelist())
+        assert "fonts/backup-fixture-font.ttf" in names
+        assert (
+            archive.read("fonts/backup-fixture-font.ttf")
+            == b"\x00\x01\x00\x00test-font-placeholder"
+        )
+        manifest = json.loads(archive.read("backup-manifest.json"))
+        assert manifest["included_fonts"] is True

@@ -687,6 +687,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
                 "database_revision": current_revision(),
                 "counts": counts,
                 "included_media": not args.without_media,
+                "included_fonts": settings.fonts_dir.exists(),
                 "included_secret": (settings.data_dir / "secret.key").exists() and not args.without_secret,
             }
             archive.writestr("backup-manifest.json", json.dumps(manifest, indent=2))
@@ -694,6 +695,15 @@ def cmd_backup(args: argparse.Namespace) -> int:
                 for path in settings.media_dir.rglob("*"):
                     if path.is_file():
                         archive.write(path, str(Path("media") / path.relative_to(settings.media_dir)))
+            # Imported fonts are licensed assets referenced by theme revisions.
+            # Losing them on restore would leave archived themes pointing at
+            # missing files, so they travel with the database snapshot.
+            if settings.fonts_dir.exists():
+                for path in settings.fonts_dir.rglob("*"):
+                    if path.is_file():
+                        archive.write(
+                            path, str(Path("fonts") / path.relative_to(settings.fonts_dir))
+                        )
     _print(f"Backup written: {target} ({target.stat().st_size / 1024 / 1024:.1f} MB)")
     return 0
 
@@ -732,6 +742,10 @@ def cmd_restore(args: argparse.Namespace) -> int:
                 if settings.media_dir.exists():
                     shutil.rmtree(settings.media_dir)
                 shutil.copytree(tmp / "media", settings.media_dir)
+            if (tmp / "fonts").exists():
+                if settings.fonts_dir.exists():
+                    shutil.rmtree(settings.fonts_dir)
+                shutil.copytree(tmp / "fonts", settings.fonts_dir)
             settings.ensure_dirs()
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

@@ -18,9 +18,9 @@ import hashlib
 import json
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from .config import settings
 
@@ -142,15 +142,11 @@ def inspect_font_file(path: Path | str, *, asset_id: int | None = None) -> FontF
             for record in names.names:
                 try:
                     value = record.toUnicode().strip()
-                except Exception:  # noqa: BLE001 - malformed name records
+                except Exception:  # noqa: BLE001, S112 - malformed name records are skipped
                     continue
-                if record.nameID == 16 and value:
+                if value and (record.nameID == 16 or (record.nameID == 1 and not family)):
                     family = value
-                elif record.nameID == 1 and not family and value:
-                    family = value
-                elif record.nameID == 17 and value:
-                    subfamily = value
-                elif record.nameID == 2 and not subfamily and value:
+                elif value and (record.nameID == 17 or (record.nameID == 2 and not subfamily)):
                     subfamily = value
             weight = _weight_class(getattr(font["OS/2"], "usWeightClass", 400) if "OS/2" in tables else 400)
             flags = int(getattr(font["OS/2"], "fsSelection", 0)) if "OS/2" in tables else 0
@@ -413,7 +409,7 @@ def import_font(
     }
 
 
-def asset_face(asset) -> FontFace:  # noqa: ANN001 - SQLAlchemy row
+def asset_face(asset) -> FontFace:
     path = _fonts_dir() / asset.stored_name
     return FontFace(
         family=asset.family or Path(asset.stored_name).stem,

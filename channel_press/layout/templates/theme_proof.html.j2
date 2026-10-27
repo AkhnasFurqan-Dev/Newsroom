@@ -47,6 +47,11 @@ html, body { background: #dedbd3; margin: 0; padding: 0; }
 .proof-specimen dl > div { display: flex; justify-content: space-between; gap: 8pt; border-bottom: 1px dotted var(--hairline); padding: 2pt 0; }
 .proof-specimen dt { color: var(--ink-soft); font-family: var(--font-caption); font-size: 7.4pt; }
 .proof-specimen dd { margin: 0; font-family: var(--font-numeric); font-weight: var(--numeric-weight); font-size: 7.4pt; }
+.proof-palette { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3pt 0.24in; margin-top: 8pt; }
+.proof-swatch { display: flex; align-items: center; gap: 6pt; border-bottom: 1px dotted var(--hairline); padding: 2pt 0; }
+.proof-swatch__chip { width: 0.24in; height: 0.16in; border: 1px solid var(--hair); flex: 0 0 auto; }
+.proof-swatch__name { font-family: var(--font-caption); font-size: 7.4pt; color: var(--ink-soft); }
+.proof-swatch__hex { font-family: var(--font-numeric); font-weight: var(--numeric-weight); font-size: 7.4pt; margin-left: auto; }
 .proof-caption {
   font-family: var(--font-caption);
   font-size: 7.4pt;
@@ -114,6 +119,15 @@ html, body { background: #dedbd3; margin: 0; padding: 0; }
       <div><dt>{{ role.label }}</dt><dd>{{ role.family }}</dd></div>
       {% endfor %}
     </dl>
+    <div class="proof-palette">
+      {% for item in palette %}
+      <div class="proof-swatch">
+        <span class="proof-swatch__chip" style="background: {{ item.value }}"></span>
+        <span class="proof-swatch__name">{{ item.label }}</span>
+        <span class="proof-swatch__hex">{{ item.value }}</span>
+      </div>
+      {% endfor %}
+    </div>
   </section>
   <div class="proof-caption">Theme revision {{ theme.revision_id or "draft" }} · hash {{ theme.hash[:12] }} · generated locally. Check colours and type at 100% zoom before publishing.</div>
   <div class="proof-footer"><span>{{ publication.name }}</span><span>Theme proof · {{ theme.hash[:12] }}</span></div>

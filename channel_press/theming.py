@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from .constants import SECTION_ORDER
 from .fonts import (
-    asset_face,
     discover_installed_fonts,
     glyph_coverage,
     resolve_face,
