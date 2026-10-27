@@ -284,11 +284,23 @@ def mark_preview_stale(db: Session, edition: Edition) -> None:
     db.flush()
 
 
+def edition_theme_hash(db: Session, edition: Edition) -> str:
+    from ..publications import publication_for_edition
+    from ..theming import payload_hash, theme_payload, current_theme
+
+    publication = publication_for_edition(db, edition)
+    if publication is None:
+        return ""
+    return payload_hash(theme_payload(current_theme(db, publication)))
+
+
 def preview_matches_content(db: Session, edition: Edition) -> bool:
     return (
         edition.preview_state == "current"
         and bool(edition.preview_dir)
         and edition.preview_revision == edition_content_fingerprint(db, edition)
+        and bool(edition.preview_theme_hash)
+        and edition.preview_theme_hash == edition_theme_hash(db, edition)
     )
 
 

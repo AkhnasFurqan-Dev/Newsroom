@@ -421,6 +421,21 @@ form.is-dirty .field > label { color: var(--accent); }
   .workspace__list, .workspace__preview { display: none; }
 }
 
+/* Print appearance: palette, font roles and proofs */
+.appearance-warnings { display: grid; gap: 4px; margin-bottom: 18px; }
+.appearance-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px 18px; margin-bottom: 8px; }
+.appearance-color__row { display: flex; gap: 6px; align-items: stretch; }
+.appearance-color__row input[type="color"] { width: 46px; height: 34px; padding: 2px; border: 1px solid var(--rule-strong); background: #fffdf8; cursor: pointer; flex: none; }
+.appearance-color__row input[type="text"] { min-width: 0; font-family: Consolas, "Courier New", monospace; text-transform: lowercase; }
+.appearance-fonts td { vertical-align: middle; }
+.appearance-fonts .font-sample { display: inline-block; max-width: 260px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink); font-size: 16px; }
+.appearance-proof { border: 1px solid var(--rule-strong); background: #d9d5cb; padding: 14px; display: flex; justify-content: center; margin-bottom: 8px; }
+.appearance-proof img { display: block; width: 100%; max-width: 660px; height: auto; box-shadow: 0 1px 3px rgba(0, 0, 0, .18); background: #fff; }
+.warnline { font-size: 12.5px; display: flex; align-items: baseline; gap: 7px; }
+.warnline--critical { color: var(--danger); }
+.warnline--warning { color: var(--warn); }
+.warnline--info { color: var(--muted); }
+
 /* Newspaper selector in the top bar */
 .pub-select { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 24px; font-size: 12px; }
 .pub-select label { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }

@@ -81,6 +81,8 @@ class Settings(BaseSettings):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "media").mkdir(exist_ok=True)
         (self.data_dir / "geodata").mkdir(exist_ok=True)
+        (self.data_dir / "fonts").mkdir(exist_ok=True)
+        (self.data_dir / "theme-proofs").mkdir(exist_ok=True)
 
     @property
     def effective_database_url(self) -> str:
@@ -107,6 +109,14 @@ class Settings(BaseSettings):
     @property
     def media_dir(self) -> Path:
         return self.data_dir / "media"
+
+    @property
+    def fonts_dir(self) -> Path:
+        return self.data_dir / "fonts"
+
+    @property
+    def theme_proofs_dir(self) -> Path:
+        return self.data_dir / "theme-proofs"
 
     @property
     def telegram_session_file(self) -> Path:

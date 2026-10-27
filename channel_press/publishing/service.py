@@ -31,6 +31,7 @@ from ..models import (
     ReviewFlag,
     SourceAppendix,
 )
+from ..publications import publication_for_edition
 from ..timeutil import human_local, iso_utc, utcnow
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -113,9 +114,19 @@ def _write_epaper(
     render: RenderResult,
     target: Path,
     demo_edition: bool,
+    theme=None,
 ) -> dict:
     from PIL import Image
 
+    from ..theming import available_font_assets, compile_theme, theme_css
+
+    if theme is None:
+        theme = compile_theme(db, plan.profile, edition, font_dir=target / "assets")
+    epaper_css, _warnings = theme_css(
+        theme.payload,
+        assets=available_font_assets(db),
+        font_dir=target / "assets",
+    )
     pages_dir = target / "pages"
     pages_dir.mkdir(parents=True, exist_ok=True)
     page_payload: list[dict] = []
@@ -165,6 +176,7 @@ def _write_epaper(
         "qa": render.qa,
         "cartographic_convention": plan.profile.map_profile,
         "demo_edition": demo_edition,
+        "theme": theme.hash,
     }
     html = _environment().get_template("epaper.html.j2").render(
         edition=edition,
@@ -190,6 +202,7 @@ def _write_epaper(
     (target / "assets" / "epaper.css").write_text(
         (TEMPLATE_DIR / "epaper.css").read_text(encoding="utf-8"), encoding="utf-8"
     )
+    (target / "assets" / "theme.css").write_text(epaper_css, encoding="utf-8")
     (target / "assets" / "epaper.js").write_text(
         (TEMPLATE_DIR / "epaper.js").read_text(encoding="utf-8"), encoding="utf-8"
     )
@@ -437,7 +450,7 @@ def publish_edition(
     therefore never a published version, even when the edition itself is
     published: the caller edits a working revision instead.
     """
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    profile = publication_for_edition(db, edition)
     if profile is None:
         raise PublicationError("Publication profile is not configured.")
     if preview:
@@ -487,6 +500,17 @@ def publish_edition(
             media_dir=settings.media_dir,
             download_media=False,
         )
+        from ..theming import available_font_assets, pin_edition_theme, theme_manifest
+
+        theme = render.theme
+        if theme is None:
+            from ..theming import compile_theme
+
+            theme = compile_theme(db, profile, edition)
+        if not preview:
+            # Freeze the exact colours, fonts and metrics used for this release
+            # before any archived issue can be rewritten by a later theme save.
+            pin_edition_theme(db, edition, profile, theme)
         epaper_dir = staging / "epaper"
         if layout_progress:
             layout_progress("layout_generate_epaper", "Generating the e-paper bundle")
@@ -497,6 +521,7 @@ def publish_edition(
             render=render,
             target=epaper_dir,
             demo_edition=demo_edition,
+            theme=theme,
         )
         for package in plan.packages:
             if package.media_id is not None:
@@ -566,8 +591,13 @@ def publish_edition(
                 "handle": profile.channel_handle,
                 "city": profile.city,
                 "cartographic_profile": plan.profile.map_profile,
-                "accent": profile.accent,
+                "accent": theme.payload["colors"]["accent"],
             },
+            "theme": theme_manifest(
+                theme.theme,
+                theme.payload,
+                available_font_assets(db),
+            ),
             "generated_at": iso_utc(utcnow()),
             "preview": preview,
             "demo_edition": bool(demo_edition),
@@ -637,6 +667,7 @@ def publish_edition(
             edition.preview_dir = str(final_dir)
             edition.preview_pdf_path = str(pdf_path)
             edition.preview_revision = edition_content_fingerprint(db, edition)
+            edition.preview_theme_hash = theme.hash
             edition.preview_updated_at = utcnow()
             edition.preview_state = "current"
             edition.updated_at = utcnow()

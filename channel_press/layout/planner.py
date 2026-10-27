@@ -151,6 +151,9 @@ def _build_package(
     media_dir: Path | None = None,
     exclude_media_ids: set[int] | None = None,
     download_media: bool = True,
+    palette: dict[str, str] | None = None,
+    chart_font: str = "",
+    map_font: str = "",
 ) -> StoryPackage:
     story = db.get(StoryCluster, article.story_id)
     paragraphs = _body(article)
@@ -232,7 +235,7 @@ def _build_package(
             package.supporting_media_credit = supporting.credit
             package.supporting_media_label = "VIDEO STILL" if supporting.graphic_kind == "video_still" else ""
     if not package.media_path and map_profile is not None:
-        map_result = render_locator_map(story, map_profile)
+        map_result = render_locator_map(story, map_profile, palette=palette, font_family=map_font)
         if not map_result.fallback:
             package.map_result = map_result
     if article.section in {"analysis", "opinion"}:
@@ -242,7 +245,7 @@ def _build_package(
         spec = build_percentage_chart(claims)
         if spec is not None:
             package.chart_spec = spec
-            package.chart_svg = render_chart_svg(spec)
+            package.chart_svg = render_chart_svg(spec, palette=palette, font_family=chart_font)
     if is_front or (section == "conflict" and not is_brief):
         events = list(
             db.scalars(
@@ -276,6 +279,9 @@ def create_plan(
     *,
     media_dir: Path | None = None,
     download_media: bool = False,
+    palette: dict[str, str] | None = None,
+    chart_font: str = "",
+    map_font: str = "",
 ) -> EditionPlan:
     links = list(
         db.scalars(
@@ -348,6 +354,9 @@ def create_plan(
             media_dir=media_dir,
             download_media=download_media,
             exclude_media_ids=used_media_ids,
+            palette=palette,
+            chart_font=chart_font,
+            map_font=map_font,
         )
         if package.media_id is not None:
             used_media_ids.add(package.media_id)
@@ -370,7 +379,9 @@ def create_plan(
             package.media_credit = ""
             package.media_label = ""
             if map_profile is not None and package.map_result is None:
-                map_result = render_locator_map(package.story, map_profile)
+                map_result = render_locator_map(
+                    package.story, map_profile, palette=palette, font_family=map_font
+                )
                 if not map_result.fallback:
                     package.map_result = map_result
         else:
@@ -379,7 +390,7 @@ def create_plan(
     lead.headline_size = "major" if lead.story.importance >= 0.72 or lead.story.risk_level == "high" else "front"
     # Rebuild front lead with visual hierarchy; map preferred over a fixture plate.
     if map_profile is not None:
-        map_result = render_locator_map(lead.story, map_profile)
+        map_result = render_locator_map(lead.story, map_profile, palette=palette, font_family=map_font)
         if not map_result.fallback:
             lead.map_result = map_result
     for link in links:

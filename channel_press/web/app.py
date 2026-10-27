@@ -57,6 +57,7 @@ from ..constants import (
     EXCLUSION_REASONS,
     ROLE_RANK,
     SECTION_LABELS,
+    SECTION_ORDER,
     SECTIONS,
 )
 from ..collection.service import (
@@ -117,6 +118,7 @@ from ..models import (
     EditionPage,
     EditionSchedule,
     ExternalReference,
+    FontAsset,
     Job,
     JobStep,
     PostFragment,
@@ -131,6 +133,7 @@ from ..models import (
     StoryClaim,
     StoryCluster,
     StoryTimelineEvent,
+    ThemeRevision,
     User,
 )
 from ..publishing.service import (
@@ -148,6 +151,30 @@ from ..media.service import (
     update_media_caption,
 )
 from ..research import ResearchError, accept_reference, reject_reference, research_reference
+from ..fonts import (
+    FontError,
+    MAX_FONT_BYTES,
+    catalog as font_catalog,
+    import_font,
+)
+from ..theming import (
+    COLOR_FIELDS,
+    FONT_ROLES,
+    METRIC_LIMITS,
+    PRESETS,
+    ThemeError,
+    available_font_assets,
+    contrast_warnings,
+    current_theme,
+    default_payload,
+    describe_theme,
+    fonts_used_by_themes,
+    normalise_payload,
+    payload_hash,
+    preset as theme_preset,
+    save_theme,
+    theme_payload,
+)
 from ..editorial.moderation import (
     CLASSIFICATION_LABELS,
     CLASSIFIER_VERSION,
@@ -3727,6 +3754,466 @@ def branding_save(
     audit(db, user, "branding.update", "publication_profile", profile.id, {"name": profile.name})
     db.commit()
     return _redirect("/branding", "Publication profile saved.")
+
+
+# ---------------------------------------------------------------------------
+# print appearance: palette, fonts and real proofs
+# ---------------------------------------------------------------------------
+
+
+def _appearance_publication(db: Session, request: Request, user: User) -> PublicationProfile:
+    publication = resolve_publication(db, request, user)
+    if publication is None:
+        raise HTTPException(404, "Publication profile missing.")
+    if not can_access_publication(db, user, publication, "editor"):
+        raise HTTPException(403, "You do not have editorial access to this publication.")
+    return publication
+
+
+def _font_choice(value: str, fallback: dict) -> dict:
+    raw = (value or "").strip()
+    if not raw:
+        return dict(fallback)
+    if raw.startswith("asset:"):
+        try:
+            asset_id = int(raw.split(":", 1)[1])
+        except (TypeError, ValueError) as exc:
+            raise ThemeError("Invalid imported font selection.") from exc
+        return {"asset_id": asset_id}
+    if raw.startswith("system:"):
+        return {"family": raw.split(":", 1)[1], "asset_id": None}
+    return {"family": raw, "asset_id": None}
+
+
+def _appearance_payload_from_form(form, base: dict) -> dict:
+    payload = {
+        "colors": dict(base["colors"]),
+        "fonts": {key: dict(value) for key, value in base["fonts"].items()},
+        "metrics": dict(base["metrics"]),
+        "sections": dict(base.get("sections") or {}),
+    }
+    for item in COLOR_FIELDS:
+        key = item["key"]
+        value = str(form.get(f"color_{key}") or "").strip()
+        if value:
+            payload["colors"][key] = value
+    assets = {}
+    for role in FONT_ROLES:
+        key = role["key"]
+        current = payload["fonts"][key]
+        choice = _font_choice(str(form.get(f"font_{key}") or ""), current)
+        if "asset_id" in choice and choice.get("asset_id") is not None:
+            current["asset_id"] = choice["asset_id"]
+            if choice.get("family"):
+                current["family"] = choice["family"]
+        elif choice.get("family"):
+            current["family"] = choice["family"]
+            current["asset_id"] = None
+        try:
+            weight = int(str(form.get(f"weight_{key}") or current["weight"]))
+        except (TypeError, ValueError) as exc:
+            raise ThemeError(f"{role['label']}: font weight must be a number.") from exc
+        current["weight"] = weight
+        style = str(form.get(f"style_{key}") or current["style"]).lower()
+        if style not in {"normal", "italic"}:
+            raise ThemeError(f"{role['label']}: font style must be normal or italic.")
+        current["style"] = style
+    for key in payload["metrics"]:
+        raw = str(form.get(f"metric_{key}") or "").strip()
+        if raw:
+            payload["metrics"][key] = raw
+    for section in SECTION_ORDER:
+        raw = str(form.get(f"section_{section}") or "").strip()
+        if raw:
+            payload["sections"][section] = raw
+        else:
+            payload["sections"].pop(section, None)
+    return normalise_payload(payload)
+
+
+def _validate_font_assets(db: Session, payload: dict) -> None:
+    available = {asset.id: asset for asset in available_font_assets(db)}
+    for role in FONT_ROLES:
+        selection = payload["fonts"][role["key"]]
+        asset_id = selection.get("asset_id")
+        if asset_id is None:
+            continue
+        asset = available.get(int(asset_id))
+        if asset is None:
+            raise ThemeError(f"{role['label']}: the selected imported font no longer exists.")
+        selection["family"] = asset.family
+        selection["weight"] = int(asset.weight or selection["weight"])
+        selection["style"] = asset.style or selection["style"]
+
+
+def _appearance_font_options(db: Session, payload: dict) -> list[dict]:
+    assets = available_font_assets(db)
+    options: list[dict] = []
+    seen: set[str] = set()
+    for entry in font_catalog(assets):
+        if entry.source == "asset":
+            for face in entry.faces:
+                if face.asset_id is None:
+                    continue
+                value = f"asset:{face.asset_id}"
+                label = f"{entry.family} — imported {face.weight} {face.style}"
+                options.append(
+                    {
+                        "value": value,
+                        "label": label,
+                        "group": "imported",
+                        "unavailable": face.unavailable,
+                    }
+                )
+                seen.add(value)
+        else:
+            value = f"system:{entry.family}"
+            if value in seen:
+                continue
+            options.append(
+                {
+                    "value": value,
+                    "label": f"{entry.family} — installed",
+                    "group": "installed",
+                    "unavailable": all(face.unavailable for face in entry.faces),
+                }
+            )
+            seen.add(value)
+    for role in FONT_ROLES:
+        selection = payload["fonts"][role["key"]]
+        asset_id = selection.get("asset_id")
+        value = f"asset:{asset_id}" if asset_id else f"system:{selection['family']}"
+        if value not in seen:
+            options.append(
+                {
+                    "value": value,
+                    "label": f"{selection['family']} — not currently available",
+                    "group": "missing",
+                    "unavailable": True,
+                }
+            )
+            seen.add(value)
+    return options
+
+
+def _appearance_roles(db: Session, payload: dict) -> list[dict]:
+    described = describe_theme(payload, available_font_assets(db))
+    options = _appearance_font_options(db, payload)
+    roles = []
+    for role in described["roles"]:
+        selection = role["selection"]
+        selected = (
+            f"asset:{selection['asset_id']}"
+            if selection.get("asset_id")
+            else f"system:{selection['family']}"
+        )
+        roles.append({**role, "selected": selected, "options": options})
+    return roles
+
+
+@app.get("/appearance")
+def appearance_page(
+    request: Request,
+    proof: str = "",
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+):
+    publication = _appearance_publication(db, request, user)
+    theme = current_theme(db, publication)
+    db.commit()
+    payload = theme_payload(theme)
+    assets = available_font_assets(db)
+    revisions = list(
+        db.scalars(
+            select(ThemeRevision)
+            .where(ThemeRevision.publication_id == publication.id)
+            .order_by(ThemeRevision.revision.desc())
+        )
+    )
+    proof_file = ""
+    from ..layout.proof import proof_dir
+
+    if re.fullmatch(r"theme-proof-[a-f0-9]{16}\.png", proof or ""):
+        candidate = proof_dir(publication) / proof
+        if candidate.is_file():
+            proof_file = proof
+    return render(
+        request,
+        "appearance.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "appearance",
+            publication=publication,
+            theme=theme,
+            payload=payload,
+            colors=COLOR_FIELDS,
+            roles=_appearance_roles(db, payload),
+            metrics={key: payload["metrics"][key] for key in payload["metrics"]},
+            metric_limits=METRIC_LIMITS,
+            warnings=[*contrast_warnings(payload), *describe_theme(payload, assets)["warnings"]],
+            presets=PRESETS,
+            revisions=revisions,
+            assets=assets,
+            proof_file=proof_file,
+            section_order=[(key, label) for key, label in SECTIONS if key != "front"],
+            section_accents=payload.get("sections") or {},
+        ),
+    )
+
+
+@app.post("/appearance")
+async def appearance_save(
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _appearance_publication(db, request, user)
+    form = await request.form()
+    base = theme_payload(current_theme(db, publication))
+    try:
+        payload = _appearance_payload_from_form(form, base)
+        _validate_font_assets(db, payload)
+        name = str(form.get("theme_name") or "").strip()[:160]
+        row = save_theme(
+            db,
+            publication,
+            payload,
+            actor_id=user.id,
+            name=name,
+            notes=str(form.get("theme_notes") or "").strip()[:400],
+        )
+        audit(
+            db,
+            user,
+            "theme.save",
+            "theme_revision",
+            row.id,
+            {"publication": publication.id, "revision": row.revision, "hash": payload_hash(payload)},
+        )
+        db.commit()
+    except ThemeError as exc:
+        db.rollback()
+        return _redirect("/appearance", error=str(exc))
+    return _redirect(
+        "/appearance",
+        f"Saved theme revision {row.revision}. Unpublished previews are now marked stale.",
+    )
+
+
+@app.post("/appearance/preset")
+async def appearance_preset(
+    request: Request,
+    preset: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _appearance_publication(db, request, user)
+    chosen = theme_preset(preset)
+    if chosen is None:
+        return _redirect("/appearance", error="Unknown palette preset.")
+    base = theme_payload(current_theme(db, publication))
+    payload = {**base, "colors": {**base["colors"], **chosen["colors"]}}
+    try:
+        row = save_theme(
+            db,
+            publication,
+            normalise_payload(payload),
+            actor_id=user.id,
+            name=f"{publication.name} — {chosen['name']}",
+            notes=chosen["description"],
+        )
+        audit(
+            db,
+            user,
+            "theme.preset",
+            "theme_revision",
+            row.id,
+            {"preset": preset, "revision": row.revision},
+        )
+        db.commit()
+    except ThemeError as exc:
+        db.rollback()
+        return _redirect("/appearance", error=str(exc))
+    return _redirect("/appearance", f"Applied the {chosen['name']} palette as revision {row.revision}.")
+
+
+@app.post("/appearance/reset")
+def appearance_reset(
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _appearance_publication(db, request, user)
+    try:
+        row = save_theme(
+            db,
+            publication,
+            default_payload(),
+            actor_id=user.id,
+            name=f"{publication.name} standard",
+            notes="Reset to the standard print theme.",
+        )
+        audit(
+            db,
+            user,
+            "theme.reset",
+            "theme_revision",
+            row.id,
+            {"publication": publication.id, "revision": row.revision},
+        )
+        db.commit()
+    except ThemeError as exc:
+        db.rollback()
+        return _redirect("/appearance", error=str(exc))
+    return _redirect("/appearance", f"Reset to the standard theme as revision {row.revision}.")
+
+
+@app.post("/appearance/proof")
+async def appearance_proof(
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _appearance_publication(db, request, user)
+    form = await request.form()
+    base = theme_payload(current_theme(db, publication))
+    try:
+        payload = _appearance_payload_from_form(form, base)
+        _validate_font_assets(db, payload)
+        from starlette.concurrency import run_in_threadpool
+
+        from ..layout.proof import render_theme_proof
+
+        # Playwright's synchronous API cannot run inside the request's asyncio
+        # loop, so the renderer runs in a worker thread.
+        image_path, theme = await run_in_threadpool(
+            render_theme_proof, db, publication, payload=payload
+        )
+        audit(
+            db,
+            user,
+            "theme.proof",
+            "publication_profile",
+            publication.id,
+            {"theme": theme.hash, "file": image_path.name},
+        )
+        db.commit()
+    except ThemeError as exc:
+        db.rollback()
+        return _redirect("/appearance", error=str(exc))
+    except Exception as exc:  # noqa: BLE001 - report the renderer failure honestly
+        db.rollback()
+        return _redirect("/appearance", error=f"The print proof could not be rendered: {exc}")
+    return _redirect(
+        f"/appearance?proof={image_path.name}",
+        "Print proof rendered from the current form values.",
+    )
+
+
+@app.get("/appearance/proof/{filename}")
+def appearance_proof_image(
+    filename: str,
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+):
+    publication = _appearance_publication(db, request, user)
+    if not re.fullmatch(r"theme-proof-[a-f0-9]{16}\.png", filename):
+        raise HTTPException(404, "Proof not found.")
+    from ..layout.proof import proof_dir
+
+    path = proof_dir(publication) / filename
+    if not path.is_file():
+        raise HTTPException(404, "Proof not found.")
+    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/appearance/fonts")
+async def appearance_font_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    license_note: str = Form(""),
+    license_acknowledged: str = Form(""),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _appearance_publication(db, request, user)
+    data = await file.read(MAX_FONT_BYTES + 1)
+    if len(data) > MAX_FONT_BYTES:
+        return _redirect("/appearance", error="Font files must be at most 12 MB.")
+    try:
+        metadata = import_font(
+            data=data,
+            filename=file.filename or "font.ttf",
+            license_note=license_note,
+            license_acknowledged=license_acknowledged in {"1", "true", "on"},
+            uploaded_by=user.id,
+        )
+    except FontError as exc:
+        return _redirect("/appearance", error=str(exc))
+    existing = db.scalar(select(FontAsset).where(FontAsset.sha256 == metadata["sha256"]))
+    if existing is not None:
+        return _redirect(
+            "/appearance",
+            message=f"{existing.family} is already in the font library.",
+        )
+    asset = FontAsset(**metadata)
+    db.add(asset)
+    audit(
+        db,
+        user,
+        "theme.font_import",
+        "publication_profile",
+        publication.id,
+        {"family": metadata["family"], "sha256": metadata["sha256"]},
+    )
+    db.commit()
+    return _redirect(
+        "/appearance",
+        f"Imported {asset.family} {asset.weight} {asset.style}. Select it for a font role.",
+    )
+
+
+@app.post("/appearance/fonts/{font_id}/delete")
+def appearance_font_delete(
+    font_id: int,
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    publication = _appearance_publication(db, request, user)
+    asset = db.get(FontAsset, font_id)
+    if asset is None:
+        raise HTTPException(404, "Font asset not found.")
+    used_by = fonts_used_by_themes(db, asset.id)
+    if used_by:
+        return _redirect(
+            "/appearance",
+            error="This font is referenced by a saved theme revision. Keep it, or save a theme that no longer uses it before deleting.",
+        )
+    stored_name = asset.stored_name
+    db.delete(asset)
+    audit(
+        db,
+        user,
+        "theme.font_delete",
+        "publication_profile",
+        publication.id,
+        {"family": asset.family, "sha256": asset.sha256},
+    )
+    db.commit()
+    target = settings.fonts_dir / stored_name
+    if target.is_file() and target.parent.resolve() == settings.fonts_dir.resolve():
+        target.unlink(missing_ok=True)
+    return _redirect("/appearance", f"Removed {asset.family} from the font library.")
 
 
 @app.get("/users")

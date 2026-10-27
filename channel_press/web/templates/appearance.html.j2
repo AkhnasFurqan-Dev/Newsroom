@@ -1,0 +1,205 @@
+{% extends "base.html.j2" %}
+{% block title %}Appearance{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="kicker">Print identity · {{ publication.name }}</div>
+    <h1>Appearance</h1>
+    <p class="lede">Colours, fonts and typographic metrics for the printed newspaper and its e-paper. Every save creates a new immutable revision; published editions keep the theme they were printed with.</p>
+  </div>
+  <div class="page-head__actions">
+    <a class="btn btn--ghost" href="/branding">Branding &amp; policy</a>
+  </div>
+</div>
+
+{% if warnings %}
+<div class="card card--flat appearance-warnings">
+  <div class="card__label">Print checks</div>
+  {% for item in warnings %}
+  <div class="warnline warnline--{{ item.level }}"><span class="badge badge--{{ 'block_publish' if item.level == 'critical' else ('review' if item.level == 'warning' else '') }}">{{ item.level }}</span> {{ item.message }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Palette presets</h2>
+<p class="help">A preset creates a new revision using the palette below with your current fonts and metrics. It never edits an archived issue.</p>
+<div class="field-row" style="margin-bottom:18px">
+  {% for item in presets %}
+  <form method="post" action="/appearance/preset" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="preset" value="{{ item.key }}">
+    <button class="btn btn--ghost btn--small" type="submit" title="{{ item.description }}">{{ item.name }}</button>
+  </form>
+  {% endfor %}
+</div>
+
+<form method="post" action="/appearance" id="appearance-form" class="stack" style="max-width:1120px">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+  <div class="grid grid--2">
+    <div class="field"><label for="theme_name">Revision name</label><input id="theme_name" name="theme_name" type="text" maxlength="160" value="{{ theme.name }}"></div>
+    <div class="field"><label for="theme_notes">What changed</label><input id="theme_notes" name="theme_notes" type="text" maxlength="400" placeholder="e.g. warmer paper for the weekend edition"></div>
+  </div>
+
+  <h2>Colours</h2>
+  <p class="help">HEX values are printed exactly as selected. Warnings are advisory; a critical body-ink or muted-text contrast problem blocks saving. QR modules stay black on white regardless of the palette so they remain scannable.</p>
+  <div class="appearance-colors">
+    {% for item in colors %}
+    <div class="appearance-color">
+      <div class="field">
+        <label for="color_{{ item.key }}">{{ item.label }}</label>
+        <div class="appearance-color__row">
+          <input type="color" value="{{ payload.colors[item.key] }}" data-color-picker="color_{{ item.key }}" aria-label="{{ item.label }} colour picker">
+          <input id="color_{{ item.key }}" name="color_{{ item.key }}" type="text" value="{{ payload.colors[item.key] }}" pattern="#[0-9a-fA-F]{3,6}" maxlength="7" required data-color-text="color_{{ item.key }}">
+        </div>
+        <div class="help">{{ item.help }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2>Fonts</h2>
+  <p class="help">Only families installed on this computer or imported into the local font library are listed. A missing weight or italic face is substituted and reported instead of being faked. Imported files are embedded in the PDF, the proof and the e-paper.</p>
+  <div class="table-wrap">
+    <table class="appearance-fonts">
+      <thead><tr><th>Role</th><th>Sample</th><th>Family</th><th>Weight</th><th>Style</th></tr></thead>
+      <tbody>
+      {% for role in roles %}
+      <tr>
+        <td><strong>{{ role.label }}</strong>{% if not role.available %}<div class="small warnline--critical">Selected face is not available; text will fall back.</div>{% endif %}</td>
+        <td><span class="font-sample" data-role-sample="{{ role.key }}" data-sample="{{ role.sample }}" style="font-family: {{ role.stack }}; font-weight: {{ role.weight }}; font-style: {{ role.style }}">{{ role.sample }}</span></td>
+        <td>
+          <select name="font_{{ role.key }}" data-font-role="{{ role.key }}" aria-label="{{ role.label }} family">
+            {% for option in role.options %}
+            <option value="{{ option.value }}" {% if option.value == role.selected %}selected{% endif %}>{{ option.label }}{% if option.unavailable %} (unavailable){% endif %}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td>
+          <select name="weight_{{ role.key }}" data-font-weight="{{ role.key }}" aria-label="{{ role.label }} weight">
+            {% for weight in [300, 400, 500, 600, 700, 800, 900] %}
+            <option value="{{ weight }}" {% if weight == role.weight %}selected{% endif %}>{{ weight }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td>
+          <select name="style_{{ role.key }}" data-font-style="{{ role.key }}" aria-label="{{ role.label }} style">
+            <option value="normal" {% if role.style == 'normal' %}selected{% endif %}>Upright</option>
+            <option value="italic" {% if role.style == 'italic' %}selected{% endif %}>Italic</option>
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Type metrics</h2>
+  <div class="grid grid--3">
+    {% set metric_labels = {
+      'body_size_pt': 'Body size (pt)',
+      'body_leading': 'Body leading',
+      'headline_scale': 'Headline scale',
+      'headline_tracking': 'Headline tracking (em)',
+      'display_scale': 'Masthead scale'
+    } %}
+    {% for key, value in metrics.items() %}
+    {% set limits = metric_limits[key] %}
+    <div class="field">
+      <label for="metric_{{ key }}">{{ metric_labels.get(key, key) }}</label>
+      <input id="metric_{{ key }}" name="metric_{{ key }}" type="number" min="{{ limits[0] }}" max="{{ limits[1] }}" step="0.001" value="{{ value }}">
+      <div class="help">Allowed {{ limits[0] }} to {{ limits[1] }}.</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <h2>Section accents</h2>
+  <p class="help">Optional. A section accent colours that section's kicker and genre labels without changing body ink.</p>
+  <div class="appearance-colors">
+    {% for key, label in section_order %}
+    <div class="field">
+      <label for="section_{{ key }}">{{ label }}</label>
+      <input id="section_{{ key }}" name="section_{{ key }}" type="text" value="{{ section_accents.get(key, '') }}" pattern="#[0-9a-fA-F]{3,6}" maxlength="7" placeholder="Use the main accent">
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="field-row">
+    <button type="submit">Save as new theme revision</button>
+    <button class="btn btn--ghost" type="submit" formaction="/appearance/proof" formnovalidate>Render print proof</button>
+  </div>
+</form>
+
+<form method="post" action="/appearance/reset" class="inline" style="margin-top:10px" onsubmit="return confirm('Create a new standard-theme revision? Published editions are not changed.')">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <button class="btn btn--ghost btn--small" type="submit">Reset colours, fonts and metrics to the standard theme</button>
+</form>
+
+<h2>Print proof</h2>
+<p class="help">The proof is rendered from the form values above with the same print stylesheet and the same font files as the edition. It is a specimen page, not a news report. Render it after changing a colour or font, then inspect it at 100% zoom.</p>
+{% if proof_file %}
+<div class="appearance-proof">
+  <img src="/appearance/proof/{{ proof_file }}" alt="Theme proof specimen page for {{ publication.name }}" width="1056" height="1632">
+</div>
+<p class="small">Proof file <span class="mono">{{ proof_file }}</span>. It is private to this computer and served only to signed-in editors.</p>
+{% else %}
+<div class="card card--flat"><div class="card__hint">No proof rendered yet. Use “Render print proof” above.</div></div>
+{% endif %}
+
+<h2>Imported font library</h2>
+<p class="help">Upload only fonts you are licensed to embed. Files are validated with fontTools, stored under a checksum, and never addressed by a browser-supplied path. A font referenced by any saved theme revision cannot be deleted, because that would make an archived design unreproducible.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Family</th><th>Face</th><th>File</th><th>Size</th><th>Licence note</th><th></th></tr></thead>
+    <tbody>
+      {% for asset in assets %}
+      <tr>
+        <td><strong>{{ asset.family }}</strong></td>
+        <td>{{ asset.weight }} {{ asset.style }}</td>
+        <td class="mono">{{ asset.stored_name }}</td>
+        <td>{{ (asset.size_bytes / 1024)|round(1) }} KB</td>
+        <td>{{ asset.license_note or 'No note recorded' }}</td>
+        <td>
+          <form method="post" action="/appearance/fonts/{{ asset.id }}/delete" class="inline" onsubmit="return confirm('Remove this font from the library?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn--danger btn--small" type="submit">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="small">No imported fonts yet. Installed system families are still available above.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<form method="post" action="/appearance/fonts" enctype="multipart/form-data" class="grid grid--4" style="margin:12px 0 26px;align-items:end">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <div class="field"><label for="font_file">Font file (.ttf, .otf, .ttc)</label><input id="font_file" name="file" type="file" accept=".ttf,.otf,.ttc" required></div>
+  <div class="field"><label for="license_note">Licence note</label><input id="license_note" name="license_note" type="text" maxlength="400" placeholder="Licence name / source / reference"></div>
+  <label class="field--inline"><input type="checkbox" name="license_acknowledged" value="1" required> I am licensed to use and embed this font.</label>
+  <div><button class="btn btn--ghost" type="submit">Import font</button></div>
+</form>
+
+<h2>Revision history</h2>
+<p class="help">Revisions are immutable. Saving another theme creates the next revision; nothing rewrites an edition that is already published.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Revision</th><th>Name</th><th>Created</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+      {% for revision in revisions %}
+      <tr>
+        <td class="mono">r{{ revision.revision }}</td>
+        <td>{{ revision.name }}</td>
+        <td>{{ revision.created_at|localtime(publication.timezone, '%d %b %Y %H:%M') }}</td>
+        <td>{% if revision.is_current %}<span class="badge badge--approved">current</span>{% else %}<span class="badge">archived</span>{% endif %}</td>
+        <td class="small">{{ revision.notes or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/appearance.js"></script>
+{% endblock %}

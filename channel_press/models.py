@@ -520,6 +520,58 @@ class PublicationSource(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class FontAsset(Base):
+    """An editor-uploaded font file held in the managed font library.
+
+    Assets are content-addressed and never addressed by a user-supplied path.
+    Shared assets can be referenced by several newspapers; deletion is only
+    allowed when no theme revision references the row.
+    """
+
+    __tablename__ = "font_assets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    family: Mapped[str] = mapped_column(String(160), default="")
+    style: Mapped[str] = mapped_column(String(20), default="normal")
+    weight: Mapped[int] = mapped_column(Integer, default=400)
+    filename: Mapped[str] = mapped_column(String(240), default="")
+    stored_name: Mapped[str] = mapped_column(String(240), unique=True)
+    relative_path: Mapped[str] = mapped_column(String(400), default="")
+    sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    license_note: Mapped[str] = mapped_column(String(400), default="")
+    license_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    uploaded_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class ThemeRevision(Base):
+    """Immutable snapshot of one newspaper's print design.
+
+    ``is_current`` marks the revision used for future drafts and previews.
+    Published editions pin the revision they rendered with, so changing the
+    newspaper's colours or fonts never rewrites an archived issue.
+    """
+
+    __tablename__ = "theme_revisions"
+    __table_args__ = (
+        UniqueConstraint("publication_id", "revision", name="uq_theme_revision"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    publication_id: Mapped[int] = mapped_column(
+        ForeignKey("publication_profiles.id", ondelete="CASCADE"), index=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(160), default="Standard edition")
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    colors_json: Mapped[str] = mapped_column(Text, default="{}")
+    fonts_json: Mapped[str] = mapped_column(Text, default="{}")
+    notes: Mapped[str] = mapped_column(String(400), default="")
+    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class PublicationEditor(Base):
     """Per-newspaper editorial access, independent of global user role."""
 
@@ -697,6 +749,12 @@ class Edition(Base):
     preview_updated_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     preview_dir: Mapped[str] = mapped_column(String(500), default="")
     preview_pdf_path: Mapped[str] = mapped_column(String(500), default="")
+    # Print design pinned to this edition (immutable once published).
+    theme_revision_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("theme_revisions.id"), nullable=True
+    )
+    theme_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    preview_theme_hash: Mapped[str] = mapped_column(String(64), default="")
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)

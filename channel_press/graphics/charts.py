@@ -85,8 +85,21 @@ def build_percentage_chart(claims: list[StoryClaim], title: str = "Figures cited
     return spec
 
 
-def render_chart_svg(spec: ChartSpec) -> str:
+def render_chart_svg(
+    spec: ChartSpec,
+    *,
+    palette: dict[str, str] | None = None,
+    font_family: str = "",
+) -> str:
     spec.validate()
+    colors = palette or {}
+    paper = colors.get("surface") or "#f4f1e9"
+    ink = colors.get("ink") or "#211f1d"
+    muted = colors.get("muted") or "#5b5852"
+    accent = colors.get("accent") or "#7b1f24"
+    grid = colors.get("hairline") or "#d3cec3"
+    display = font_family or "Georgia,serif"
+    caption = font_family or "Arial,sans-serif"
     width, height = spec.width, spec.height
     margin_left, margin_right, margin_top, margin_bottom = 150, 60, 110, 110
     plot_width = width - margin_left - margin_right
@@ -98,33 +111,33 @@ def render_chart_svg(spec: ChartSpec) -> str:
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="{_escape(spec.title)}">',
-        '<rect width="100%" height="100%" fill="#f4f1e9"/>',
-        f'<text x="{margin_left}" y="52" font-family="Georgia,serif" font-size="30" fill="#211f1d">{_escape(spec.title)}</text>',
-        f'<text x="{margin_left}" y="82" font-family="Arial,sans-serif" font-size="18" fill="#5b5852">Unit: {_escape(spec.unit)}</text>',
+        f'<rect width="100%" height="100%" fill="{_escape(paper)}"/>',
+        f'<text x="{margin_left}" y="52" font-family="{_escape(display)}" font-size="30" fill="{_escape(ink)}">{_escape(spec.title)}</text>',
+        f'<text x="{margin_left}" y="82" font-family="{_escape(caption)}" font-size="18" fill="{_escape(muted)}">Unit: {_escape(spec.unit)}</text>',
     ]
     for tick in range(0, 6):
         value = axis_max * tick / 5
         y = margin_top + plot_height - (value / axis_max) * plot_height
-        parts.append(f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="#d3cec3"/>')
+        parts.append(f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="{_escape(grid)}"/>')
         parts.append(
-            f'<text x="{margin_left - 12}" y="{y + 6:.1f}" text-anchor="end" font-family="Arial,sans-serif" '
-            f'font-size="17" fill="#5b5852">{value:g}</text>'
+            f'<text x="{margin_left - 12}" y="{y + 6:.1f}" text-anchor="end" font-family="{_escape(caption)}" '
+            f'font-size="17" fill="{_escape(muted)}">{value:g}</text>'
         )
     for index, point in enumerate(spec.points):
         bar_height = point.value / axis_max * plot_height
         x = margin_left + index * (bar_width + bar_gap)
         y = margin_top + plot_height - bar_height
-        parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}" fill="#7b1f24"/>')
+        parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}" fill="{_escape(accent)}"/>')
         parts.append(
             f'<text x="{x + bar_width / 2:.1f}" y="{y - 12:.1f}" text-anchor="middle" '
-            f'font-family="Georgia,serif" font-size="24" fill="#211f1d">{point.value:g}</text>'
+            f'font-family="{_escape(display)}" font-size="24" fill="{_escape(ink)}">{point.value:g}</text>'
         )
         parts.append(
             f'<text x="{x + bar_width / 2:.1f}" y="{height - margin_bottom + 30}" text-anchor="middle" '
-            f'font-family="Arial,sans-serif" font-size="19" fill="#211f1d">{_escape(point.label)}</text>'
+            f'font-family="{_escape(caption)}" font-size="19" fill="{_escape(ink)}">{_escape(point.label)}</text>'
         )
     parts.append(
-        f'<text x="{margin_left}" y="{height - 38}" font-family="Arial,sans-serif" font-size="15" fill="#5b5852">'
+        f'<text x="{margin_left}" y="{height - 38}" font-family="{_escape(caption)}" font-size="15" fill="{_escape(muted)}">'
         f'{_escape(spec.source_note)}</text>'
     )
     parts.append("</svg>")

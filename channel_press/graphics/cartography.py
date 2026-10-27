@@ -121,7 +121,13 @@ class MapResult:
     fallback: bool = False
 
 
-def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> MapResult:
+def render_locator_map(
+    story: StoryCluster,
+    profile: CartographicProfile,
+    *,
+    palette: dict[str, str] | None = None,
+    font_family: str = "",
+) -> MapResult:
     place = locate_place(story)
     if not place:
         return MapResult(
@@ -132,6 +138,17 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
             legend=profile.legend,
             fallback=True,
         )
+    colors = palette or {}
+    surface = colors.get("surface") or "#f4f1e9"
+    ink = colors.get("ink") or "#211f1d"
+    muted = colors.get("muted") or "#4a4842"
+    accent = colors.get("accent") or "#7b1f24"
+    land = colors.get("land") or colors.get("hairline") or "#d8d2c4"
+    land_highlight = colors.get("land_highlight") or colors.get("hair") or "#c4beb0"
+    border = colors.get("border") or colors.get("link") or "#4c4a45"
+    border_highlight = colors.get("primary") or "#2e2d2a"
+    map_font = font_family or "Arial,sans-serif"
+    display_font = font_family or "Georgia,serif"
     lon, lat = PLACE_COORDS[place]
     span_x = 10.5
     span_y = 4.0
@@ -144,7 +161,7 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" '
         f'aria-label="Locator map of {place}">',
-        '<rect width="100%" height="100%" fill="#f4f1e9"/>',
+        f'<rect width="100%" height="100%" fill="{_escape(surface)}"/>',
     ]
     drawn = 0
     for feature in datasets["countries"]["features"]:
@@ -158,8 +175,8 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
                 continue
             projected = [_project(x, y, view, width, height) for x, y in points]
             path = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in projected) + " Z"
-            fill = "#d8d2c4" if name != "Pakistan" else "#c4beb0"
-            stroke = "#4c4a45" if name != "Pakistan" else "#2e2d2a"
+            fill = land if name != "Pakistan" else land_highlight
+            stroke = border if name != "Pakistan" else border_highlight
             stroke_width = 1.0 if name != "Pakistan" else 1.8
             svg.append(f'<path d="{path}" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width}"/>')
             drawn += 1
@@ -171,8 +188,8 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
                     continue
                 if 60 < cx < width - 60 and 50 < cy < height - 60:
                     svg.append(
-                        f'<text x="{cx:.0f}" y="{cy:.0f}" font-family="Georgia,serif" font-size="30" '
-                        f'fill="#4a4842" text-anchor="middle" letter-spacing="2">{name.upper()}</text>'
+                        f'<text x="{cx:.0f}" y="{cy:.0f}" font-family="{_escape(display_font)}" font-size="30" '
+                        f'fill="{_escape(muted)}" text-anchor="middle" letter-spacing="2">{name.upper()}</text>'
                     )
     # Disputed areas from Natural Earth, drawn as a dashed convention layer.
     for feature in datasets["disputed"]["features"]:
@@ -186,24 +203,24 @@ def render_locator_map(story: StoryCluster, profile: CartographicProfile) -> Map
             projected = [_project(x, y, view, width, height) for x, y in points]
             path = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in projected) + " Z"
             svg.append(
-                f'<path d="{path}" fill="none" stroke="#7b1f24" stroke-width="2" stroke-dasharray="7 5"/>'
+                f'<path d="{path}" fill="none" stroke="{_escape(accent)}" stroke-width="2" stroke-dasharray="7 5"/>'
             )
     # Attribution is printed by the HTML figure caption below the map, not
     # inside the SVG: type drawn inside the frame either overlays coastlines or
     # forces an opaque band that wastes a sixth of the map area.
-    svg.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="10" fill="#7b1f24" stroke="#fff" stroke-width="3"/>')
+    svg.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="10" fill="{_escape(accent)}" stroke="#fff" stroke-width="3"/>')
     svg.append(
-        f'<text x="{px + 18:.0f}" y="{py - 12:.0f}" font-family="Arial,sans-serif" font-size="35" '
-        f'font-weight="bold" fill="#211f1d">{place}</text>'
+        f'<text x="{px + 18:.0f}" y="{py - 12:.0f}" font-family="{_escape(map_font)}" font-size="35" '
+        f'font-weight="bold" fill="{_escape(ink)}">{place}</text>'
     )
     # Scale bar in the lower-left corner, clear of the place label.
     km_per_degree = 111.32 * math.cos(math.radians(lat))
     map_km = (view[2] - view[0]) * km_per_degree
     scale_km = 200 if map_km > 900 else (100 if map_km > 450 else 50)
     scale_px = scale_km / map_km * width
-    svg.append(f'<rect x="40" y="{height - 34}" width="{scale_px:.0f}" height="7" fill="#211f1d"/>')
+    svg.append(f'<rect x="40" y="{height - 34}" width="{scale_px:.0f}" height="7" fill="{_escape(ink)}"/>')
     svg.append(
-        f'<text x="40" y="{height - 48}" font-family="Arial,sans-serif" font-size="30" fill="#211f1d">'
+        f'<text x="40" y="{height - 48}" font-family="{_escape(map_font)}" font-size="30" fill="{_escape(ink)}">'
         f'{scale_km} km</text>'
     )
     svg.append("</svg>")
