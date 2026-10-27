@@ -77,6 +77,41 @@ def test_fixture_to_printable_edition_and_epaper(db, demo_channel, owner, tmp_pa
     assert manifest["pdf"]["page_size_pt"] == {"width": 792, "height": 1224}
     assert manifest["quality"]["warnings"] == []
     assert manifest["quality"]["office_print_proof"] is True
+
+    # Page-fill diagnostics come from the real browser layout, not an estimate.
+    layout = manifest["quality"]["layout"]
+    assert layout["measured"] is True
+    assert layout["pages"]
+    assert layout["underfull_count"] == len(layout["underfull_pages"])
+    assert 0.0 < layout["average_fill_ratio"] <= 1.0
+    assert 0.0 <= layout["lowest_fill_ratio"] <= layout["average_fill_ratio"]
+    for page in layout["pages"]:
+        assert 0.0 <= page["fill_ratio"] <= 1.0
+        assert page["trailing_whitespace_px"] >= 0
+
+    # The release pins an immutable theme revision and ships it with both artefacts.
+    theme = manifest["theme"]
+    assert theme["schema"] == "channel_press.theme.v1"
+    assert theme["hash"]
+    assert theme["revision"] >= 1
+    assert theme["colors"]["accent"].startswith("#")
+    assert set(theme["fonts"]) >= {
+        "display",
+        "headline",
+        "section",
+        "standfirst",
+        "body",
+        "caption",
+        "numeric",
+    }
+    assert edition.theme_revision_id == theme["revision_id"]
+    assert json.loads(edition.theme_snapshot_json)["colors"] == theme["colors"]
+    theme_css = published.epaper_dir.joinpath("assets", "theme.css").read_text(encoding="utf-8")
+    assert "--accent:" in theme_css
+    assert theme["colors"]["accent"].lower() in theme_css.lower()
+    assert "--font-body:" in theme_css
+    for asset in theme["font_files"]:
+        assert published.epaper_dir.joinpath("assets", "fonts", asset["file"]).exists()
     assert manifest["pdf"]["sha256"] == _sha256(published.pdf_path)
     assert manifest["sources"]
     assert manifest["articles"]

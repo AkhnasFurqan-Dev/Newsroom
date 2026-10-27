@@ -70,6 +70,7 @@ class RenderResult:
     qa: dict
     meta: dict
     plan: EditionPlan | None = None
+    theme: object | None = None
 
 
 @dataclass
@@ -144,6 +145,67 @@ def _max_words(package: StoryPackage, *, front: bool = False) -> int:
     if package.section == "conflict":
         return 430
     return 470
+
+
+# A two-story row gives each report half the measure, so the pair must stay
+# within one tabloid page. The estimate deliberately errs towards the full-width
+# flow: a row that cannot fit leaves a blank page behind it in Paged.js.
+PAIRABLE_SECTIONS = {"national", "regional", "international", "defence"}
+ROW_WORD_BUDGET = 980
+ROW_SINGLE_BUDGET = 620
+# A section is only given a fresh tabloid page when its real reports are likely
+# to fill enough of it. Thin sections flow after the previous one instead of
+# leaving a mostly empty page (and no process ever invents filler copy).
+SECTION_BREAK_MIN_LOAD = 760
+# Comment and editorial copy is a newspaper's own voice and is not broken across
+# a page boundary after a line or two of body text. Giving the opinion page its
+# own opening also keeps a short editorial from being stranded at the foot of a
+# section page.
+OPINION_BREAK_SECTIONS = {"opinion"}
+SECTION_RECORD_SECTIONS = {"conflict", "regional", "defence", "national", "international"}
+
+
+def _package_load(package: StoryPackage) -> int:
+    """Rough vertical load of a report in half-page row measure."""
+    load = _words(package.body_paragraphs) + len((package.article.title or "").split()) * 2
+    if package.article.standfirst:
+        load += len(package.article.standfirst.split()) // 2
+    if package.media_path:
+        load += 90
+    if package.supporting_media_path:
+        load += 45
+    if package.map_result is not None:
+        load += 150
+    if package.chart_svg:
+        load += 110
+    if package.timeline_html:
+        load += 35 * package.timeline_html.count("<li")
+    if package.correction_note:
+        load += 25
+    return load
+
+
+def _row_fits(chunks: list[StoryChunk]) -> bool:
+    loads = [_package_load(chunk.package) for chunk in chunks]
+    return (
+        bool(loads)
+        and max(loads) <= ROW_SINGLE_BUDGET
+        and sum(loads) <= ROW_WORD_BUDGET
+    )
+
+
+def _section_needs_break(section: str, chunks: list[StoryChunk]) -> bool:
+    if not chunks:
+        return False
+    if section in OPINION_BREAK_SECTIONS:
+        return True
+    load = sum(_package_load(chunk.package) for chunk in chunks)
+    if section in SECTION_RECORD_SECTIONS and len(chunks) <= 2:
+        # These sections print a source/provenance record beneath the reports.
+        load += 90
+    if section == "briefs":
+        load += 80
+    return load >= SECTION_BREAK_MIN_LOAD
 
 
 def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
@@ -221,38 +283,45 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
         if (
             len(chunks) == 2
             and len({chunk.package.article.id for chunk in chunks}) == 2
+            and _row_fits(chunks)
         ):
             pair_sections.add(section)
         # A section whose reports each fit on one page can run two to a row.
         # Sections carrying a split report (count > 1) or the brief grid keep
         # the single-column flow.
         if (
-            section != "briefs"
+            section in PAIRABLE_SECTIONS
             and len(chunks) >= 2
             and all(chunk.count == 1 for chunk in chunks)
         ):
-            section_rows[section] = [chunks[i : i + 2] for i in range(0, len(chunks), 2)]
+            rows: list[list[StoryChunk]] = []
+            pending: list[StoryChunk] = []
+            for chunk in chunks:
+                if pending and not _row_fits([*pending, chunk]):
+                    rows.append(pending)
+                    pending = [chunk]
+                else:
+                    pending.append(chunk)
+                if len(pending) == 2:
+                    rows.append(pending)
+                    pending = []
+            if pending:
+                # A lone final report stays full width when the previous row is
+                # already substantial; pairing it with a re-shuffled row would
+                # make one row overflow the page.
+                rows.append(pending)
+            if len(rows) != len(chunks):
+                section_rows[section] = rows
 
-    # Sections that must open their own page: the two feature/opinion families
-    # carry a distinctive layout and the brief grid is a fixed four-column page.
-    standalone = {"analysis", "opinion", "briefs"}
-    previous = ""
+    # Give a section its own page only when its real content can justify one.
+    # Thin sections flow behind the previous section; Paged.js then places the
+    # section head with its first report (``break-after: avoid``) instead of
+    # leaving an almost empty page. The first interior section always opens a
+    # page after the front.
     for index, (section, _) in enumerate(ordered):
-        if index == 0:
-            section_break[section] = True
-            previous = section
-            continue
-        if section in standalone or previous in standalone:
-            section_break[section] = True
-            previous = section
-            continue
-        # Let Paged.js fill the real page. Estimating section heights here used
-        # to force a page break that the rendered rows did not need, leaving
-        # pages holding only a section record or the last report of a section.
-        # Non-standalone sections flow; their heads carry ``break-after: avoid``
-        # so a head never sits alone at the foot of a page.
-        section_break[section] = False
-        previous = section
+        section_break[section] = index == 0 or _section_needs_break(
+            section, section_chunks.get(section, [])
+        )
     return PageChunkPlan(
         lead=lead,
         lead_chunks=lead_chunks,
@@ -539,12 +608,18 @@ def build_print_html(
     plan: EditionPlan,
     *,
     demo_edition: bool,
+    theme=None,
 ) -> tuple[str, PageChunkPlan]:
     _assign_source_refs(plan)
     _attach_citations(plan, demo_edition=demo_edition)
     chunk_plan = build_page_plan(plan)
     date_label, window_label, cutoff_label = _edition_labels(edition, plan.profile.timezone)
     css = CSS_PATH.read_text(encoding="utf-8")
+    if theme is None:
+        from ..theming import compile_theme
+
+        theme = compile_theme(db, plan.profile, edition)
+    css = css + "\n/* publication theme */\n" + theme.css + "\n"
     paged_js = (VENDOR_DIR / "paged.polyfill.min.js").read_text(encoding="utf-8")
     postprocess_js = (TEMPLATE_DIR / "postprocess.js").read_text(encoding="utf-8")
     demo_note = (
@@ -795,10 +870,29 @@ def inspect_pdf(pdf_path: Path, meta: dict | None = None) -> dict:
     if page_count == 0:
         warnings.append("PDF contains no pages.")
     meta_pages = (meta or {}).get("pages", [])
+    layout_pages: list[dict] = []
     if meta_pages:
         for report in meta_pages:
             if report.get("blank"):
                 warnings.append(f"Browser layout reported blank page {report.get('page')}.")
+            fill = report.get("fill_ratio")
+            if isinstance(fill, (int, float)):
+                layout_pages.append(
+                    {
+                        "page": report.get("page"),
+                        "template": report.get("template", ""),
+                        "section": report.get("section", ""),
+                        "fill_ratio": round(float(fill), 3),
+                        "used_height_px": report.get("used_height_px"),
+                        "content_height_px": report.get("content_height_px"),
+                        "trailing_whitespace_px": report.get("trailing_whitespace_px"),
+                        "underfull": bool(report.get("underfull")),
+                    }
+                )
+            if report.get("orphan_section_head"):
+                warnings.append(
+                    f"Page {report.get('page')} carries a section heading with no reports."
+                )
             if report.get("overflow"):
                 details = []
                 for item in report["overflow"]:
@@ -815,10 +909,29 @@ def inspect_pdf(pdf_path: Path, meta: dict | None = None) -> dict:
                     f"Browser layout reported overflow on page {report.get('page')}: "
                     f"{'; '.join(sorted(set(details)))}."
                 )
+    underfull = [page for page in layout_pages if page["underfull"]]
+    fills = [page["fill_ratio"] for page in layout_pages]
+    layout = {
+        "pages": layout_pages,
+        "underfull_pages": [page["page"] for page in underfull],
+        "underfull_count": len(underfull),
+        "average_fill_ratio": round(sum(fills) / len(fills), 3) if fills else 0.0,
+        "lowest_fill_ratio": min(fills) if fills else 0.0,
+        "trailing_whitespace_px": sum(
+            int(page.get("trailing_whitespace_px") or 0) for page in layout_pages
+        ),
+        "measured": bool(layout_pages),
+        "note": (
+            "Fill is the share of the printed content box occupied by real text, "
+            "figures and tables. Underfull pages are reported for the editor; only "
+            "blank pages, overflowing geometry and orphaned section headings fail proofing."
+        ),
+    }
     return {
         "page_count": page_count,
         "pages": page_reports,
         "warnings": sorted(set(warnings)),
+        "layout": layout,
         "expected_size_pt": {"width": 792, "height": 1224},
         "office_print_proof": not warnings,
     }
@@ -833,21 +946,32 @@ def compile_edition(
     media_dir: Path | None = None,
     progress: Callable[[str, str], None] | None = None,
 ) -> RenderResult:
-    from ..models import PublicationProfile
+    from ..publications import publication_for_edition
+    from ..theming import compile_theme
 
-    profile = db.get(PublicationProfile, 1) or db.query(PublicationProfile).first()
+    profile = publication_for_edition(db, edition)
     if profile is None:
         raise RuntimeError("Publication profile is missing; run setup first.")
     if progress:
         progress("layout_prepare", "Building page plan from the real edition articles")
+    theme = compile_theme(db, profile, edition, font_dir=output_dir)
     plan = create_plan(
         db,
         edition,
         profile,
         media_dir=media_dir,
         download_media=False,
+        palette=theme.palette,
+        chart_font=theme.font_stacks["numeric"],
+        map_font=theme.font_stacks["caption"],
     )
-    html, _ = build_print_html(db, edition, plan, demo_edition=demo_edition)
+    html, _ = build_print_html(
+        db,
+        edition,
+        plan,
+        demo_edition=demo_edition,
+        theme=theme,
+    )
     if db.info.get("durable_worker"):
         db.commit()
     result = render_edition_pdf(
@@ -861,4 +985,5 @@ def compile_edition(
     if progress:
         progress("layout_complete", f"PDF validated with {result.qa.get('page_count', 0)} pages")
     result.plan = plan
+    result.theme = theme
     return result

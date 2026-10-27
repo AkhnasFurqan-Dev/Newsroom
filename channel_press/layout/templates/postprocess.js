@@ -73,6 +73,7 @@
       const pageRect = pageEl.getBoundingClientRect();
       const contentRect = content.getBoundingClientRect();
       const all = Array.prototype.slice.call(content.querySelectorAll("*"));
+      let usedBottom = contentRect.top;
       all.forEach(function (el) {
         const tag = (el.tagName || "").toLowerCase();
         if (tag === "script" || tag === "style" || tag === "svg" || tag === "path") { return; }
@@ -85,6 +86,13 @@
           if (only && (only.hasAttribute("data-ref") || only.hasAttribute("data-split-from") || only.hasAttribute("data-split-to"))) { return; }
         }
         const hasText = el.children.length === 0 && textOf(el).length > 0;
+        const isMedia = tag === "img" || tag === "svg" || tag === "figure" || tag === "table" || tag === "canvas";
+        if ((hasText || isMedia) && !el.closest(".front-footer")) {
+          const contentRectForMeasure = el.getBoundingClientRect();
+          if (contentRectForMeasure.bottom > usedBottom) {
+            usedBottom = Math.min(contentRectForMeasure.bottom, contentRect.bottom);
+          }
+        }
         if (hasText) {
           const fs = parseFloat(window.getComputedStyle(el).fontSize || "0");
           if (fs > 0) {
@@ -133,6 +141,17 @@
       record.blank = record.chars < 40 && record.images === 0;
       record.width_px = Math.round(pageRect.width);
       record.height_px = Math.round(pageRect.height);
+      const contentHeight = Math.max(0, contentRect.height);
+      const usedHeight = Math.max(0, usedBottom - contentRect.top);
+      record.content_height_px = Math.round(contentHeight);
+      record.used_height_px = Math.round(usedHeight);
+      record.fill_ratio = contentHeight > 0
+        ? Math.round(Math.max(0, Math.min(1, usedHeight / contentHeight)) * 1000) / 1000
+        : 0;
+      record.trailing_whitespace_px = Math.round(Math.max(0, contentRect.bottom - usedBottom));
+      record.underfull = !record.blank && record.chars >= 40 && record.fill_ratio < 0.62;
+      record.orphan_section_head = template !== "sources" &&
+        Boolean(content.querySelector(".section-head")) && stories.length === 0;
       pageRecords.push(record);
     });
 

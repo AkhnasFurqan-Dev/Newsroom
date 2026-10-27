@@ -122,6 +122,11 @@
     <div class="audit-box">
       <div><strong>Pages:</strong> {{ quality.get('page_count', '—') }}</div>
       <div><strong>Warnings:</strong> {{ quality.get('warnings', [])|join('; ') or 'none' }}</div>
+      {% set layout = quality.get('layout', {}) %}
+      {% if layout.get('measured') %}
+      <div><strong>Page fill:</strong> average {{ (layout.get('average_fill_ratio', 0) * 100)|round(0) }}%, lowest {{ (layout.get('lowest_fill_ratio', 0) * 100)|round(0) }}%</div>
+      <div><strong>Underfull pages:</strong> {% if layout.get('underfull_pages') %}{{ layout.get('underfull_pages')|join(', ') }} (reported, not a proof failure){% else %}none{% endif %}</div>
+      {% endif %}
       <div><strong>PDF bytes:</strong> {{ manifest.get('pdf', {}).get('bytes', '—') }}</div>
       <div><strong>PDF SHA:</strong> <span class="mono">{{ (manifest.get('pdf', {}).get('sha256') or '—')[:16] }}</span></div>
     </div>
