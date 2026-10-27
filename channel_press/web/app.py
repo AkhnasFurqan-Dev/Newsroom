@@ -116,6 +116,7 @@ from ..models import (
     EditionArticle,
     EditionPage,
     EditionSchedule,
+    ExternalReference,
     Job,
     JobStep,
     PostFragment,
@@ -146,6 +147,7 @@ from ..media.service import (
     rank_media,
     update_media_caption,
 )
+from ..research import ResearchError, accept_reference, reject_reference, research_reference
 from ..editorial.moderation import (
     CLASSIFICATION_LABELS,
     CLASSIFIER_VERSION,
@@ -1692,6 +1694,13 @@ def story_detail(
         .order_by(SourcePost.posted_at.asc())
     ).all()
     article = db.scalar(select(Article).where(Article.story_id == story.id).order_by(Article.revision.desc()))
+    external = list(
+        db.scalars(
+            select(ExternalReference)
+            .where(ExternalReference.story_id == story.id)
+            .order_by(ExternalReference.accessed_at.desc(), ExternalReference.id.desc())
+        )
+    )
     return render(
         request,
         "story.html",
@@ -1705,7 +1714,84 @@ def story_detail(
             timeline=timeline,
             fragments=rows,
             article=article,
+            external=external,
         ),
+    )
+
+
+@app.post("/stories/{story_id}/research")
+def story_research_add(
+    story_id: int,
+    url: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Fetch one editor-supplied public page as a candidate reference."""
+    story = db.get(StoryCluster, story_id)
+    if story is None:
+        raise HTTPException(404, "Story not found.")
+    _channel_or_404(db, story.channel_id, user, "editor")
+    try:
+        reference, created = research_reference(db, story, url)
+    except ResearchError as exc:
+        db.rollback()
+        return _redirect(f"/stories/{story.id}", error=str(exc))
+    audit(
+        db,
+        user,
+        "research.candidate_added" if created else "research.candidate_reused",
+        object_type="external_reference",
+        object_id=reference.id,
+        detail={"story": story.id, "status": reference.review_status, "host": reference.publisher},
+    )
+    db.commit()
+    return _redirect(
+        f"/stories/{story.id}",
+        message="Research candidate fetched. It stays out of print until an editor accepts it."
+        if created
+        else "That page is already recorded for this story.",
+    )
+
+
+@app.post("/stories/{story_id}/research/{reference_id}/review")
+def story_research_review(
+    story_id: int,
+    reference_id: int,
+    decision: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    story = db.get(StoryCluster, story_id)
+    if story is None:
+        raise HTTPException(404, "Story not found.")
+    _channel_or_404(db, story.channel_id, user, "editor")
+    reference = db.get(ExternalReference, reference_id)
+    if reference is None or reference.story_id != story.id:
+        raise HTTPException(404, "Research reference not found for this story.")
+    if decision not in {"accept", "reject"}:
+        return _redirect(f"/stories/{story.id}", error="Unknown review decision.")
+    if decision == "accept":
+        accept_reference(db, reference)
+        action = "research.accepted"
+    else:
+        reject_reference(db, reference)
+        action = "research.rejected"
+    audit(
+        db,
+        user,
+        action,
+        object_type="external_reference",
+        object_id=reference.id,
+        detail={"story": story.id, "host": reference.publisher},
+    )
+    db.commit()
+    return _redirect(
+        f"/stories/{story.id}",
+        message="Reference accepted as editorial context."
+        if decision == "accept"
+        else "Reference rejected and excluded from print.",
     )
 
 

@@ -17,6 +17,7 @@ from ..models import (
     ModelRun,
     PostFragment,
     PublicationProfile,
+    PublicationSource,
     ReviewFlag,
     SourcePost,
     StoryClaim,
@@ -25,7 +26,9 @@ from ..models import (
 from ..timeutil import utcnow
 from .audit import audit_article
 from .claims import build_claims, contains_injection, strip_injection
+from .entities import parse_entity_json
 from .moderation import attribution_issues, profanity_details, redact_profanity
+from .quality import quality_review
 
 
 def _snapshot(article: Article) -> str:
@@ -272,14 +275,34 @@ def draft_story(
                 message=message[:1000],
             )
         )
-    profile = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
-    publications = {
-        name.strip()
-        for name in (channel.title if channel else "", profile.name if profile else "")
-        if name and name.strip()
-    }
+    publication_names = _publication_names(db, story)
+    quality = quality_review(
+        title=result.title,
+        deck=result.deck,
+        standfirst=result.standfirst,
+        body=result.body,
+        genre=article.genre,
+        publication_names=publication_names,
+        source_text="\n".join(source.text for source in bundle.sources),
+    )
+    if quality["status"] in {"review", "block"}:
+        article.status = "needs_review"
+        messages = [
+            finding["message"]
+            for finding in quality["findings"]
+            if finding["severity"] in {"review", "block_publish"}
+        ]
+        db.add(
+            ReviewFlag(
+                article_id=article.id,
+                story_id=story.id,
+                category="quality",
+                severity="block_publish" if quality["status"] == "block" else "review",
+                message=("Independent quality pass: " + "; ".join(messages[:6]))[:1000],
+            )
+        )
     attribution_findings: list[str] = []
-    for publication in publications:
+    for publication in publication_names:
         attribution_findings.extend(attribution_issues(output_text, publication))
     if attribution_findings:
         article.status = "needs_review"
@@ -356,6 +379,7 @@ def draft_story(
     audit["model"] = result.model
     audit["prompt_version"] = result.prompt_version
     audit["fallback_reason"] = fallback_reason
+    audit["quality"] = quality
     article.audit_json = json.dumps(audit, ensure_ascii=False, default=str)
     article.style_metrics_json = json.dumps(audit.get("style", {}), ensure_ascii=False)
     if audit.get("unsupported"):
@@ -390,11 +414,32 @@ def draft_story(
 
 
 def _risk_tags(story: StoryCluster) -> list[str]:
-    try:
-        data = json.loads(story.entity_json or "{}")
-        return list(data.get("risk_tags") or [])
-    except json.JSONDecodeError:
-        return []
+    tags = parse_entity_json(story.entity_json).get("risk_tags") or []
+    return [str(tag) for tag in tags if isinstance(tag, str)]
+
+
+def _publication_names(db: Session, story: StoryCluster | None) -> list[str]:
+    """Every newspaper identity a story could be attributed to.
+
+    A draft must never turn any of these names into a reporter, eyewitness or
+    employer. All linked titles are checked, not just the default paper.
+    """
+    names: set[str] = set()
+    if story is not None:
+        channel = db.get(Channel, story.channel_id)
+        if channel is not None and channel.title.strip():
+            names.add(channel.title.strip())
+        linked = db.scalars(
+            select(PublicationProfile.name)
+            .join(PublicationSource, PublicationSource.publication_id == PublicationProfile.id)
+            .where(PublicationSource.channel_id == story.channel_id)
+        )
+        names.update(name.strip() for name in linked if name and name.strip())
+    default = db.get(PublicationProfile, 1) or db.scalar(select(PublicationProfile).limit(1))
+    if default is not None and default.name.strip():
+        names.add(default.name.strip())
+    return sorted(names)
+
 
 
 def save_editor_edit(
@@ -455,6 +500,40 @@ def reaudit_article(db: Session, article: Article) -> dict:
         story_risk_tags=_risk_tags(story) if story else [],
     )
     audit["audited_at"] = utcnow().isoformat()
+    quality = quality_review(
+        title=article.title,
+        deck=article.deck,
+        standfirst=article.standfirst,
+        body=body,
+        genre=article.genre,
+        publication_names=_publication_names(db, story),
+        source_text=corpus,
+    )
+    audit["quality"] = quality
+    # Re-running the audit must not pile up repeated quality flags: replace
+    # the open one with this run's verdict.
+    db.execute(
+        delete(ReviewFlag).where(
+            ReviewFlag.article_id == article.id,
+            ReviewFlag.category == "quality",
+            ReviewFlag.status == "open",
+        )
+    )
+    if quality["status"] in {"review", "block"}:
+        messages = [
+            finding["message"]
+            for finding in quality["findings"]
+            if finding["severity"] in {"review", "block_publish"}
+        ]
+        db.add(
+            ReviewFlag(
+                article_id=article.id,
+                story_id=article.story_id,
+                category="quality",
+                severity="block_publish" if quality["status"] == "block" else "review",
+                message=("Independent quality pass: " + "; ".join(messages[:6]))[:1000],
+            )
+        )
     article.audit_json = json.dumps(audit, ensure_ascii=False, default=str)
     db.flush()
     return audit

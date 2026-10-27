@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 
 STOPWORDS = {
@@ -92,6 +93,25 @@ def headline_from_text(text: str, max_len: int = 92) -> str:
     if base:
         base = base[0].upper() + base[1:]
     return base.rstrip(".")
+
+
+def parse_entity_json(raw: str | None) -> dict:
+    """Read a story's entity payload, tolerating both stored shapes.
+
+    Older clusters store a bare list of names; newer ones store a dict with
+    places, risk tags and status detail. Readers must handle either without
+    failing a layout build.
+    """
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list):
+        names = [str(item) for item in data if isinstance(item, str) and item.strip()]
+        return {"names": names, "places": names}
+    return {}
 
 
 def infer_section(text: str, topic: str | None = None) -> str:

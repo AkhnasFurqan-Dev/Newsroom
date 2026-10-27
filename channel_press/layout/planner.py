@@ -442,7 +442,12 @@ def create_plan(
                 }
             )
     for package in packages:
-        for ref in db.scalars(select(ExternalReference).where(ExternalReference.story_id == package.story.id)):
+        for ref in db.scalars(
+            select(ExternalReference).where(
+                ExternalReference.story_id == package.story.id,
+                ExternalReference.review_status == "accepted",
+            )
+        ):
             appendix_entries.append(
                 {
                     "ref": "",

@@ -159,6 +159,18 @@
         <td>
           {% if post.inclusion_status == 'included' %}<span class="badge badge--published">Included</span>{% else %}<span class="badge">Excluded</span>{% endif %}
           <div class="small">{{ classification_labels.get(post.classification, post.classification) }}{% if post.classification_reason %} · {{ exclusion_reasons.get(post.classification_reason, post.classification_reason.replace('_', ' ')) }}{% endif %}</div>
+          {% set signals = post.classification_signals_json|json_loads([]) %}
+          {% if signals %}
+          <details class="small">
+            <summary>Why this classification</summary>
+            <ul>
+              {% for signal in signals %}
+              <li><strong>{{ signal.kind|replace('_', ' ') }}</strong>: {{ signal.values|join(', ') }}</li>
+              {% endfor %}
+            </ul>
+            <div class="muted">Classifier {{ post.classification_version }}{% if post.classified_at %} · {{ post.classified_at|shortdate }}{% endif %}</div>
+          </details>
+          {% endif %}
           {% if post.moderation_status and post.moderation_status != 'none' %}<div class="small error-text">Moderation: {{ post.moderation_status.replace('_', ' ') }}</div>{% endif %}
           {% if post.editor_override %}<div class="small">Editor override: {{ post.editor_override }}</div>{% endif %}
         </td>

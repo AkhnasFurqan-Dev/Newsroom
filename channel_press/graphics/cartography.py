@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass
 
 from ..config import BASE_DIR
+from ..editorial.entities import parse_entity_json
 from ..models import CartographicProfile, StoryCluster
 
 GEODATA = BASE_DIR / "assets" / "geodata"
@@ -102,11 +103,8 @@ def _project(lon: float, lat: float, view, width: int, height: int) -> tuple[flo
 
 def locate_place(story: StoryCluster) -> str | None:
     text = story.canonical_title + " " + (story.summary or "")
-    try:
-        entities = json.loads(story.entity_json or "{}")
-        places = entities.get("places") or []
-    except json.JSONDecodeError:
-        places = []
+    entities = parse_entity_json(story.entity_json)
+    places = [str(place) for place in (entities.get("places") or []) if isinstance(place, str)]
     for place in places + list(PLACE_COORDS):
         if place in PLACE_COORDS and place in text:
             return place

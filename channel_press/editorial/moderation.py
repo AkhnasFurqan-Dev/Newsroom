@@ -405,6 +405,7 @@ class ModerationResult:
     quoted_profanity: bool = False
     routed_to_review: bool = False
     flags: list[str] = field(default_factory=list)
+    signals: list[dict] = field(default_factory=list)
 
 
 def _iter_profanity_hits(text: str):
@@ -629,6 +630,78 @@ def _signal_counts(normalized: str) -> tuple[int, int]:
     return total, events
 
 
+_NUMBER_SIGNAL = re.compile(r"(?<![\w.])\d{1,4}(?:[.,]\d+)?(?![\w.])")
+
+
+def _unique_matches(pattern: re.Pattern[str], text: str, *, limit: int = 8) -> list[str]:
+    """First distinct matched forms, lower-cased and bounded.
+
+    Signals are persisted and shown to editors as evidence for a
+    classification decision; they never replace the original post text.
+    """
+    found: list[str] = []
+    for match in pattern.finditer(text):
+        value = re.sub(r"\s+", " ", match.group(0)).strip().casefold()
+        if value and value not in found:
+            found.append(value)
+        if len(found) >= limit:
+            break
+    return found
+
+
+def _classification_signals(
+    *,
+    text: str,
+    normalized: str,
+    language: str,
+    profanity: str,
+    quoted: bool,
+    media_kinds: list[str],
+    deleted: bool,
+    forwarded: bool,
+    injected: bool,
+) -> list[dict]:
+    """Explain a deterministic classification with bounded matched signals."""
+    signals: list[dict] = []
+
+    def add(kind: str, values: list[str]) -> None:
+        values = [value for value in values if value]
+        if values:
+            signals.append({"kind": kind, "values": values[:8]})
+
+    add("event_terms", _unique_matches(_EVENT_SIGNAL, normalized))
+    roman = [token for token in normalized.split() if token in _ROMAN_STRONG]
+    add("roman_urdu_terms", list(dict.fromkeys(roman)))
+    add("numbers", _unique_matches(_NUMBER_SIGNAL, normalized))
+    add("weak_terms", _unique_matches(_WEAK_SIGNAL, text))
+    add("media", sorted(set(media_kinds)))
+    add("urls", _unique_matches(_URL, text, limit=3))
+    if _GREETING_SIGNAL.match(text) or _GREETING_URDU.match(text) or _GREETING_PREFIX.match(text):
+        add("greeting", ["greeting_or_condolence"])
+    if _SLOGAN_SIGNAL.match(text):
+        add("slogan", ["generic_slogan"])
+    add("promotion", _unique_matches(_PROMOTION, normalized))
+    add("engagement_bait", _unique_matches(_ENGAGEMENT_BAIT, normalized))
+    if _EMOJI.search(text):
+        add("emoji", ["emoji_present"])
+    if injected:
+        add("injection", ["instruction_injection_neutralised"])
+    if language != "en":
+        add("language", [language])
+    if profanity != "none":
+        # Never persist the matched term itself; the severity is enough for an
+        # editor and keeps abusive wording out of secondary logs.
+        add("profanity", [profanity])
+    if quoted:
+        add("quoted_profanity", ["quoted"])
+    if forwarded:
+        add("forwarded", ["telegram_forward"])
+    if deleted:
+        add("deleted", ["deleted_at_source"])
+    return signals
+
+
+
 def classify_message(message: NormalizedMessage, *, rights_ok: bool) -> ModerationResult:
     """Deterministically classify one source post. Untrusted input in, flags out."""
     from .claims import contains_injection  # local import avoids any import cycle
@@ -654,6 +727,7 @@ def classify_message(message: NormalizedMessage, *, rights_ok: bool) -> Moderati
             quoted_profanity=details["quoted"],
             routed_to_review="moderation_review" in flags,
             flags=flags,
+            signals=signals,
         )
 
     kinds = _media_kinds(message)
@@ -664,6 +738,17 @@ def classify_message(message: NormalizedMessage, *, rights_ok: bool) -> Moderati
     weak = len(_WEAK_SIGNAL.findall(text))
     injected = contains_injection(text)
     has_media = bool(kinds)
+    signals = _classification_signals(
+        text=text,
+        normalized=normalized,
+        language=language,
+        profanity=profanity,
+        quoted=details["quoted"],
+        media_kinds=kinds,
+        deleted=message.deleted,
+        forwarded=bool(message.forward_origin),
+        injected=injected,
+    )
 
     # 1-4: hard gates first.
     if message.deleted:

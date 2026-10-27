@@ -50,6 +50,37 @@
     {% else %}
       <p class="muted">No fragments attached.</p>
     {% endfor %}
+
+    <h2 id="research">Research context</h2>
+    <p class="help">Fetch one public HTML page as background. Research is untrusted data: it never becomes claim evidence, and a candidate stays out of the printed appendix until an editor accepts it.</p>
+    {% if can.edit %}
+    <form method="post" action="/stories/{{ story.id }}/research" class="field-row" style="margin-bottom:12px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input name="url" type="url" placeholder="https://example.org/report" required style="min-width:280px">
+      <button type="submit">Fetch candidate</button>
+    </form>
+    {% endif %}
+    {% for ref in external %}
+      <div class="card" style="margin-bottom:8px">
+        <div class="split">
+          <strong>{{ ref.title or ref.url }}</strong>
+          <span class="badge badge--{{ 'approved' if ref.review_status == 'accepted' else ('rejected' if ref.review_status == 'rejected' else 'review') }}">{{ ref.review_status|status_label }}</span>
+        </div>
+        <div class="small"><a href="{{ ref.url }}" rel="noopener nofollow noreferrer">{{ ref.url }}</a></div>
+        <div class="small">{{ ref.publisher }}{% if ref.http_status %} · HTTP {{ ref.http_status }}{% endif %} · accessed {{ ref.accessed_at|shortdate }}</div>
+        {% if ref.excerpt %}<p class="small">{{ ref.excerpt[:280] }}{% if ref.excerpt|length > 280 %}…{% endif %}</p>{% endif %}
+        {% if ref.terms_note %}<div class="small muted">{{ ref.terms_note }}</div>{% endif %}
+        {% if can.edit and ref.review_status != 'accepted' %}
+        <form method="post" action="/stories/{{ story.id }}/research/{{ ref.id }}/review" class="field-row" style="margin-top:6px">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <button type="submit" name="decision" value="accept" class="btn--small">Accept context</button>
+          <button type="submit" name="decision" value="reject" class="btn--danger btn--small">Reject</button>
+        </form>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="muted">No external references recorded for this story.</p>
+    {% endfor %}
   </div>
 
   <aside>

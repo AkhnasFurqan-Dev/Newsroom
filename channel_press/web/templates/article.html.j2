@@ -165,6 +165,21 @@
       <div class="small">Stock phrases: {{ audit_data.get('style', {}).get('stock_phrases', [])|join(', ') or 'none' }}</div>
       <div class="small">Repeated openings: {{ audit_data.get('style', {}).get('repeated_openings', [])|join(', ') or 'none' }}</div>
       {% endif %}
+      {% set quality = audit_data.get('quality') %}
+      {% if quality %}
+      <h3 style="font-size:14px">Independent quality pass</h3>
+      <div class="small">Verdict: <strong>{{ quality.get('status', 'pass')|status_label }}</strong> · {{ quality.get('body_words', 0) }} words · lead {{ quality.get('lead_words', 0) }} words</div>
+      {% set quality_findings = quality.get('findings', []) %}
+      {% if quality_findings %}
+      <ul class="small">
+        {% for finding in quality_findings %}
+        <li><span class="badge badge--{{ 'review' if finding.severity == 'review' else ('block_publish' if finding.severity == 'block_publish' else 'note') }}">{{ finding.severity|status_label }}</span> {{ finding.message }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="small muted">No quality findings.</div>
+      {% endif %}
+      {% endif %}
     </div>
 
     <h2>Status decision</h2>
@@ -204,8 +219,13 @@
     {% endif %}
 
     <h2>External context</h2>
+    <p class="help">Only accepted references are eligible for the printed appendix. A candidate is unfetched editorial context, never claim evidence.</p>
     {% for ref in external %}
-      <div class="small" style="margin-bottom:6px"><a href="{{ ref.url }}" rel="noopener nofollow">{{ ref.title or ref.url }}</a><br>{{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate }}</div>
+      <div class="small" style="margin-bottom:8px">
+        <span class="badge badge--{{ 'approved' if ref.review_status == 'accepted' else ('rejected' if ref.review_status == 'rejected' else 'review') }}">{{ ref.review_status|status_label }}</span>
+        <a href="{{ ref.url }}" rel="noopener nofollow noreferrer">{{ ref.title or ref.url }}</a><br>{{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate }}
+        {% if story %}<div><a href="/stories/{{ story.id }}#research">Review reference</a></div>{% endif %}
+      </div>
     {% else %}
       <p class="muted small">No external references recorded.</p>
     {% endfor %}

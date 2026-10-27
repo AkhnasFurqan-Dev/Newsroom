@@ -253,6 +253,7 @@ def import_payload(
                 exclusion_reason=reason or "",
                 classification=moderation.classification,
                 classification_reason=moderation.reason,
+                classification_signals_json=json.dumps(moderation.signals, ensure_ascii=False),
                 classification_version=CLASSIFIER_VERSION,
                 classified_at=utcnow(),
                 moderation_status=moderation.profanity,
@@ -306,6 +307,13 @@ def import_payload(
                 post.exclusion_reason = override_reason
                 post.classification = classification
                 post.classification_reason = f"editor_override:{post.editor_override}"
+                post.classification_signals_json = json.dumps(
+                    [
+                        *moderation.signals,
+                        {"kind": "editor_override", "values": [post.editor_override]},
+                    ],
+                    ensure_ascii=False,
+                )
                 post.classification_version = CLASSIFIER_VERSION
                 post.classified_at = utcnow()
             else:
@@ -313,6 +321,7 @@ def import_payload(
                 post.exclusion_reason = reason or ""
                 post.classification = moderation.classification
                 post.classification_reason = moderation.reason
+                post.classification_signals_json = json.dumps(moderation.signals, ensure_ascii=False)
                 post.classification_version = CLASSIFIER_VERSION
                 post.classified_at = utcnow()
                 post.moderation_status = moderation.profanity
@@ -517,6 +526,13 @@ def reclassify_posts(
             post.exclusion_reason = override_reason
             post.classification = classification
             post.classification_reason = f"editor_override:{post.editor_override}"
+            post.classification_signals_json = json.dumps(
+                [
+                    *moderation.signals,
+                    {"kind": "editor_override", "values": [post.editor_override]},
+                ],
+                ensure_ascii=False,
+            )
             post.classification_version = CLASSIFIER_VERSION
             post.classified_at = utcnow()
             stats.overrides += 1
@@ -535,6 +551,10 @@ def reclassify_posts(
                     classification="duplicate",
                     reason="repeated_copy",
                     score=0,
+                    signals=[
+                        *moderation.signals,
+                        {"kind": "duplicate", "values": ["repeated_copy"]},
+                    ],
                 )
                 reason = "repeated_copy"
                 stats.duplicates += 1
@@ -542,6 +562,7 @@ def reclassify_posts(
             post.exclusion_reason = reason or ""
             post.classification = moderation.classification
             post.classification_reason = moderation.reason
+            post.classification_signals_json = json.dumps(moderation.signals, ensure_ascii=False)
             post.classification_version = CLASSIFIER_VERSION
             post.classified_at = utcnow()
             post.moderation_status = moderation.profanity

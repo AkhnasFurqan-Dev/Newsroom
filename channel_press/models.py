@@ -202,6 +202,7 @@ class SourcePost(Base):
     exclusion_reason: Mapped[str] = mapped_column(String(80), default="")
     classification: Mapped[str] = mapped_column(String(40), default="editorially_relevant")
     classification_reason: Mapped[str] = mapped_column(String(240), default="")
+    classification_signals_json: Mapped[str] = mapped_column(Text, default="[]")
     classification_version: Mapped[str] = mapped_column(String(60), default="legacy")
     classified_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
     moderation_status: Mapped[str] = mapped_column(String(30), default="none")
@@ -363,6 +364,13 @@ class ExternalReference(Base):
     excerpt: Mapped[str] = mapped_column(Text, default="")
     provider: Mapped[str] = mapped_column(String(80), default="manual")
     reachable: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Research references stay "candidate" until an editor accepts them. Only
+    # accepted references may reach the printed appendix, and even then they
+    # remain editorial context rather than claim evidence.
+    review_status: Mapped[str] = mapped_column(String(20), default="accepted", index=True)
+    http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    content_sha256: Mapped[str] = mapped_column(String(64), default="")
+    terms_note: Mapped[str] = mapped_column(String(300), default="")
 
 
 class Article(Base):
