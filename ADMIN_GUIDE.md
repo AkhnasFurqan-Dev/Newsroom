@@ -45,6 +45,13 @@ required (see §5).
 4. Start the server; `init-db` runs Alembic migrations on startup.
 5. Run `diagnostics` and inspect the reported revision.
 
+The theme migration (`d8a4b1c2e345`) only adds `theme_revisions`,
+`font_assets` and three nullable/defaulted edition columns. Existing published
+PDFs are untouched; an older edition with no pinned theme falls back to the
+publication's current theme if it is ever re-rendered, so re-render as a new
+version rather than overwriting an archived issue. The Phase D migration
+(`c7a1e2f3d4b5`) is applied in the same upgrade.
+
 Dependencies are pinned in `pyproject.toml`. Review release notes before changing
 pins, and test a fixture build after any upgrade.
 
@@ -97,6 +104,34 @@ parameter cannot widen access.
 - A schedule belongs to one newspaper. A due run expands that paper's enabled
   sources and records the source list on the job and edition. Removing a source
   later does not rewrite the edition's source record.
+
+### Print themes and imported fonts
+
+Each newspaper has one **current** theme revision and any number of archived
+revisions. Owners and editors manage them on **Appearance**.
+
+- Palette, fonts and metrics live in `theme_revisions`; imported files live in
+  `font_assets`. Both are ordinary database rows covered by the normal backup.
+- A save inserts a new immutable revision and marks it current. Apart from
+  clearing the previous `is_current` marker, it does not edit an existing
+  revision's palette, fonts or metrics. A released edition pins
+  `theme_revision_id` plus a full snapshot, so the archive remains reproducible
+  even if the profile or theme is edited later.
+- Imported fonts are limited to 12 MB and `.ttf`, `.otf` or `.ttc`. The app
+  validates the outline tables and basic Latin coverage with fontTools, requires
+  a licence acknowledgement, and stores the file under a SHA-256-derived name in
+  `data\fonts\`. The browser never supplies a storage path. fontTools is a core
+  dependency: without it the Appearance screen cannot list installed families
+  and rejects uploads. `channel-press diagnostics` prints the installed version.
+- A font referenced by a saved revision cannot be deleted. The Appearance screen
+  reports how many revisions use it. A missing file (for example after a partial
+  manual restore) is flagged as unavailable; re-import the same bytes and the
+  content-addressed row recovers.
+- Theme proofs in `data\theme-proofs\` are cached render outputs. They are safe
+  to delete; the app regenerates them on demand. They are not part of a backup.
+- Theme revisions are per publication, not global. Switching newspapers switches
+  the design; creating a second paper creates its own default revision on first
+  visit to Appearance.
 
 ### Users page
 
@@ -440,6 +475,7 @@ Writes `data\backups\channel-press-<timestamp>.zip` containing:
 - a consistent SQLite snapshot (`channel_press.db`);
 - `secret.key` unless `--without-secret`;
 - `media/` unless `--without-media`;
+- `fonts/` (imported font files referenced by theme revisions);
 - `backup-manifest.json` with schema, revision, counts and included components.
 
 Published `output/` folders are **not** included. Archive them separately if the
@@ -514,15 +550,19 @@ Baseline measurements (fixture composer, no model, Chrome rendering):
 
 | Workload | Wall time | Output |
 | --- | --- | --- |
-| sample (26 messages) | ~6 s | 15 articles, 5 pages |
-| 30 posts (fixture composer) | 5.95 s | 17 articles, 8 pages |
-| 70 posts (fixture composer) | 7.97 s | 32 articles, 11 pages |
-| 150 posts (fixture composer) | 10.53 s | 49 articles, 15 pages |
+| sample (26 messages) | ~6.4 s | 15 articles, 5 pages |
+| 30 posts (fixture composer) | 9.6 s cold CLI run | 17 articles, 7 pages |
+| 70 posts (fixture composer) | 10.8 s cold CLI run | 27 articles, 8 pages |
+| 150 posts (fixture composer) | 12.1 s cold CLI run | 28 articles, 9 pages |
 | 30 posts (real Ollama, `qwen2.5:3b-instruct`) | 57–62 s | 17 articles, 8 pages, peak VRAM 2213 MiB |
+| 150 posts, cold run | ~870 MB peak process group including Chrome | 9 pages |
 
-Peak process-group working set for the 150-post build was about 276 MB, with
-about 0.68 GB system RAM delta including Chrome. The idle web server used about
-62 MB and no measurable CPU over 10 seconds. GPU was unused.
+Cold CLI runs include database creation, fixture import, drafting, Chrome
+rendering and publication. The 150-post run spent 9.7 s inside the pipeline.
+The idle web server used about 62 MB and no measurable CPU over 10 seconds. GPU
+was unused for fixture composition and layout. Capacity fixtures repeat a few
+topics, so their pages end shorter; the manifest reports those underfull pages
+as diagnostics, not as failures.
 
 Practical guidance:
 
@@ -543,6 +583,11 @@ Practical guidance:
   the model added contextual proper nouns. Review capacity is a real operational
   constraint, not a defect to bypass.
 - FFmpeg is absent; OpenCV handles video frames.
+- Font embedding is a licensing decision for the owner. The app records the
+  acknowledgement but cannot verify that an uploaded file's licence actually
+  permits print/PDF embedding.
+- Specimen proofs require Chrome/Edge or Playwright Chromium, like the PDF
+  renderer. A proof is a PNG specimen, not a rendered news article.
 - Public hosting and QR landing pages are not configured.
 - The SQLite + local-folder design targets one workstation, not concurrent
   multi-user scale.

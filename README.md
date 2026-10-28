@@ -49,11 +49,17 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
   timelines and locator maps from bundled Natural Earth data.
 - **Print engine.** Paged.js pagination rendered through installed Chrome, a
   distinct tabloid front page, 3–4 column interiors, continuation labels, source
-  records, a source appendix, embedded fonts and automated overflow/blank-page
-  checks.
+  records, a source appendix, embedded fonts, measured per-page fill and
+  automated overflow/blank-page/orphan-head checks.
+- **Per-newspaper appearance.** Each paper carries an immutable, revisioned print
+  identity: nine palette colours with HEX controls and presets, seven type roles,
+  print metrics, contrast/ink warnings and real specimen proofs. Fonts come from
+  installed families or validated `.ttf`/`.otf`/`.ttc` imports kept in a managed
+  library. A released edition pins the exact theme and bundled font files it was
+  printed with, and the e-paper uses the same palette and typography.
 - **Newsroom UI.** Source desk, rights declarations, stories, article editing and
-  review, edition page studio, schedules, jobs, branding, users, audit and
-  diagnostics.
+  review, edition page studio, schedules, jobs, branding, appearance, users, audit
+  and diagnostics.
 - **Multiple newspapers on one computer.** Each publication keeps its own
   branding, source list, schedules, drafts, editions, archive and editor
   membership. The header selector switches the working newspaper; the server
@@ -284,13 +290,44 @@ Key modules live under `channel_press/`:
 | `ai` | Prompt templates, fixture/Ollama providers, audit, style lint |
 | `media` | Asset cache, ranking, derivatives, frame extraction |
 | `graphics` | Charts, timelines, cartography |
-| `layout` | Edition plan, chunking, print HTML, PDF rendering, QA |
+| `layout` | Edition plan, chunking, print HTML, PDF rendering, theme proof, QA |
 | `publishing` | Atomic release, manifest, checksums, e-paper |
 | `scheduling` | Jobs, watermarks, leases, worker |
 | `web` | FastAPI routes, Jinja templates, session/CSRF/role checks |
 
+Theming lives in `channel_press/theming.py` and the managed font library in
+`channel_press/fonts.py`.
+
 Data stays under `data/` (SQLite database, media originals and derivatives,
-secret key, logs) and `output/` (published editions). Both are gitignored.
+imported fonts, theme proofs, secret key, logs) and `output/` (published
+editions). Both are gitignored.
+
+## Print identity and themes
+
+Each newspaper owns its print design rather than sharing a global stylesheet.
+The **Appearance** screen edits nine palette colours (masthead, accent, body ink,
+paper, rules and so on), seven type roles (masthead, headline, section,
+standfirst, body, caption, numbers) and bounded print metrics such as body size
+and leading.
+
+- Colours are entered as HEX values or loaded from a named preset. The screen
+  reports low-contrast text and paper/ink combinations that would waste ink or
+  become unreadable in print.
+- Fonts are chosen from families actually installed on the machine, or imported
+  as `.ttf`, `.otf` or `.ttc` after file validation and a licence confirmation.
+  The app reports missing weights/styles and glyph coverage instead of faking
+  bold or silently substituting a face.
+- Saving creates a new immutable **theme revision**. A draft uses the current
+  revision; a released edition pins the exact revision, palette, font files and
+  metrics it rendered with. Editing the theme afterwards never rewrites an
+  archived issue.
+- **Render specimen proof** produces a real tabloid PNG from the same
+  `print.css` and compiled theme CSS used by the PDF, so the preview is not a
+  browser approximation. Proofs are cached by theme hash and regenerated when
+  the theme changes.
+- The PDF, page PNGs, e-paper, charts, maps, captions and QR labels all consume
+  the same palette and font stacks. QR modules remain black on white for scan
+  reliability.
 
 ## Publication truthfulness
 
@@ -323,17 +360,24 @@ Chrome installed, Ollama 0.40.9 with `qwen2.5:3b-instruct` (1841 MB).
 | Scenario | Result |
 | --- | --- |
 | Idle web server | ~62 MB working set, 0 CPU seconds over a 10 s sample, 13 threads |
-| 30-post fixture build | 5.95 s, 17 stories/articles, 8 pages |
-| 70-post fixture build | 7.97 s, 32 stories/articles, 11 pages |
-| 150-post fixture build | 10.53 s wall (~5.2 s Python CPU), 49 stories/articles, 15 pages, ~276 MB peak process-group working set |
+| sample fixture (26 messages), fixture composer | 6.4 s, 15 stories/articles, 5 pages |
+| 30-post fixture build | 9.6 s cold CLI run, 17 stories/articles, 7 pages |
+| 70-post fixture build | 10.8 s cold CLI run, 27 stories/articles, 8 pages |
+| 150-post fixture build | 12.1 s cold CLI run (9.7 s inside the pipeline), 28 stories/articles, 9 pages, ~870 MB peak process group including Chrome |
 | 30-post **real Ollama** build | 57–62 s, 17 stories, 17 articles, 8 pages, no fixture fallback, peak VRAM 2213 MiB |
 | PDF page size | exactly 792 × 1224 pt (11 × 17 in) on every page |
 | GPU | unused for fixture composition and layout; used only while drafting |
 
+The fixture rows were re-measured on 2026-10-27 with a cold data directory, so
+they include database creation, fixture import, composition, Chrome rendering
+and publication. Page counts depend on the copy: the capacity fixtures repeat a
+small number of topics, so their pages end shorter than the sample edition's.
+Their manifests report underfull pages as diagnostics and no proof warnings.
+
 These are measurements, not throughput promises. The 30-post real-model run is
-the only real-model capacity result; 70- and 150-post real-model runs were not
-performed. Run `diagnostics` and one real build before relying on a tight
-cutoff-to-release window.
+the only real-model capacity result; its page count predates the current page
+packing. 70- and 150-post real-model runs were not performed. Run `diagnostics`
+and one real build before relying on a tight cutoff-to-release window.
 
 ## Tests
 
@@ -349,7 +393,7 @@ cutoff-to-release window.
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 
-Last recorded run: **202 passed, 2 skipped** in 105 s. The skips are the two
+Last recorded run: **277 passed, 2 skipped** in 345 s. The skips are the two
 Ollama live tests because no model server was running. The suite renders actual
 PDFs, checks exact page geometry, verifies searchable text, inspects every page
 proof for blank/overflow defects and confirms the e-paper bundle and checksums.

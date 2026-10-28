@@ -1034,3 +1034,205 @@ rights grant was verified, and no real newspaper was published in this phase.
   visible but it is not automatically retried as a standalone source job.
 - Per-source weight changes apply to the next build; an already published edition
   keeps its source record and manifest.
+
+## Phase D — independent quality pass, classification signals and bounded research (2026-10-27)
+
+Commit `d917642` (`feat(editorial): independent quality pass, classification signals and bounded research`).
+
+- Post typing now records whether an included post is a report, correction,
+  casualty/emergency alert, commentary or other signal, and the story/edition
+  planner can use it without re-parsing free text. Editorial quality is checked
+  by a separate deterministic pass instead of asking one model to approve its own
+  article.
+- Research is bounded and licence-aware. A candidate external reference is kept
+  separate from accepted evidence; only an editor-accepted, reachable and
+  validated URL can enter the source appendix. URL validation rejects literal
+  loopback/private/link-local targets and redirects to them, and robots/legal
+  notes are shown to the editor.
+- The editorial workspace exposes candidate versus accepted evidence and the
+  quality flags with provenance. Opinion/analysis copy is labelled as such in
+  print and e-paper.
+- Focused verification: `tests/test_editorial_quality.py` and
+  `tests/test_research.py` (17 tests), `tests/test_editorial.py`,
+  `tests/test_moderation_media_lifecycle.py`, `tests/test_publications.py`,
+  `tests/test_layout.py` and `tests/test_editorial_workspace.py` all passed.
+- Not verified in this phase: live external research against a real publisher,
+  live Telegram collection and a real Ollama run. Fixture results are not claimed
+  as live-network evidence.
+
+## Print appearance and Phase E page composition (2026-10-27)
+
+Commits `12d9544` (`feat(theme): per-newspaper print identity with immutable
+revisions`) and `2393025` (`feat(layout): measured page fill, tighter packing and
+theme-aware rendering`).
+
+**Theme and fonts**
+
+- Added `fonts.py` (installed-family discovery with a path/mtime cache, validated
+  `.ttf/.otf/.ttc` import up to 12 MB, content-addressed storage under
+  `data/fonts`, face resolution without synthetic bold, glyph coverage) and
+  `theming.py` (palette, seven font roles, bounded metrics, presets, contrast and
+  ink warnings, compiled CSS, immutable revisions, edition pinning).
+- Added `FontAsset` and `ThemeRevision` plus `edition.theme_revision_id`,
+  `theme_snapshot_json` and `preview_theme_hash`. Migration
+  `d8a4b1c2e345_print_themes.py` is additive and was validated against a fresh
+  temporary database and a copy of the live database before being applied.
+- `print.css`, charts, maps, captions and QR labels take the compiled theme.
+  QR modules stay black on white. The e-paper gets `assets/theme.css`, bundled
+  font files and the same palette/typography; its manifest and the edition
+  manifest record the theme hash, revision and fonts.
+- Added the **Appearance** workspace: presets, HEX pickers, contrast checks,
+  seven font roles, per-section accents, metrics, licence-confirmed uploads,
+  import deletion protection and a real specimen proof rendered through Chrome
+  from the same `print.css`.
+- A released edition pins its theme before publish; a later theme edit never
+  rewrites it. Draft/preview staleness compares the current theme hash.
+- Current migration state of the live local database: `d8a4b1c2e345 (head)`.
+  `diagnostics` after the upgrade still reports 1 user, 2 channels, 1,687 source
+  posts, 81 stories, 81 articles, 7 editions, 8 jobs and 0 pending jobs. Backup
+  before migration:
+  `data/backups/channel-press-before-theme-20261027-190438.db`.
+
+**Page composition**
+
+- The planner only pairs two reports into a half-page row when the estimated
+  load fits (`ROW_WORD_BUDGET=980`, `ROW_SINGLE_BUDGET=620`) and the section
+  family is `national`, `regional`, `international` or `defence`.
+- Thin sections flow after the previous section instead of forcing an almost
+  empty page; a section gets a fresh page only at `SECTION_BREAK_MIN_LOAD=760`.
+  Editorial/opinion copy opens its own page so a short piece is not split after
+  one line at the foot of a section page.
+- Browser post-processing measures fill from real leaf text/figure/table
+  bottoms. `inspect_pdf` reports `quality.layout` with per-page fill, underfull
+  pages, average/lowest fill, trailing whitespace and whether the measurement is
+  real. Underfull pages are diagnostics; blank pages, overflow and orphaned
+  section headings remain proof failures.
+- Before/after on the synthetic fixture edition: 7 pages with four underfull
+  pages (57%, 20%, 21%, 38%) and an orphan-head warning became 5 pages with
+  average fill 0.791, no underfull page reported and no proof warning. Page 3
+  (Conflict & War + Analysis) and page 4 (Opinion + Briefs + evidence) were
+  inspected as full-page PNGs; the previous one-line opinion split is gone.
+- Added backup coverage for imported fonts so a restore cannot orphan a theme
+  revision. `cli backup` now includes `fonts/` and the manifest records
+  `included_fonts`.
+
+**Focused verification during this phase**
+
+- `python -m pytest tests/test_theming.py tests/test_layout.py tests/test_web.py`
+  → 29 passed.
+- `python -m pytest tests/test_appearance_web.py` → 9 passed, including a real
+  Playwright specimen proof (1056×1632 PNG) with the named palette swatch strip.
+- `python -m pytest tests/test_cli_backup.py` → 2 passed (font archive test).
+- `python -m pytest tests/test_edition_e2e.py::test_fixture_to_printable_edition_and_epaper`
+  → passed with the new theme and page-fill assertions.
+
+**Not claimed**
+
+- No live Telegram or Ollama run in this phase; no real-network research.
+- The specimen proof and PDF use the installed browser, but the proof is a
+  labelled specimen, not a news article.
+- Font embedding licensing remains the owner's responsibility; the app records
+  the acknowledgement but cannot verify the licence.
+
+## Phase F — end-to-end verification and defect repair (2026-10-28)
+
+**Scope.** Verify the complete fixture-to-PDF/e-paper route after the retrospective
+theme and page-fill work, repair what verification exposed, re-measure capacity and
+refresh the user-facing documentation. No production table, migration, Telegram
+session or archived edition was reset or rewritten.
+
+**Defects found during verification and fixed**
+
+1. **Same-channel stories were folded by the cross-source dedupe.** The
+   `merge_cross_source_stories` matcher added for multi-source papers compared
+   section and title tokens but not the channel. On the 150-post fixture set it
+   reduced 28 clustered stories to 8 printed reports, merging unrelated local
+   reports such as "Editorial: Local services in Sialkot…" with the Gilgit
+   editorial. It now only considers candidates from another channel, leaving
+   within-channel deduplication to `build_stories`. Regression test:
+   `tests/test_publications.py::test_cross_source_merge_never_folds_two_reports_from_the_same_channel`.
+   Recorded in `docs/decisions/0010-cross-source-dedupe-scope.md`. The 30-, 70-
+   and 150-post sets now print 17, 27 and 28 stories instead of 17, 8 and 8.
+   Earlier capacity rows in this log were recorded while this bug was active.
+2. **Three-column body inside a half-width Conflict & War row.** The
+   `.template-conflict_visual .story__body { columns: 3 }` rule overrode the row
+   rule, so each 4.9 in story was set in three ~1.5 in columns with two or three
+   words a line and stretched justification. The rule is now scoped to full-width
+   conflict reports. A Playwright test loads the real `print.css` and asserts
+   computed `column-count` of 2 for row members and 3 for a full-width report.
+   Page 3 was re-rendered and inspected at full size.
+3. **`cli demo` never marked setup complete.** The documented five-minute demo
+   created the owner, publication profile and edition, but its dashboard kept
+   showing "Setup is not complete". The command now records the setup flag, and
+   `tests/test_cli_demo.py` asserts both the flag and the absence of the banner.
+4. **fontTools was missing from the dependencies.** The Appearance screen
+   therefore reported Georgia, Segoe UI and every other installed family as
+   "not installed", and every upload was rejected. `fonttools==4.55.3` is now a
+   core dependency; discovery on this machine returns 377 faces across 190
+   families. The on-disk discovery cache is keyed by the parser version so a
+   cache written without fontTools cannot survive installing it
+   (`tests/test_theming.py::test_installed_font_cache_is_keyed_by_the_font_parser`).
+   `diagnostics` and preflight now report the fontTools version. Appearance was
+   rechecked in the browser: all seven roles resolve to installed faces, and the
+   remaining notes are truthful Urdu-coverage notes, not missing-font warnings.
+
+**Verified artifact**
+
+- PDF: `output/the-pakistan-news/2026-10-21-manual-011-v1/sample_issue.pdf`
+  (edition 12, issue 11, version 1, published 2026-10-28 09:40 UTC).
+- E-paper: `output/the-pakistan-news/2026-10-21-manual-011-v1/epaper/index.html`
+  with `assets/theme.css`, five page JPEGs, text edition and source appendix.
+- Manifest: 5 pages, every page 792 × 1224 pt, 1,142,089 bytes, theme revision 1
+  pinned, average measured fill 0.783, `underfull_pages: []`,
+  `warnings: []`, `office_print_proof: true`.
+- Pages 3 (Conflict & War + Analysis), 4 (Opinion & Editorial, Briefs, evidence)
+  and 5 (Sources & provenance) were rendered to PNG and inspected at full size.
+  The previous three-column garbling on page 3 is gone. Page 4 ends at fill 0.626
+  because the fixture copy runs out; that is reported, not padded with invented
+  filler.
+
+**Capacity re-measured (cold CLI runs, 2026-10-28)**
+
+| Posts | Stories/articles | Pages | Wall | Peak process group (with Chrome) |
+| --- | --- | --- | --- | --- |
+| 30 | 17 | 7 | 9.57 s | 869 MB |
+| 70 | 27 | 8 | 10.81 s | 874 MB |
+| 150 | 28 | 9 | 12.11 s | 861 MB |
+
+Each run used a fresh data directory, so the wall time includes database creation,
+fixture import, drafting, Chrome rendering and publication; the 150-post run spent
+9.7 s inside the pipeline. Average fill was 0.659, 0.781 and 0.739 with underfull
+pages reported as diagnostics (4–6, 3 and 7, 3/7/9) and no proof warnings. The
+capacity fixtures repeat a small number of topics, so their pages genuinely end
+shorter than the sample edition's.
+
+**Full test suite**
+
+- Command: `.\.venv\Scripts\python.exe -m pytest -o addopts="" -q`
+- Result: **277 passed, 2 skipped, 0 failed** in 345 s, exit 0 (2026-10-28).
+- The two skips are the live Ollama tests (`tests/test_ollama_live.py`); no model
+  server was running. The run includes the slow sample/30/70/150 PDF builds, the
+  Playwright specimen proof, the Playwright column test and the new CLI/font
+  regressions.
+
+**Documentation**
+
+- `README.md`: theme and page-fill capabilities, corrected capacity table,
+  current test count, demo paths.
+- `ADMIN_GUIDE.md`: re-measured capacity, fontTools requirement and diagnostics.
+- `USER_MANUAL.md`: Appearance screenshot and current procedures.
+- `TROUBLESHOOTING.md`: font parser missing, stale discovery cache, upload and
+  theme-cache recoveries.
+- `docs/decisions/0008`, `0009`, `0010`; screenshots regenerated from the current
+  build (dashboard, editions archive, edition detail, e-paper viewer, front page)
+  and a new Appearance capture.
+
+**Not claimed**
+
+- No live Telegram collection and no real Ollama drafting ran in this phase; the
+  two Ollama tests were skipped and no real-network research was performed.
+- The specimen proof is a labelled specimen page, not a news article.
+- Capacity times are measurements on this laptop, not throughput promises; peak
+  memory includes every Chrome process started for the build.
+- Font embedding licensing remains the owner's decision; the app records the
+  acknowledgement but cannot verify the licence.

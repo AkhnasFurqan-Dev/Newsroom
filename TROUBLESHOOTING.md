@@ -420,12 +420,13 @@ those wrappers are excluded from the check, so an overflow message always refers
 a real visible element. Fix the copy or the chunking and re-render; do not reduce
 the font below the configured minimum.
 
-**A page holds only a source record or one short report** — non-standalone
-sections now continue on the same page, and the source record is kept unbreakable.
-A section record that does not fit moves whole to the next page and the following
-section fills the rest. If a page is still mostly empty, re-render; if the record
-itself is unusually long, trim the message list in the plan or move the section to
-a standalone family.
+**A page is mostly empty** — the edition screen reports a measured fill ratio.
+Underfull pages are advisory, not fabricated content: the app will not invent
+copy to fill space. A section whose estimated load is small flows after the
+previous section, and editorial/opinion copy opens its own page so it is not
+stranded at the foot of another section. If a page is still very empty, trim the
+window, merge thin sections through **Section order**, or accept the shorter
+issue. Do not add unsourced filler.
 
 **The masthead handle or footer still says “demonstration” or “synthetic
 fixtures”** — the edition is built from live posts but the publication profile
@@ -439,9 +440,15 @@ when QA warnings exist. Only an owner should override with code-level
 `allow_quality_warnings=True`, and the reason must be documented. The normal path
 is to fix the layout.
 
-**Fonts missing or substituted** — the pipeline uses installed Windows fonts
-(Georgia, Segoe UI, Arial) and embeds them. If a font is missing, install it or
-change the print CSS. Verify embedded fonts in the manifest after the change.
+**Fonts missing or substituted** — open **Appearance**. Each role shows whether
+the selected face is available and the app reports missing weights, missing
+italics and glyph coverage. Choose an installed family or import a licensed font.
+If a font was available at build time but is missing later, the edition is still
+valid because the PDF embeds the rendered subsets and the bundle carries the
+referenced files. Check the manifest `theme.font_files` entries, the edition's
+root `fonts\` folder when imports were used, and the e-paper's `assets\fonts\`.
+To re-render an older edition, install the family again or re-import the licensed
+file.
 
 **Chrome failed to launch** — install Google Chrome, close a hung Chrome process,
 and re-run. The renderer first uses installed Google Chrome, then Microsoft
@@ -465,6 +472,58 @@ take several minutes because each article is drafted, audited and then laid
 out; do not start a second worker pass while one is active. Use
 `.\.venv\Scripts\python.exe -m channel_press.operations owners` to verify
 managed ownership.
+
+## Appearance, fonts and theme problems
+
+**I changed a colour or font but the edition looks the same** — a saved theme
+applies to the next render, not to an already-rendered preview or published PDF.
+Save the revision, then build or re-render the edition. A draft preview whose
+theme hash no longer matches shows as stale. Published editions deliberately keep
+the exact theme they were printed with.
+
+**The archived edition changed after a theme edit** — that should not happen.
+Verify the edition has `theme_revision_id` and `theme_snapshot_json` set, and
+that you are opening an existing version rather than re-rendering a new version
+with the same title. Version 2 is a new edition and may use a newer theme.
+
+**A palette warning blocks the save** — the check reports unreadable contrast or
+paper that is too dark for print. Lighten the paper, darken body ink, or raise
+contrast between text and surface. The warning is about the printed result; do
+not override it to make a screen-only look.
+
+**Every font says “not installed” or uploads fail asking for fonttools** — the
+font parser is missing from this Python environment, so no font file can be
+inspected. Install the project dependencies with
+`.\.venv\Scripts\python.exe -m pip install -e .`; fontTools is a core dependency.
+Reload Appearance afterwards. The discovery cache is keyed by the parser
+version, so previously cached "unavailable" results refresh automatically.
+`channel-press diagnostics` lists the fontTools version.
+
+**A font upload is rejected** — the file must be `.ttf`, `.otf` or `.ttc`, at most
+12 MB, with valid TrueType/OpenType tables, outline data and basic Latin capitals.
+A renamed executable or a bitmap-only font is rejected. Confirm the licence
+checkbox and add a short licence note before saving.
+
+**An imported font says “missing”** — the row exists but the file is not in
+`data\fonts\`. Restore a backup that includes `fonts/` or re-import the exact
+licensed file. The app stores by content hash, so importing the same bytes
+recovers the asset. Do not delete files from `data\fonts\` by hand.
+
+**“Cannot delete this font”** — one or more saved theme revisions still use it.
+Switch those newspapers to another face and save new revisions; an archived
+revision that references the font remains reproducible and is intentionally
+protected.
+
+**The specimen proof fails** — the proof uses the same Chrome/Edge/Chromium
+launch path as the PDF renderer. Install Google Chrome or run
+`.\.venv\Scripts\python.exe -m playwright install chromium`, then retry. Proofs
+are cached by theme hash; deleting `data\theme-proofs\` only forces a fresh
+render.
+
+**E-paper colours differ from the PDF** — check that the bundle contains
+`assets\theme.css` and that `manifest.json` has a `theme` block. An older bundle
+created before theming may not carry these files; re-render as a new version
+rather than editing the published folder.
 
 ## E-paper and QR problems
 
@@ -562,9 +621,12 @@ independent reporting.
 - **Archive is not a Channel Press backup** — the zip lacks
   `backup-manifest.json` or `channel_press.db`. Do not extract arbitrary archives
   over `data\`.
-- **Restore succeeded but editions are missing** — backups include the database and
-  media, not `output\`. Rebuild editions, or restore the output folder separately
-  from your own archive.
+- **Restore succeeded but editions are missing** — backups include the database,
+  media and imported fonts, not `output\`. Rebuild editions, or restore the output
+  folder separately from your own archive.
+- **Appearance says imported fonts are missing after restore** — the archive may
+  predate font backup support. Re-import the licensed files; revisions keep their
+  font rows and recover by content hash.
 - **Login fails after restore** — the restored database may contain different
   password hashes. Use the owner account from that backup or reset with
   `set-password`.

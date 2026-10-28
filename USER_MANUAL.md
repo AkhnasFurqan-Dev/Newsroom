@@ -412,8 +412,13 @@ failure.
 
 The panel reports page count, paper size, print-proof status and warnings. The
 per-page table lists paper size, text characters, images, links, minimum font
-size and whether the page is blank. Any unexplained warning is a defect to fix
-before release, not a cosmetic detail.
+size and whether the page is blank. It also shows **measured page fill** — the
+share of the printed content box occupied by real text, figures and tables —
+plus the underfull-page list and trailing whitespace. A low fill ratio is an
+editorial/design signal, not fabricated content: the app never fills space with
+invented copy. Blank pages, overflow and a section heading with no reports under
+it remain hard proof failures. Any unexplained warning is a defect to fix before
+release, not a cosmetic detail.
 
 ## 9. Reading and printing the edition
 
@@ -553,6 +558,45 @@ Owners can edit **Branding**:
 
 Changes apply to the next build. Existing editions keep their profile snapshot.
 
+### Print appearance: colours and fonts
+
+Open **Appearance** (owners and editors of the newspaper). This controls the
+printed paper and e-paper, separately from the web dashboard.
+
+![Appearance](docs/images/appearance.png)
+
+1. **Start from a preset** or edit the palette. Each colour field has a HEX input
+   and a picker. The **Print checks** card warns about unreadable contrast, very
+   dark paper, or a palette that would consume excessive ink.
+2. **Choose fonts for seven roles**: masthead/display, article headline, section
+   heading, standfirst/deck, body, caption/byline and numbers/infographics. The
+   lists contain families actually present on this computer plus fonts your
+   team has imported.
+3. **Adjust type metrics** only within the allowed range. Body size cannot be
+   reduced below the print minimum; the form rejects out-of-range values rather
+   than producing unreadable type.
+4. Use **Render specimen proof** to see a real tabloid page rendered with the
+   current palette and fonts. The proof is a specimen, not a news article, and
+   is intentionally labelled as such.
+5. Enter a **Revision name** and optional **What changed**, then **Save as new
+   theme revision**.
+
+Every save is a new immutable revision. Drafts and previews use the current
+revision and become stale when it changes. A published edition keeps the exact
+theme, palette, metrics and bundled font files it was printed with, so changing
+the design later never alters an archived PDF or e-paper issue. Revision history
+stays in the database; a proof is cached by theme hash and regenerated after an
+edit.
+
+**Importing fonts.** Use the **Imported font library** section only for fonts you
+are licensed to embed. The app accepts `.ttf`, `.otf` and `.ttc` files up to
+12 MB, checks that the file is a real outline font with basic Latin capitals, and
+stores it under a content checksum. It reports missing weights, missing italic
+faces and characters the selected font cannot draw. If a family has no true bold
+or italic face, the app uses the nearest real face and tells you; it never fakes
+synthetic bold. Uploading a font requires a licence confirmation, which is stored
+with the asset. A font used by any saved theme revision cannot be deleted.
+
 ## 13. Account
 
 **Account** lets you change your display name and password. Enter the current
@@ -564,6 +608,8 @@ never displays or exports them.
 ```text
 data\channel_press.db       SQLite database (WAL mode)
 data\media\                 imported originals, downloaded source cache and derivatives
+data\fonts\                 imported font files, stored by content checksum
+data\theme-proofs\          rendered specimen proofs and their HTML
 data\secret.key             local session signing key (not in Git)
 data\logs\                  worker logs
 output\<publication>\<edition folder>\
@@ -571,8 +617,11 @@ output\<publication>\<edition folder>\
   print.html
   edition.html
   pages\page-01.png ...
+  fonts\                    copied when the theme references imported fonts
   epaper\index.html
   epaper\text.html
+  epaper\assets\theme.css   compiled palette and typography
+  epaper\assets\fonts\      imported font files referenced by the theme
   manifest.json
   checksums.json
 ```
