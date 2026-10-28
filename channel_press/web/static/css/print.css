@@ -313,9 +313,12 @@ a { color: inherit; text-decoration: none; }
 .template-opinion .story__body { columns: 2; font-size: calc(var(--body-size) * 1.08); font-style: normal; }
 .template-opinion .story__headline { font-size: calc(31pt * var(--headline-scale)); }
 .template-opinion .story__standfirst { font-style: italic; }
-.template-conflict_visual .story__body { columns: 3; }
-.template-conflict_visual .story__headline { font-size: calc(31pt * var(--headline-scale)); }
-.template-conflict_visual .story__media img { max-height: 5.6in; width: 100%; object-fit: cover; }
+/* Section-family type applies to full-width reports only. A row or pair member
+   is about 4.9in wide; three columns there set two or three words per line and
+   stretch justification, so row members keep their own smaller scale. */
+.template-conflict_visual .story-flow:not(.story-flow--rows):not(.story-flow--pair) > .story .story__body { columns: 3; }
+.template-conflict_visual .story-flow:not(.story-flow--rows):not(.story-flow--pair) > .story .story__headline { font-size: calc(31pt * var(--headline-scale)); }
+.template-conflict_visual .story-flow:not(.story-flow--rows):not(.story-flow--pair) > .story .story__media img { max-height: 5.6in; width: 100%; object-fit: cover; }
 .template-defence.section--multi .story__media img { max-height: 2.7in; }
 .template-briefs .brief-grid { columns: 4; column-gap: 0.24in; column-rule: 1px solid var(--hairline); }
 .template-briefs .story--brief { break-inside: avoid; border-bottom: 1px solid var(--hairline); padding-bottom: 0.11in; margin-bottom: 0.11in; }

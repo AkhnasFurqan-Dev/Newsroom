@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import fitz
+import pytest
 
 from channel_press.layout.engine import (
     build_page_plan,
@@ -211,3 +212,53 @@ def test_pdf_inspection_summarises_real_page_fill_and_orphan_heads(tmp_path):
     assert layout["lowest_fill_ratio"] == 0.41
     assert layout["trailing_whitespace_px"] == 1050
     assert any("section heading with no reports" in warning for warning in report["warnings"])
+
+
+@pytest.mark.slow
+def test_conflict_row_members_keep_the_two_column_row_scale(tmp_path):
+    """A three-column body in a half-width row sets two words a line."""
+
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    from channel_press.layout.proof import _launch
+
+    css_path = (
+        Path(__file__).resolve().parent.parent
+        / "channel_press"
+        / "web"
+        / "static"
+        / "css"
+        / "print.css"
+    )
+    row_story = (
+        '<article class="story"><div class="story__body"><p>Row body</p></div></article>'
+    )
+    markup = (
+        '<section class="page-section template-conflict_visual">'
+        '<div class="story-flow story-flow--rows"><div class="story-row">'
+        f"{row_story}{row_story}"
+        "</div></div></section>"
+        '<section class="page-section template-conflict_visual">'
+        '<div class="story-flow"><article class="story">'
+        '<div class="story__body"><p>Full width body</p></div></article></div></section>'
+    )
+    page_path = tmp_path / "columns.html"
+    page_path.write_text(
+        "<!doctype html><html><head><meta charset='utf-8'><style>"
+        + css_path.read_text(encoding="utf-8")
+        + f"</style></head><body>{markup}</body></html>",
+        encoding="utf-8",
+    )
+    with sync_playwright() as playwright:
+        browser = _launch(playwright)
+        try:
+            page = browser.new_page(viewport={"width": 1200, "height": 1600})
+            page.goto(page_path.as_uri())
+            columns = page.eval_on_selector_all(
+                ".story__body", "nodes => nodes.map(node => getComputedStyle(node).columnCount)"
+            )
+        finally:
+            browser.close()
+    assert columns == ["2", "2", "3"]
+
