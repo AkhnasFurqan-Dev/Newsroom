@@ -298,6 +298,36 @@ def test_cross_source_merge_keeps_the_weighted_report_and_attributes_both_channe
     assert all(row.post_count == 1 for row in sources)
 
 
+def test_cross_source_merge_never_folds_two_reports_from_the_same_channel(db, owner):
+    publication = default_publication(db)
+    assert publication is not None
+    channel = _channel(db, "single-source", "Single Source")
+    db.add(PublicationSource(publication_id=publication.id, channel_id=channel.id, priority=1))
+    db.flush()
+    # Generic local-service editorials share almost every word; the city differs.
+    sialkot = _story(
+        db,
+        channel,
+        "Editorial: Local services in Sialkot need a published budget",
+        fingerprint="same-channel-sialkot",
+    )
+    gilgit = _story(
+        db,
+        channel,
+        "Editorial: Local services in Gilgit need a published budget",
+        fingerprint="same-channel-gilgit",
+    )
+    db.flush()
+
+    kept, absorbed = merge_cross_source_stories(db, [sialkot, gilgit])
+
+    assert {story.id for story in kept} == {sialkot.id, gilgit.id}
+    assert absorbed == {}
+    db.refresh(gilgit)
+    assert gilgit.merged_into_id is None
+    assert gilgit.status == "draft"
+
+
 def test_manual_job_records_publication_and_all_enabled_sources(db, owner):
     publication = default_publication(db)
     assert publication is not None

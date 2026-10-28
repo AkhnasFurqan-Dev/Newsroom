@@ -289,11 +289,16 @@ def merge_cross_source_stories(
     for story in sorted(stories, key=rank):
         if story.merged_into_id:
             continue
+        # Only deduplicate across channels. Reports from one channel are already
+        # clustered inside that channel, and near-identical generic titles there
+        # ("Editorial: Local services in Sialkot...") describe different events.
+        # Folding them would merge unrelated city or district reports.
         primary = next(
             (
                 candidate
                 for candidate in kept
-                if candidate.section == story.section
+                if candidate.channel_id != story.channel_id
+                and candidate.section == story.section
                 and _same_story_title(candidate.canonical_title, story.canonical_title)
             ),
             None,
