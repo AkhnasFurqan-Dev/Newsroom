@@ -235,6 +235,22 @@ def _portable_font_files() -> list[Path]:
     return files
 
 
+def _engine_tag() -> str:
+    """Identify the parser that produced a cached discovery result.
+
+    Without fontTools every face is recorded as unavailable. If the package is
+    installed later, an old cache would keep claiming that Georgia and Segoe UI
+    are missing, so the cache is keyed by the parser version.
+    """
+
+    try:
+        from fontTools import version as fonttools_version
+
+        return f"fonttools-{fonttools_version}"
+    except Exception:
+        return "fonttools-missing"
+
+
 def _read_cache() -> list[dict] | None:
     path = _cache_path()
     if not path.exists():
@@ -243,7 +259,7 @@ def _read_cache() -> list[dict] | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if payload.get("version") != _CACHE_VERSION:
+    if payload.get("version") != _CACHE_VERSION or payload.get("engine") != _engine_tag():
         return None
     faces = payload.get("faces")
     return faces if isinstance(faces, list) else None
@@ -252,11 +268,15 @@ def _read_cache() -> list[dict] | None:
 def _write_cache(faces: list[dict]) -> None:
     try:
         _cache_path().write_text(
-            json.dumps({"version": _CACHE_VERSION, "faces": faces}, ensure_ascii=False),
+            json.dumps(
+                {"version": _CACHE_VERSION, "engine": _engine_tag(), "faces": faces},
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
     except OSError:
         pass
+
 
 
 def discover_installed_fonts(*, force: bool = False) -> list[dict]:

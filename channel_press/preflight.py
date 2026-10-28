@@ -269,6 +269,16 @@ def build_preflight(*, probe_ollama: bool = True) -> PreflightReport:
             "PyMuPDF available for geometry QA." if module_available("fitz") else "PyMuPDF is missing.",
         )
     )
+    report.checks.append(
+        Check(
+            "fonttools",
+            "Font inspection",
+            OK if module_available("fontTools") else WARN,
+            "fontTools available for installed-font discovery and uploads."
+            if module_available("fontTools")
+            else "fontTools is missing; only fonts already installed can be listed by name and uploads are rejected.",
+        )
+    )
 
     telegram = telegram_environment()
     report.telegram = telegram

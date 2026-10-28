@@ -425,3 +425,28 @@ def test_coverage_reports_missing_characters():
     assert "A" not in report["missing"]
     empty = glyph_coverage("", "ABC")
     assert empty["checked"] is False
+
+def test_installed_font_cache_is_keyed_by_the_font_parser(tmp_path, monkeypatch):
+    """A cache written without fontTools must not survive installing fontTools."""
+
+    import json
+
+    from channel_press import fonts as fonts_module
+
+    cache = tmp_path / "font-cache.json"
+    monkeypatch.setattr(fonts_module, "_cache_path", lambda: cache)
+    monkeypatch.setattr(fonts_module, "_installed_cache", None)
+    cache.write_text(
+        json.dumps(
+            {
+                "version": fonts_module._CACHE_VERSION,
+                "engine": "fonttools-missing",
+                "faces": [{"family": "Georgia", "unavailable": True}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert fonts_module._read_cache() is None
+
+    fonts_module._write_cache([{"family": "Georgia", "unavailable": False}])
+    assert fonts_module._read_cache() == [{"family": "Georgia", "unavailable": False}]

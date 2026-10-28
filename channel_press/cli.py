@@ -201,6 +201,11 @@ def cmd_demo(args: argparse.Namespace) -> int:
                 generated_password = True
             owner = create_first_owner(db, args.username, password, args.display_name or "Demo Editor")
             _print(f"Created owner '{owner.username}'.")
+        # The demo command is a complete setup path. Owner and publication
+        # profile now exist, so the dashboard must not keep reporting that setup
+        # is incomplete after the documented five-minute demo.
+        mark_setup_complete(db)
+        db.commit()
         channel = get_or_create_demo_channel(db, owner)
         if args.reset:
             _print("Resetting demo source and editorial records for the fixture channel...")
@@ -779,7 +784,15 @@ def cmd_diagnostics(args: argparse.Namespace) -> int:
     _print(f"  Base dir:  {BASE_DIR}")
     _print(f"  Data dir:  {settings.data_dir}")
     _print(f"  Output:    {settings.output_dir}")
-    for package in ("fastapi", "sqlalchemy", "playwright", "PyMuPDF", "pillow", "argon2-cffi"):
+    for package in (
+        "fastapi",
+        "sqlalchemy",
+        "playwright",
+        "PyMuPDF",
+        "pillow",
+        "argon2-cffi",
+        "fonttools",
+    ):
         try:
             _print(f"  {package:<12} {importlib.metadata.version(package)}")
         except importlib.metadata.PackageNotFoundError:
