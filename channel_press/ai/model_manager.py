@@ -137,11 +137,12 @@ def installed_models() -> list[dict[str, Any]]:
 
 
 def installed_profile(profile: dict) -> dict[str, Any] | None:
+    pinned_digest = profile["registry_manifest_digest"].removeprefix("sha256:")
     return next(
         (
             model
             for model in installed_models()
-            if model["name"] == profile["tag"] and model["size"] == int(profile["download_bytes"])
+            if model["name"] == profile["tag"] and model["digest"] == pinned_digest
         ),
         None,
     )
@@ -330,7 +331,7 @@ def _install(profile: dict) -> None:
         _update(state="downloading", detail="Connecting to the local Ollama model service.")
         base_url = _local_ollama_url()
         with (
-            httpx.Client(timeout=httpx.Timeout(connect=10, read=10, write=30, pool=10)) as client,
+            httpx.Client(timeout=httpx.Timeout(connect=10, read=60, write=30, pool=10)) as client,
             client.stream(
                 "POST",
                 f"{base_url}/api/pull",

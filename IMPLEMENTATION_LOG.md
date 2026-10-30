@@ -1357,14 +1357,12 @@ ignored. A broader baseline scan also reports existing lint findings in
 `PyMuPDF 1.25.1` is identified as `AGPL-3.0-only` in the SBOM and remains a
 closed-source redistribution blocker.
 
-### Not yet verified / next gate
+### Gaps at the initial PROD-00 inventory snapshot
 
-- No Qwen3.5 weights were downloaded. Real inference, pipeline quality,
-  latency, VRAM and performance remain unverified; request owner confirmation
-  before any multi-gigabyte download.
+- At this inventory snapshot no Qwen3.5 weights had been downloaded. Later
+  owner authorization and live model checks are recorded below.
 - The Qwen3.5 request contract, editorial audit/provenance, smoke-test gate,
-  web page and history behavior are covered by deterministic tests, not by an
-  actual Qwen3.5 response.
+  web page and history behavior were then covered by deterministic tests only.
 - PyInstaller artifact generation and GUI PE subsystems passed, but the
   packaged window itself has not been launched or inspected. Installer,
   clean-machine/WebView2 checks, bundled Playwright Chromium/Paged.js,
@@ -1395,3 +1393,36 @@ closed-source redistribution blocker.
   executable is 19,338,213 bytes and the worker is 18,301,081 bytes; both PE
   subsystem values are 2 (Windows GUI). Native launch/restore and clean-install
   behavior remain unverified. This is not a production-ready release.
+
+### PROD-01 — Authorized Qwen3.5 downloads and live validation
+
+- The owner authorized upgrading Ollama and downloading Standard, Enhanced and
+  Compact. Verified the official updater script's Authenticode signature, then
+  upgraded the existing `E:\ollama` installation from 0.40.10 to 0.40.13.
+  The user-scoped `OLLAMA_MODELS` setting remained configured and the
+  historical `qwen2.5:3b-instruct` model remained installed; no model was loaded
+  during the upgrade.
+- Pulled all three pinned profiles through `channel_press.ai.model_manager`.
+  Their exact local Ollama digests match the reviewed registry manifest
+  digests. Combined upstream layer size: 12,558,395,767 bytes.
+- Live integration exposed two manager assumptions: Ollama's local `size`
+  includes 175 bytes of metadata beyond the registry layer total, so readiness
+  now compares the exact pinned digest; the 10-second pull-stream read timeout
+  expired while the 9B model verified its final layer, so it is now 60 seconds
+  and the retry reused the downloaded layer and completed digest verification.
+- **Live inference:** Compact passed its synthetic FX-01 schema smoke in
+  42,608 ms. Standard passed in 21,578 ms and also passed the live
+  `draft_story` path through editorial cleanup, factual audit and model-run
+  provenance. The optional live test was isolated to the test harness database.
+- Enhanced was downloaded and digest-verified but not loaded for inference:
+  the measured machine had 1,695 MiB of 16,088 MiB RAM free and 6 GB VRAM,
+  below the profile's 12 GB VRAM recommendation. No Enhanced quality or
+  performance claim is made.
+- **Verification after fixes:** the focused suite passed 41 tests with one
+  optional live test skipped by default; the explicit live Standard test passed
+  (1 test); targeted Ruff and `compileall` passed. The refreshed PyInstaller
+  6.11.1 bundle contains a 19,338,301-byte desktop executable and an
+  18,301,169-byte worker executable, both PE subsystem 2.
+- The packaged window, clean Windows install, installer lifecycle, WebView2,
+  bundled print renderer, enhanced-model inference, and full acceptance suite
+  remain unverified. The AGPL PyMuPDF licensing blocker remains open.

@@ -2,8 +2,9 @@
 
 **Contract:** `CHANNEL_PRESS_WINDOWS_PRODUCTION_RELEASE_PLAN_V2.md`, revision 2
 **Evidence snapshot:** 31 October 2026
-**Status:** PROD-00 inventory documented; PROD-01 desktop prototype and focused
-verification completed. This is not an installer or clean-install certification.
+**Status:** PROD-00 inventory documented; PROD-01 desktop prototype and
+targeted Qwen3.5 validation completed. This is not an installer or clean-install
+certification.
 
 ## PROD-00 repository and machine inventory
 
@@ -50,10 +51,10 @@ manifest's license layer (digest
 | Enhanced | `qwen3.5:9b-q4_K_M` | `sha256:56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90` | 6,550,825,373 | Prefer 12 GB VRAM / 16 GB RAM; explicit download confirmation |
 | Compact | `qwen3.5:2b` | `sha256:0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a` | 2,683,396,637 | Optional hardware-dependent fallback; heavier tasks need review |
 
-These are exact registry manifest pins, not local-inference quality claims. No
-Qwen3.5 weights were downloaded during this inventory. The only installed model
-observed was the historical Qwen2.5 3B model. Its prior model-run records remain
-unchanged.
+These are exact registry manifest pins, not local-inference quality claims. At
+the initial inventory, no Qwen3.5 weights had been downloaded; the historical
+Qwen2.5 3B model was the only one observed. Its model-run records remain
+unchanged after the later authorized downloads.
 
 ## PROD-01 boundary
 
@@ -67,11 +68,12 @@ The PyInstaller onedir build completed for both executables:
 
 | Executable | Size | PE subsystem |
 |---|---:|---|
-| `ChannelPress.exe` | 19,338,213 bytes | 2 (Windows GUI) |
-| `ChannelPressWorker.exe` | 18,301,081 bytes | 2 (Windows GUI) |
+| `ChannelPress.exe` | 19,338,301 bytes | 2 (Windows GUI) |
+| `ChannelPressWorker.exe` | 18,301,169 bytes | 2 (Windows GUI) |
 
-Focused Python checks passed: 40 editorial/readiness/web/model/desktop/migration
-tests; `compileall`; targeted Ruff checks; and an Alembic upgrade test that
+Focused Python checks passed: 41 editorial/readiness/web/model/desktop/migration
+tests, with one optional live test skipped by default; `compileall`; targeted
+Ruff checks; and an Alembic upgrade test that
 seeds a historical Qwen2.5 `ModelRun`, upgrades it, and verifies all prior fields
 remain intact. The additive article reference uses `ON DELETE SET NULL`, so
 clearing an unpublished article does not erase its provenance row.
@@ -84,15 +86,31 @@ the project environment with PyInstaller 6.11.1; both PE headers report GUI
 subsystem 2. This verifies build artifacts, not successful native window
 launch, WebView2 availability or clean-install behavior.
 
-The Qwen3.5 provider request and editorial provenance path are covered with
-deterministic local fakes. **No Qwen3.5 weights were downloaded and no Qwen3.5
-inference or quality/performance claim is made.** Download/inference requires
-owner confirmation for the multi-gigabyte model packages.
+## Live Qwen3.5 validation
+
+After explicit owner authorization, Ollama was upgraded in place from 0.40.10
+to 0.40.13 with the official signed installer. The configured user model-store
+setting and historical `qwen2.5:3b-instruct` model remained available. The
+Standard, Enhanced and Compact weights were downloaded through the application
+model manager; each local model digest matches its pinned registry manifest.
+Combined registry layer size is 12,558,395,767 bytes.
+
+- Compact `qwen3.5:2b`: synthetic local smoke passed in 42,608 ms.
+- Standard `qwen3.5:4b-q4_K_M`: synthetic smoke passed in 21,578 ms, and the
+  optional live test ran `draft_story` through the editorial cleanup, factual
+  audit and provenance recording path successfully.
+- Enhanced `qwen3.5:9b-q4_K_M`: downloaded and digest-verified, but not loaded
+  for inference. At the time of the check only 1,695 MiB of 16,088 MiB system
+  RAM was free, and this profile recommends 12 GB VRAM; the machine has 6 GB.
+
+The two smoke latencies are single-request observations, not quality,
+throughput, or peak-memory certification. The Enhanced model still needs
+inference validation on hardware with adequate memory.
 
 Not verified: a packaged window launch/restore on this machine, the Windows 10
 clean-machine workflow, WebView2 prerequisite handling, a setup/repair/uninstall
 installer, bundled Playwright Chromium/Paged.js, silent Ollama runtime
-supervision, or real Qwen3.5 drafting. These are release blockers; do not
-describe this prototype as production-ready. The AGPL PyMuPDF distribution
-license needs an owner-approved licensing choice or renderer replacement before
-closed-source redistribution.
+supervision, Enhanced inference, and real-channel end-to-end behavior. These are
+release blockers; do not describe this prototype as production-ready. The AGPL
+PyMuPDF distribution license needs an owner-approved licensing choice or
+renderer replacement before closed-source redistribution.

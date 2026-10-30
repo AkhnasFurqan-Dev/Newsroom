@@ -346,9 +346,12 @@ class OllamaDraftProvider:
                 return False, f"Model {self.model} is not installed. Install it from AI Models."
             selected = models[sorted(matches)[0]]
             profile = profile_for_model(self.model)
-            if profile and int(selected.get("size") or 0) != int(profile["download_bytes"]):
+            pinned_digest = (
+                profile["registry_manifest_digest"].removeprefix("sha256:") if profile else ""
+            )
+            if profile and selected.get("digest") != pinned_digest:
                 return False, (
-                    f"Installed {self.model} does not match the reviewed model package size. "
+                    f"Installed {self.model} does not match the reviewed model digest. "
                     "Repair it from AI Models before drafting."
                 )
             self.model_digest = str(selected.get("digest") or "")

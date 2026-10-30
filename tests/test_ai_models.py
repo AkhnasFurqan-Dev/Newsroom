@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
-from channel_press.ai import providers
+from channel_press.ai import model_manager, providers
 from channel_press.ai.model_profiles import MODEL_MANIFEST, MODEL_PROFILES
 from channel_press.ai.providers import (
     DraftResult,
@@ -42,6 +43,21 @@ def test_model_manifest_pins_three_profiles_and_apache_license():
     assert MODEL_PROFILES["compact"]["tag"] == "qwen3.5:2b"
     assert len(MODEL_PROFILES["standard"]["registry_manifest_digest"]) == 71
     assert len(MODEL_PROFILES["enhanced"]["registry_manifest_digest"]) == 71
+
+
+def test_installed_profile_uses_pinned_digest_not_registry_layer_size(monkeypatch):
+    profile = MODEL_PROFILES["compact"]
+    installed = {
+        "name": profile["tag"],
+        "size": profile["download_bytes"] + 175,
+        "digest": profile["registry_manifest_digest"].removeprefix("sha256:"),
+    }
+    monkeypatch.setattr(model_manager, "installed_models", lambda: [installed])
+
+    assert model_manager.installed_profile(profile) == installed
+
+    monkeypatch.setattr(model_manager, "installed_models", lambda: [{**installed, "digest": "wrong"}])
+    assert model_manager.installed_profile(profile) is None
 
 
 def test_ai_models_page_lists_pinned_profiles_inside_authenticated_app(client, auth, monkeypatch):
@@ -130,15 +146,24 @@ def test_qwen35_request_disables_thinking_and_uses_a_json_schema(monkeypatch):
     assert result.generation_settings["num_ctx"] == provider.num_ctx
 
 
-def test_provider_requires_exact_pinned_tag_and_size(monkeypatch):
+def test_provider_requires_exact_pinned_tag_and_digest(monkeypatch):
+    profile = MODEL_PROFILES["standard"]
+    installed = {
+        "name": profile["tag"],
+        "size": profile["download_bytes"] + 175,
+        "digest": "not-the-pinned-digest",
+    }
+
     class Response:
         status_code = 200
 
-        def __init__(self, payload):
-            self.payload = payload
+        def __init__(self, url):
+            self.url = url
 
         def json(self):
-            return self.payload
+            if self.url.endswith("/api/tags"):
+                return {"models": [installed]}
+            return {"version": "test"}
 
     class Client:
         def __init__(self, **_):
@@ -151,25 +176,19 @@ def test_provider_requires_exact_pinned_tag_and_size(monkeypatch):
             return None
 
         def get(self, url):
-            if url.endswith("/api/tags"):
-                return Response(
-                    {
-                        "models": [
-                            {
-                                "name": "qwen3.5:4b",
-                                "size": MODEL_PROFILES["standard"]["download_bytes"],
-                                "digest": "not-the-pinned-tag",
-                            }
-                        ]
-                    }
-                )
-            return Response({"version": "test"})
+            return Response(url)
 
     monkeypatch.setattr(providers.httpx, "Client", Client)
-    provider = OllamaDraftProvider(model=MODEL_PROFILES["standard"]["tag"])
+    provider = OllamaDraftProvider(model=profile["tag"])
     available, message = provider.available()
     assert available is False
     assert "AI Models" in message
+
+    installed["digest"] = profile["registry_manifest_digest"].removeprefix("sha256:")
+    available, message = provider.available()
+    assert available is True
+    assert message == "ready"
+    assert provider.model_digest == installed["digest"]
 
 
 def test_real_source_provider_requires_smoke_test_for_exact_local_digest(db, monkeypatch):
@@ -276,3 +295,34 @@ def test_model_runs_record_new_provenance_without_rewriting_history(
     assert post.id in evidence["source_post_ids"]
     assert db.get(ModelRun, historical_id).model == "qwen2.5:3b-instruct"
     assert db.get(AppSetting, "ai.model_tag").value == profile["tag"]
+
+
+@pytest.mark.live
+def test_live_qwen35_standard_runs_through_editorial_audit(
+    db, demo_channel, sample_import
+):
+    if os.environ.get("CHANNEL_PRESS_RUN_LIVE_MODEL_TESTS") != "1":
+        pytest.skip("Set CHANNEL_PRESS_RUN_LIVE_MODEL_TESTS=1 to run local inference.")
+
+    profile = MODEL_PROFILES["standard"]
+    provider = OllamaDraftProvider(model=profile["tag"])
+    available, message = provider.available()
+    assert available, message
+
+    build_stories(db, demo_channel.id, *WINDOW)
+    post = db.query(SourcePost).filter_by(telegram_message_id=101).one()
+    fragment = db.query(PostFragment).filter_by(post_id=post.id).first()
+    assert fragment is not None and fragment.story_id is not None
+    story = db.get(StoryCluster, fragment.story_id)
+    assert story is not None
+
+    article = draft_story(db, story, provider)
+    run = db.query(ModelRun).filter_by(article_id=article.id).one()
+    audit = json.loads(article.audit_json)
+
+    assert run.provider == "ollama"
+    assert run.model == profile["tag"]
+    assert run.model_digest == profile["registry_manifest_digest"].removeprefix("sha256:")
+    assert run.status == "completed"
+    assert audit["provider"] == "ollama"
+    assert 0 <= audit["citation_coverage"] <= 1
