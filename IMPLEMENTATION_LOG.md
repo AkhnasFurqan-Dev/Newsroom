@@ -1406,8 +1406,8 @@ closed-source redistribution blocker.
   Their exact local Ollama digests match the reviewed registry manifest
   digests. Combined upstream layer size: 12,558,395,767 bytes.
 - Live integration exposed two manager assumptions: Ollama's local `size`
-  includes 175 bytes of metadata beyond the registry layer total, so readiness
-  now compares the exact pinned digest; the 10-second pull-stream read timeout
+  adds 175-177 bytes of metadata beyond registry layer totals, so readiness now
+  compares the exact pinned digest; the 10-second pull-stream read timeout
   expired while the 9B model verified its final layer, so it is now 60 seconds
   and the retry reused the downloaded layer and completed digest verification.
 - **Live inference:** Compact passed its synthetic FX-01 schema smoke in
@@ -1415,9 +1415,10 @@ closed-source redistribution blocker.
   `draft_story` path through editorial cleanup, factual audit and model-run
   provenance. The optional live test was isolated to the test harness database.
 - Enhanced was downloaded and digest-verified but not loaded for inference:
-  the measured machine had 1,695 MiB of 16,088 MiB RAM free and 6 GB VRAM,
-  below the profile's 12 GB VRAM recommendation. No Enhanced quality or
-  performance claim is made.
+  the pre-load check had 3,534 MiB of 16,088 MiB RAM free (1,695 MiB in the
+  final post-download snapshot) and the machine has 6 GB VRAM, below the
+  profile's 12 GB VRAM recommendation. No Enhanced quality or performance claim
+  is made.
 - **Verification after fixes:** the focused suite passed 41 tests with one
   optional live test skipped by default; the explicit live Standard test passed
   (1 test); targeted Ruff and `compileall` passed. The refreshed PyInstaller

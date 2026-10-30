@@ -100,8 +100,9 @@ Combined registry layer size is 12,558,395,767 bytes.
   optional live test ran `draft_story` through the editorial cleanup, factual
   audit and provenance recording path successfully.
 - Enhanced `qwen3.5:9b-q4_K_M`: downloaded and digest-verified, but not loaded
-  for inference. At the time of the check only 1,695 MiB of 16,088 MiB system
-  RAM was free, and this profile recommends 12 GB VRAM; the machine has 6 GB.
+  for inference. The pre-load headroom check showed 3,534 MiB free of 16,088
+  MiB system RAM; the final post-download snapshot showed 1,695 MiB free.
+  This profile recommends 12 GB VRAM; the machine has 6 GB.
 
 The two smoke latencies are single-request observations, not quality,
 throughput, or peak-memory certification. The Enhanced model still needs
