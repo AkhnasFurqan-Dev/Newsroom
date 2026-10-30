@@ -3,9 +3,8 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Account</div>
     <h1>{{ user.display_name }}</h1>
-    <p class="lede">{{ user.username }} · {{ user.role|status_label }} · joined {{ user.created_at|shortdate(profile.timezone if profile else 'Asia/Karachi') }}</p>
+    <p class="small">{{ user.username }} · {{ user.role|status_label }} · joined {{ user.created_at|shortdate(profile.timezone if profile else 'Asia/Karachi') }}</p>
   </div>
 </div>
 

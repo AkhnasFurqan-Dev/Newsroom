@@ -3,23 +3,22 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Archive</div>
     <h1>Editions</h1>
-    <p class="lede">Every release keeps its PDF, page previews, offline e-paper, manifest and checksums. Re-rendering creates a new version instead of overwriting the record.</p>
+    
   </div>
 </div>
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Edition</th><th>Date</th><th>Kind</th><th>Status</th><th>Sources</th><th class="num">Pages</th><th class="num">Version</th><th>Released</th><th>Files</th></tr></thead>
+    <thead><tr><th>Edition</th><th>Date</th><th>Mode</th><th>Status</th><th>Sources</th><th class="num">Pages</th><th class="num">Version</th><th>Released</th><th>Files</th></tr></thead>
     <tbody>
     {% for edition in editions %}
       {% set manifest = edition.manifest_json|json_loads({}) %}
       {% set source_ids = edition.source_channel_ids_json|json_loads([]) %}
       <tr>
-        <td><a href="/editions/{{ edition.id }}">{{ edition.title }}</a><div class="small">#{{ edition.issue_number }}</div></td>
+        <td><a href="/editions/{{ edition.id }}">{{ edition.display_name or edition.title }}</a><div class="small">#{{ edition.issue_number }}</div></td>
         <td class="small">{{ edition.window_end|shortdate(edition.timezone) }}</td>
-        <td>{{ edition.kind|status_label }}</td>
+        <td class="small">{{ {'manual': 'Manual', 'daily': 'Scheduled', 'special': 'Special'}.get(edition.kind, edition.kind|status_label) }}</td>
         <td><span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span></td>
         <td class="small">
           {% if edition.source_status == 'partial' %}

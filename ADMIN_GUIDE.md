@@ -288,6 +288,26 @@ Record wall time, peak RAM/VRAM and whether a fallback reason appears. `demo`
 uses the fixture provider; the real-model proof is
 `pytest -m live tests\test_ollama_live.py`.
 
+## 5b. Story research providers
+
+Research is optional and per newspaper. Configure it under **Branding →
+Automatic research**; the global provider credentials live in `.env`:
+
+| Provider | Setting | Notes |
+| --- | --- | --- |
+| Google Programmable Search | `CHANNEL_PRESS_GOOGLE_CSE_API_KEY`, `CHANNEL_PRESS_GOOGLE_CSE_CX` | Documented JSON API; quota and billing belong to the owner. |
+| Brave Search | `CHANNEL_PRESS_BRAVE_SEARCH_API_KEY` | Subscription token; independent index. |
+| GDELT DOC 2.0 | none | Public API, one request every five seconds; select it explicitly. |
+| Publisher RSS | `CHANNEL_PRESS_SEARCH_RSS_FEEDS` | Keyless fallback; reads outlets' own feeds, not a search results page. |
+
+Automatic research happens after clustering and before drafting. It commits the
+clustering transaction first, applies a per-edition candidate cap, and never
+fails the edition when a provider is offline. Candidates stay in the review queue
+unless the newspaper policy is `auto_context`; contested and high-risk stories
+always wait for a person. Google and Brave were not exercised live in this build,
+and GDELT rate-limited the verification network — the report records that limit
+rather than claiming a successful live search.
+
 ## 6. Schedules and the Windows worker
 
 The web UI manages schedule records. Actual wakeups come from Windows Task
@@ -515,10 +535,13 @@ The baseline publishes locally:
   `output/<publication>/<edition folder>/`.
 
 There is no public hosting, upload destination or cloud inference in the baseline.
-The **Contact / public URL** and `CHANNEL_PRESS_PUBLIC_BASE_URL` are used only for
-source QR codes, and only after a reachability check. With no verified public URL,
-the edition prints an honest source appendix instead of a QR code. Never configure
-a localhost or placeholder URL to make a QR appear.
+Each edition also writes static evidence pages under
+`epaper/sources/<public_id>/index.html`; the digital edition links each article to
+its own source page. A printed story code points first at a verified public
+evidence-page base URL, then at a real public `t.me` post URL. With neither, the
+editor sees the unavailable state and the paper prints no code — never a
+placeholder, local file or appendix. Never configure a localhost or placeholder
+URL to make a QR appear.
 
 If you later add hosting, validate the destination and update the release note and
 manifest. Do not mark a release successful because an upload was attempted.
@@ -588,6 +611,10 @@ Practical guidance:
   permits print/PDF embedding.
 - Specimen proofs require Chrome/Edge or Playwright Chromium, like the PDF
   renderer. A proof is a PNG specimen, not a rendered news article.
-- Public hosting and QR landing pages are not configured.
+- Public hosting and QR landing pages are not configured. An evidence page can
+  be exported, but the owner must host it and verify the base URL.
+- Search providers need their own credentials. Publisher-RSS discovery works
+  without a key but is not a web search index; Google and Brave were not tested
+  live in this build, and GDELT rate-limited this network during verification.
 - The SQLite + local-folder design targets one workstation, not concurrent
   multi-user scale.

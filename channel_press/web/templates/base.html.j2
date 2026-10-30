@@ -56,7 +56,7 @@
 </main>
 
 <footer class="site-footer">
-  <span>{{ profile.name if profile else app_name }} · local-first newsroom. Generated editions are an editorial roundup of the owner's authorized source channel.</span>
+  <span>{{ profile.name if profile else app_name }}</span>
   <span>{% if user %}<a href="/account">Account</a> · {% endif %}Data stays on this computer.</span>
 </footer>
 {% block scripts %}{% endblock %}

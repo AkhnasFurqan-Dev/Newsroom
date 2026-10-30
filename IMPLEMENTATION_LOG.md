@@ -1236,3 +1236,58 @@ shorter than the sample edition's.
   memory includes every Chrome process started for the build.
 - Font embedding licensing remains the owner's decision; the app records the
   acknowledgement but cannot verify the licence.
+
+
+## V2 production refinement ? 30 October 2026
+
+Applied the P01?P14 production-cleanup brief to the existing Phases A?F code.
+Full evidence, before/after pages, acceptance matrix and limits are in
+`docs/PRODUCTION_REFINEMENT_REPORT.md`.
+
+### Milestones
+
+- `6c0449e` ? reader-facing print cleanup: appendix, About block, source record,
+  claim counters, message IDs, footer boilerplate and default chronology removed;
+  verified per-story QR, clean headline/deck fields, conservative chronology and
+  digital `sources/<public_id>/` evidence bundles added.
+- `2026c3f` ? `channel_administration` exclusion, editor override retained,
+  Telegram furniture stripped at draft and render time, stacked attribution
+  repaired, near-duplicate sentences/paragraphs suppressed, verbatim/repeated
+  opening quality notes added.
+- `17a7c3b` ? automatic research adapters (Google CSE, Brave, GDELT, publisher
+  RSS), fact-anchored queries, candidate ranking and review policy; readable
+  health screen; per-newspaper research/chronology/QR controls; editor-defined
+  edition names.
+- `c87f720` ? lower-front second/third stories, flex story rows to prevent split
+  headlines, full-report page references.
+
+### Verified output
+
+- Live Ollama (`qwen2.5:3b-instruct`) re-draft on a database copy: 6 stories,
+  29.4 s, 5 held for review, no stacked attribution or emoji in the copy.
+- Proof PDF: 2 pages, 792 ? 1224 pt, fill 0.777 and 0.840, no overflow, blank
+  page or orphaned section head; no appendix/provenance trail; real `t.me` QR
+  targets.
+- Live RSS discovery smoke test: current Dawn article fetched through the bounded
+  research fetcher, candidate stored with HTTP 200 and article paragraph excerpt.
+- GDELT returned HTTP 429 on this network; Google/Brave had no credentials.
+
+### Focused tests
+
+- Editorial/classification batch: passed.
+- Layout/edition/citation/publication batch: passed (30).
+- Research and discovery: 22 passed.
+- Refinement UI: 5 passed.
+- Combined focused run: 130 passed.
+
+Repository-wide suite, 30 October 2026:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -o addopts="" -q
+# 299 passed, 0 failed in 280.92 s
+```
+
+This includes the new research-discovery, health-view, edition-name, branding
+and timeline tests. Live Telegram collection was not repeated in this session;
+the live Ollama and RSS observations above are recorded separately from the
+fixture suite.

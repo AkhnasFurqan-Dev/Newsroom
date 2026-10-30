@@ -45,12 +45,13 @@ hours (12 by default).
 
 ## 2. The dashboard
 
-Owners see a compact **System Health** card with **Check Connections** and
-**Restart Channel Press Services**. *Configured* is not the same as *connected and
-tested*: credentials can be present while Telegram is unreachable or not signed in,
-and the card says so. **Check Connections** runs a short, read-only check of the
-web server, database, Telegram/source channel, worker, Ollama and the configured
-model, and lists active jobs with their last error.
+Owners see a compact **System health** card with **Check connections** and
+**Restart services**. *Configured* is not the same as *connected and tested*:
+credentials can be present while Telegram is unreachable or not signed in, and
+the rows say so. **Check connections** runs a short, read-only check and shows
+readable rows for the application, database, Telegram account, selected source,
+local model, configured model, worker queue and source discovery. PIDs, raw JSON
+and full paths stay out of the normal view.
 
 **Restart Channel Press Services** asks for confirmation, requests a graceful stop,
 keeps every database, session, job and checkpoint, and starts the web app again.
@@ -328,6 +329,25 @@ that the source did not provide. An attribution flag is a publication blocker:
 remove the invented scene detail or correct the sentence rather than approving it
 as if it were observed reporting.
 
+### Researching a story
+
+Open a story and use **Research context**. **Search sources** asks the configured
+provider for independent candidates; **Add URL** remains available when the
+provider is offline or no key is configured. The page shows whether search is
+ready and which policy the newspaper uses.
+
+Candidates are not evidence. Review the outlet, date, query that found the page
+and the extracted excerpt, then **Accept context** or **Reject**. With the
+`auto_context` acceptance option, ordinary dated pages may be accepted
+automatically, but contested or high-risk stories still wait for a person. When
+accepted context is present, the drafter may attribute it to its outlet; it must
+still not present the page as the channel's reporting or as automatic
+verification.
+
+The shipped fallback reads publisher RSS feeds, not a Google results page. A
+Google Programmable Search or Brave Search key is required for those indexes;
+GDELT is available as a public API but asks for one request every five seconds.
+
 ## 7. Building an edition
 
 Open **Build**.
@@ -342,11 +362,10 @@ Open **Build**.
 3. Tick **Collect this window from Telegram before building** to fetch the exact
    window first. Leave it unchecked to build only from posts already stored.
    Collection failure leaves the watermark where it was; it does not skip a date.
-4. Choose **Edition kind**: **Manual edition** or **Special edition**. A manual or
-   special edition does not advance the daily watermark unless it is the
-   scheduled daily window.
-5. Optionally enter an **Edition title**.
-6. Select **Queue build**.
+4. Enter an **Edition name** such as *Daily Edition* or *Friday Review*. It is
+   printed on the masthead and used in the archive. The internal build mode
+   (manual, scheduled or special) is not a reader-facing title.
+5. Select **Queue build**.
 
 The build creates a persistent job and starts a detached one-shot worker. You can
 close the browser; the job continues. **Jobs** shows progress, and the job page
@@ -394,7 +413,8 @@ actual PDF page. Use it to check:
 - no overlapping columns;
 - no blank trailing page;
 - readable minimum type at physical size;
-- source appendix present when the policy requires it.
+- printed story codes only where a verified public target exists; no provenance
+  appendix or message-ID ledger.
 
 ### Releasing
 
@@ -439,10 +459,10 @@ of the design.
 ![E-paper viewer](docs/images/epaper-viewer.png)
 
 The viewer shows the page image, **Previous** / **Next**, a page selector,
-**Actual size**, **Print PDF** and **Text edition**. The **Sources & provenance**
-panel explains that every report is tied to a dated source message. Fixture
-messages have no public URL, and no QR code is printed unless a public destination
-was verified reachable.
+**Actual size**, **Print PDF** and **Text edition**. Each article exposes its
+source links in a collapsible detail block, and `sources/<id>/index.html` keeps a
+static evidence page. Fixture messages have no public URL, and no QR code is
+printed unless a public destination was verified reachable.
 
 The bundle is a plain folder. `epaper/index.html` opens from disk without the
 server; relative links keep page images, `text.html` and `sample_issue.pdf`
@@ -480,8 +500,8 @@ today's news. If the machine was off for longer than the catch-up limit, the
 **Window and retrieval history** table shows the gap; review it rather than
 assuming the missing dates were published.
 
-A **Special edition** or **Manual edition** with an overlapping window does not
-advance the daily watermark unless it was created as the scheduled daily window.
+A manually built or special edition with an overlapping window does not advance
+the daily watermark unless it was created as the scheduled daily window.
 A weekly or monthly roundup may reuse stored messages but is counted once inside
 that issue.
 
@@ -544,16 +564,20 @@ Owners can edit **Branding**:
   **Timezone**, **Accent colour**.
 - **Byline** — the printed desk label. It must not name a real or invented
   individual reporter unless that person actually wrote the edition.
-- **Source disclosure** — the footer statement that this is an editorial roundup
-  of the owner's authorized source, not independent eyewitness reporting.
+- **Internal source note** — editor-only context; it is not printed.
 - **Paper size** — Tabloid 11 × 17 in or A3.
 - **Volume number**.
 - **Cartographic convention** — neutral, Pakistan or Egypt.
-- **Source link / QR policy** — appendix links with verified-only QR (default),
-  verified public QR only, or no QR.
-- **Contact / public URL** and **Footer / provenance text**.
+- **Source code policy** — one compact code per story when a verified public
+  target exists, verified public target only, or no printed code.
+- **Timeline** — automatic only for genuinely staged evidence, always, or off.
+- **Public evidence-page base URL** — set and verify this before codes can point
+  at exported `sources/` bundles.
+- **Automatic research** — policy, provider, query and candidate budgets, and
+  whether ordinary dated context may be accepted without a second editor click.
+- **Contact / public URL** and **Slogan** (optional, off by default).
 - **Section order** — sections without articles are omitted; the front page is
-  always first and the source appendix always last.
+  always first.
 - **Allow closing light** only when a documented true source is available.
 
 Changes apply to the next build. Existing editions keep their profile snapshot.

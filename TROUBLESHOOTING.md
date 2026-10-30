@@ -388,8 +388,9 @@ scheduled jobs the watermark prevents this. If a special edition must overlap a
 daily edition, keep the daily watermark separate (the job key includes the edition
 kind). A manual or special edition does not advance the daily watermark.
 
-When in doubt, compare the **Reporting window** and message IDs in each edition's
-source appendix.
+When in doubt, compare the **Reporting window** and the internal source record in
+the edition manifest or the e-paper `sources/` pages. Reader-facing pages no longer
+print message IDs or an appendix.
 
 ## Layout, CSS and PDF problems
 
@@ -535,13 +536,25 @@ inside the edition folder; the bundle uses relative paths. Do not move
 `/editions/<id>/epaper/`. The non-slash URL redirects there so relative links
 resolve. **Print PDF** resolves to `/editions/<id>/pdf`.
 
-**No QR code printed** — this is expected. The default policy prints a truthful
-source appendix unless a public URL is configured and verified reachable. Setting a
-localhost or placeholder URL will not produce a valid QR.
+**No QR code printed** — this is expected when neither a verified public
+evidence-page base URL nor a real public `t.me` post URL exists. The editor sees
+the reason; the paper does not print a placeholder or resurrect a source appendix.
+Setting a localhost or placeholder URL will not produce a valid QR.
 
-**QR points to the wrong place** — correct **Contact / public URL** or
-`CHANNEL_PRESS_PUBLIC_BASE_URL`, rebuild, and verify the destination from a phone
-on a different network before release. A QR that cannot be reached is a defect.
+**QR points to the wrong place** — correct **Public evidence-page base URL** in
+Branding (and tick the verification box only after the hosted page really works),
+or ensure the source post's public Telegram URL is real. Rebuild, then scan from a
+phone on a different network before release. A QR that cannot be reached is a
+defect.
+
+**Search unavailable** — the story page shows the provider reason. Install a
+Google/Brave key, choose the publisher-RSS fallback, or add a URL manually.
+GDELT asks for one request every five seconds and returns HTTP 429 when called
+too quickly; that is a provider limit, not a newspaper failure.
+
+**Research found an unrelated page** — reject it. Discovery ranks by headline
+identity, date and host, but it cannot establish truth. Accepted context is
+attributed to its outlet and is never automatic verification.
 
 ## Missing media
 

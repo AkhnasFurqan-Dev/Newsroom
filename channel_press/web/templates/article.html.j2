@@ -219,7 +219,7 @@
     {% endif %}
 
     <h2>External context</h2>
-    <p class="help">Only accepted references are eligible for the printed appendix. A candidate is unfetched editorial context, never claim evidence.</p>
+    <p class="help">Only accepted references enter the digital source record and drafting context. A candidate is never claim evidence.</p>
     {% for ref in external %}
       <div class="small" style="margin-bottom:8px">
         <span class="badge badge--{{ 'approved' if ref.review_status == 'accepted' else ('rejected' if ref.review_status == 'rejected' else 'review') }}">{{ ref.review_status|status_label }}</span>
@@ -232,7 +232,7 @@
 
     <h2>Appears in</h2>
     {% for edition in editions %}
-      <div><a href="/editions/{{ edition.id }}?article={{ article.id }}">{{ edition.title }}</a> <span class="small">v{{ edition.version }} · {{ edition.status }}</span></div>
+      <div><a href="/editions/{{ edition.id }}?article={{ article.id }}">{{ edition.display_name or edition.title }}</a> <span class="small">v{{ edition.version }} · {{ edition.status }}</span></div>
     {% else %}
       <p class="muted">Not linked to an edition.</p>
     {% endfor %}

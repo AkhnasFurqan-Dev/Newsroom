@@ -44,13 +44,20 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
 - **Editorial drafting.** Version-controlled prompt templates, a deterministic
   fixture composer for reproducible tests, and an optional local Ollama provider.
   Every draft is audited against the claim ledger before it can be released.
+- **Story research.** Optional automatic discovery through a configured Google
+  Programmable Search or Brave Search API, a keyless publisher-RSS fallback and
+  an explicitly selectable GDELT DOC 2.0 adapter. Queries come only from facts in
+  the story; pages are fetched through the existing SSRF/robots/size limits and
+  stay candidates until an editor accepts them. Accepted context is attributed to
+  its outlet and never presented as automatic verification.
 - **Media and graphics.** Source-linked photos, reversible derivatives,
   OpenCV video frames, collages with credits, sourced charts, chronological
   timelines and locator maps from bundled Natural Earth data.
 - **Print engine.** Paged.js pagination rendered through installed Chrome, a
-  distinct tabloid front page, 3–4 column interiors, continuation labels, source
-  records, a source appendix, embedded fonts, measured per-page fill and
-  automated overflow/blank-page/orphan-head checks.
+  distinct tabloid front page, 3–4 column interiors, continuation labels, one
+  compact verified source code per story, embedded fonts, measured per-page fill
+  and automated overflow/blank-page/orphan-head checks. Full evidence stays in
+  the manifest, database and digital `sources/<id>/` bundles.
 - **Per-newspaper appearance.** Each paper carries an immutable, revisioned print
   identity: nine palette colours with HEX controls and presets, seven type roles,
   print metrics, contrast/ink warnings and real specimen proofs. Fonts come from
@@ -124,7 +131,8 @@ output\the-channel-dispatch\2026-10-21-manual-001-v1\
   edition.html          same composition for browser review
   pages\page-01..05.png page proofs
   epaper\index.html     offline e-paper viewer
-  epaper\text.html      text edition and source appendix
+  epaper\text.html      text edition with per-article source links
+  epaper\sources\       static per-story evidence pages
   manifest.json         version, page geometry, hashes and provenance
   checksums.json        SHA-256 for the bundle files
 ```
@@ -333,12 +341,14 @@ and leading.
 
 - The demonstrated edition is labelled **synthetic fixture edition — not for
   publication** on its front page and in its manifest.
-- The printed footer says the paper is an editorial roundup prepared from the
-  owner's authorized Telegram source, not independent newsroom reporting.
-- Source appendix rows identify fixture messages explicitly. No QR code is printed
-  unless a public destination was verified reachable.
+- Reader-facing pages carry no provenance appendix, message IDs, claim counters
+  or software-facing footer. The evidence remains in the database, manifest and
+  e-paper source bundles.
+- A compact story code is printed only when a verified public evidence page or a
+  real public Telegram message URL exists. Otherwise the editor sees an
+  actionable source-code warning and no broken placeholder is printed.
 - `public_base_url` is empty by default, so no localhost or placeholder QR is
-  emitted. The default policy is an honest printed source appendix.
+  emitted.
 
 ## Security and privacy
 

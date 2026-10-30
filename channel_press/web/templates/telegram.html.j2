@@ -3,9 +3,8 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Authorized source connection</div>
     <h1>{{ channel.title }}</h1>
-    <p class="lede">{{ handle and ('@' ~ handle) or 'No channel handle stored' }} · MTProto user session · credentials stay in <span class="mono">.env</span></p>
+    <p class="small">{{ handle and ('@' ~ handle) or 'No channel handle stored' }} · MTProto user session · credentials stay in <span class="mono">.env</span></p>
   </div>
   <div class="page-head__actions">
     <a class="btn" href="/sources/{{ channel.id }}">Back to source desk</a>

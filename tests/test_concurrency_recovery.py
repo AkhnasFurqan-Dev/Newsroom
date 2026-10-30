@@ -551,15 +551,25 @@ def test_sync_window_is_not_queued_when_preflight_fails(client, auth, db, monkey
 def test_dashboard_owner_sees_health_controls(client, auth):
     response = client.get("/")
     assert response.status_code == 200
-    for label in ("System Health", "Check Connections", "Restart Channel Press Services"):
+    for label in ("System health", "Check connections", "Restart services"):
         assert label in response.text
+    assert "<pre id=\"system-health\"" not in response.text
 
 
 def test_system_check_separates_configured_from_tested(client, auth, monkeypatch):
     from channel_press.config import settings
 
     monkeypatch.setattr(settings, "ollama_base_url", "http://127.0.0.1:9")
-    response = client.post("/system/check", data={"csrf_token": auth})
+    # The browser action is a readable view.
+    view = client.post("/system/check", data={"csrf_token": auth})
+    assert view.status_code == 200
+    assert view.headers["content-type"].startswith("text/html")
+    assert "Telegram account" in view.text
+    assert "Edition worker" in view.text
+    assert '"pid"' not in view.text
+
+    # The programmatic endpoint keeps the structured diagnostics.
+    response = client.post("/system/check.json", data={"csrf_token": auth})
     assert response.status_code == 200
     report = response.json()
     assert report["web"] == "Connected and tested"

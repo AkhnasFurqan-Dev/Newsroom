@@ -3,9 +3,8 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Production job</div>
     <h1>Job #{{ job.id }}</h1>
-    <p class="lede">{{ job.kind|status_label }} · attempt {{ job.attempt }} of {{ job.max_attempts }}</p>
+    <p class="small">{{ job.kind|status_label }} · attempt {{ job.attempt }} of {{ job.max_attempts }}</p>
   </div>
   <div class="page-head__actions">
     <span class="badge badge--{{ job.status }}" id="job-status">{{ job.status|status_label }}</span>

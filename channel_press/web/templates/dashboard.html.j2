@@ -54,7 +54,7 @@
         {% for edition in editions %}
           {% set manifest = edition.manifest_json|json_loads({}) %}
           <tr>
-            <td><a href="/editions/{{ edition.id }}">{{ edition.title }}</a><div class="small">#{{ edition.issue_number }} · v{{ edition.version }} · {{ edition.kind|status_label }}</div></td>
+            <td><a href="/editions/{{ edition.id }}">{{ edition.display_name or edition.title }}</a><div class="small">#{{ edition.issue_number }} · v{{ edition.version }}</div></td>
             <td>{{ edition.window_end|shortdate(edition.timezone) }}</td>
             <td><span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span></td>
             <td class="num">{{ manifest.get('pdf', {}).get('page_count', '—') }}</td>

@@ -3,9 +3,8 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Source channel</div>
     <h1>{{ channel.title }}</h1>
-    <p class="lede">{{ channel.handle or channel.slug }} · {% if channel.is_demo %}synthetic fixture content{% else %}owner-authorized import{% endif %}</p>
+    <p class="small">{{ channel.handle or channel.slug }} · {% if channel.is_demo %}synthetic fixture content{% else %}owner-authorized import{% endif %}</p>
   </div>
   <div class="page-head__actions">
     {% if can.operate %}<a class="btn" href="/build?channel={{ channel.id }}">Build from this channel</a>{% endif %}
