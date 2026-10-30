@@ -164,7 +164,7 @@
             <summary>Why this classification</summary>
             <ul>
               {% for signal in signals %}
-              <li><strong>{{ signal.kind|replace('_', ' ') }}</strong>: {{ signal.values|join(', ') }}</li>
+              <li><strong>{{ signal.kind|replace('_', ' ') }}</strong>: {{ signal['values']|join(', ') }}</li>
               {% endfor %}
             </ul>
             <div class="muted">Classifier {{ post.classification_version }}{% if post.classified_at %} · {{ post.classified_at|shortdate }}{% endif %}</div>

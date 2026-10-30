@@ -1427,3 +1427,63 @@ closed-source redistribution blocker.
 - The packaged window, clean Windows install, installer lifecycle, WebView2,
   bundled print renderer, enhanced-model inference, and full acceptance suite
   remain unverified. The AGPL PyMuPDF licensing blocker remains open.
+
+### PROD-02 / PROD-05 — Bundled renderer, first-run and installer follow-up — 31 October 2026
+
+- Rebuilt the final PyInstaller candidate in
+  `dist/release-candidate-final`. It includes GUI-subsystem
+  `ChannelPress.exe` (19,343,861 bytes) and `ChannelPressWorker.exe`
+  (18,303,773 bytes), Chromium 1148 pinned by Playwright 1.49.1, Paged.js,
+  layout post-processing JavaScript and the e-paper template. The renderer
+  build script checks these runtime files before reporting success.
+- Reproduced and fixed two packaged runtime defects before this follow-up:
+  PyInstaller `Tree` destination directories were incorrect, and the bundle
+  omitted layout/publishing templates. The fixed packaged worker completed a
+  synthetic 26-post edition: 5-page, 886,430-byte tabloid PDF plus e-paper
+  output, with state `awaiting_review`. All pages were rendered and inspected;
+  no blank pages, but 3 pages were underfilled (average fill ratio 0.538).
+  Visual composition still needs work.
+- New owner setup hands off to **Connections**, whose checklist links to model
+  setup, Branding, authorized Sources/import, Schedules and Build. The source
+  detail signal renderer uses keyed lookup rather than the dict `values` method.
+- Compiled an intermediate per-user online installer with Inno Setup 6.7.3
+  (288,449,156 bytes before the final AI-readiness rebuild). The build verifies
+  the downloaded Microsoft WebView2 bootstrapper's Authenticode signature and
+  uses Inno's `x64compatible` architecture identifier.
+- The first isolated install attempt exposed a runtime-detection defect:
+  Inno `FindFirst` did not match a path with a wildcard directory component,
+  incorrectly causing the bootstrapper to run on a machine where WebView2 was
+  already installed. Enumerating runtime version directories fixed it.
+- Readiness regression review found that preflight compared the Ollama local
+  package size with the registry layer total, although Ollama adds local
+  metadata bytes. Preflight now validates the exact pinned manifest digest.
+  A regression test covers a correct digest with a +176-byte size delta and a
+  mismatched digest. Rebuilt both the packaged app and installer after this fix.
+- A read-only actual Ollama tag query with Standard selected in a disposable
+  settings context returned the exact reviewed digest
+  `d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04`. This
+  checked registry/local identity only and did not load a model.
+- **Installer smoke test:** on this Windows 11 host with WebView2 already
+  present, installed silently into `.build/installer-smoke/app`, performed a
+  second in-place update, and uninstalled. Each operation exited 0; uninstall
+  removed `ChannelPress.exe` and its registry entry. A test data sentinel
+  outside the app directory remained unchanged. Subsequent rebuilt installers,
+  including the final refreshed application bundle, also installed and
+  uninstalled successfully; the last setup log confirms the WebView2
+  bootstrapper was skipped because the existing runtime was detected. Final
+  installer artifact:
+  `dist/installer/ChannelPressSetup.exe` (288,445,030 bytes). This does not test
+  a clean machine, the missing-WebView2 install path, interactive confirmation
+  or rollback.
+- **Focused verification:** 30 tests passed in
+  `tests/test_browser_runtime.py`, `tests/test_connections.py`,
+  `tests/test_desktop.py`, `tests/test_preflight.py`, and `tests/test_web.py`;
+  Ruff passed on modified Python files; both PowerShell build scripts parsed;
+  Inno compilation and final install/uninstall passed.
+  The full suite was not run.
+- **Remaining release gaps:** clean-machine setup, offline installation,
+  app-owned Ollama setup/supervision, model-weight bundling, an interactive
+  existing-install prompt check, code signing, dependency licensing/notice
+  review, Enhanced inference on suitable hardware, real Telegram access, full
+  acceptance coverage, and underfilled-page composition. The PyMuPDF AGPL
+  distribution blocker remains.

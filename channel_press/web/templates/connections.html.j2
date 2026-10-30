@@ -1,0 +1,68 @@
+{% extends "base.html.j2" %}
+{% block title %}Connections{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Connections</h1>
+    <p>Read-only checks for local services and network access. Checked {{ checked_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}.</p>
+  </div>
+  <div class="actions">
+    <a class="btn" href="/connections">Check again</a>
+    <a class="btn btn--ghost" href="/diagnostics">Diagnostics</a>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Service</th><th>Status</th><th>Result</th><th>Next step</th></tr></thead>
+    <tbody>
+    {% for check in checks %}
+      <tr>
+        <td><strong>{{ check.label }}</strong></td>
+        <td>
+          {% if check.status == 'ok' %}
+            <span class="badge badge--published">Ready</span>
+          {% elif check.status in ['warn', 'configured', 'session_present'] %}
+            <span class="badge badge--review">Needs attention</span>
+          {% else %}
+            <span class="badge badge--review">Unavailable</span>
+          {% endif %}
+        </td>
+        <td>{{ check.detail }}</td>
+        <td class="small">{{ check.action or 'No action needed.' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if is_first_run %}
+<section class="card">
+  <h2>Complete first-run setup</h2>
+  <p>These checks are local and optional steps stay disabled until you choose to configure them.</p>
+  <ol>
+    <li><a href="/ai-models">Review and test the Standard local model</a>; do not select Enhanced unless this device has enough memory.</li>
+    <li><a href="/branding">Set the newspaper identity and print profile.</a></li>
+    <li><a href="/sources">Connect an authorized source or import rights-cleared posts.</a> Telegram credentials are not required for licensed imports.</li>
+    <li><a href="/schedules">Configure a schedule</a> only after the source and review policy are ready.</li>
+    <li><a href="/build">Build a first fixture or authorized edition</a> and inspect its PDF proof before release.</li>
+  </ol>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Telegram source</h2>
+  <p><strong>Status:</strong> {{ telegram_status|replace('_', ' ')|title }}</p>
+  <p>{{ telegram_message }}</p>
+  <div class="actions">
+    <a class="btn" href="{{ telegram_url }}">Open source connection</a>
+    <a class="btn btn--ghost" href="/sources">Import rights-cleared posts</a>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Local AI</h2>
+  <p>{{ ollama_status }}</p>
+  <a class="btn btn--ghost" href="/ai-models">Open AI Models</a>
+</section>
+{% endblock %}

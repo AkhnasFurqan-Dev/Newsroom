@@ -84,6 +84,64 @@ def test_report_exposes_actionable_check_keys(monkeypatch):
             assert check.action, f"{check.key} needs a user-actionable next step"
 
 
+def test_ollama_preflight_uses_pinned_digest_not_registry_layer_size(monkeypatch):
+    from channel_press.ai.model_profiles import profile_for_id
+
+    profile = profile_for_id("standard")
+    installed = {
+        "name": profile["tag"],
+        "digest": profile["registry_manifest_digest"].removeprefix("sha256:"),
+        "size": int(profile["download_bytes"]) + 176,
+    }
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"models": [installed]}
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, *_args, **_kwargs):
+            return Response()
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(settings, "ollama_model", profile["tag"])
+    monkeypatch.setattr(preflight.httpx, "Client", Client)
+    monkeypatch.setattr("channel_press.db.SessionLocal", Session)
+    monkeypatch.setattr(
+        "channel_press.ai.model_manager.model_smoke_record",
+        lambda *_args: None,
+    )
+
+    state = preflight.ollama_environment()
+
+    assert state["model_present"] is True
+    assert state["model_digest"] == installed["digest"]
+    assert "reviewed model digest" not in state["detail"]
+    assert "run its local draft test" in state["detail"]
+
+    installed["digest"] = "unexpected-model-digest"
+    state = preflight.ollama_environment()
+
+    assert state["model_present"] is False
+    assert "reviewed model digest" in state["detail"]
+
+
 def test_database_check_reads_the_test_database():
     check = preflight.database_check()
     assert check.key == "database"

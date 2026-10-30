@@ -7,11 +7,12 @@ backup and security. Day-to-day editing is in [USER_MANUAL.md](USER_MANUAL.md).
 
 ### Baseline
 
-- Windows 10/11 with PowerShell.
-- Python 3.12 (64-bit).
-- Microsoft Edge WebView2 Runtime for the single-window desktop preview.
-- Google Chrome. The print pipeline launches the installed Chrome channel through
-  Playwright; Chromium bundled by Playwright is not required.
+- Windows 10/11, 64-bit.
+- Python 3.12 is needed only for a source checkout or developer build.
+- Microsoft Edge WebView2 Runtime for the single-window desktop app.
+- The packaged candidate includes Chromium matching its pinned Playwright
+  version, Paged.js and the print/e-paper templates; it does not depend on
+  system-installed Chrome.
 - ~2 GB free disk for the virtual environment plus space for media and editions.
 
 ### Install
@@ -21,7 +22,7 @@ cd E:\newsroom
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-The script:
+The source-checkout script:
 
 1. creates `.venv` if missing;
 2. installs pinned dependencies with `pip install -e ".[test,video,desktop,build]"`;
@@ -35,16 +36,32 @@ Optional integrations are installed separately:
 .\.venv\Scripts\python.exe -m pip install -e ".[telegram]"   # live MTProto adapter
 ```
 
-Install Ollama separately if local AI is required (see §5). This repository
-setup is a developer/source-checkout preview; it is not the promised Python-free
-Windows installer. In the source preview, start the GUI shell with:
+Install Ollama separately if local AI is required (see §5). A PyInstaller
+candidate and Inno Setup online installer can be built with:
+
+```powershell
+.\scripts\build-windows.ps1 -OutputPath dist\release-candidate
+.\scripts\build-installer.ps1 -BuildPath dist\release-candidate
+```
+
+The installer installs the per-user app files, bundled renderer and WebView2
+bootstrapper. It includes an existing-install confirmation; isolated
+install/update/uninstall smoke tests passed on the development machine with its
+existing WebView2 Runtime. A separate data sentinel survived uninstall. The
+interactive confirmation and missing-WebView2 bootstrap path have not been
+verified on a clean machine. This is not a full offline AI package: Ollama and
+model weights are not bundled. Review dependency licensing before
+redistributing the package.
+
+In the source preview, start the GUI shell with:
 
 ```powershell
 .\.venv\Scripts\python.exe -m channel_press.desktop
 ```
 
-The package build produces GUI-subsystem executables, but the installer, WebView2
-prerequisite flow and clean-machine verification are not yet certified.
+The package and installer scripts produce GUI-subsystem executables, but the
+full offline installer, model-runtime installation, rollback, code signing and
+clean-machine verification remain incomplete.
 
 ### Upgrade
 
@@ -260,11 +277,11 @@ before the application starts a download:
 | Compact | `qwen3.5:2b` | 2,683,396,637 | Optional hardware fallback; restrict to short tasks and retain additional review |
 
 The three reviewed Ollama registry manifests contain an Apache-2.0 license
-layer. A registry pin is not a quality or performance claim. The machine used
-for this report has **6144 MiB VRAM**; no Qwen3.5 package was downloaded and no
-Qwen3.5 inference was measured. The previously recorded Qwen2.5 3B result is
-historical only. Do not select Enhanced on the 6 GB test GPU based solely on
-the on-disk package size.
+layer. A registry pin is not a quality or performance claim. The machine used for this report has **6144 MiB VRAM**. Standard and Compact
+passed synthetic local smoke tests; Standard also passed one editorial draft
+and evidence-audit path. Enhanced was downloaded and digest-verified but was
+not loaded because the available RAM/VRAM headroom was insufficient. Do not
+select Enhanced on this GPU based solely on its on-disk package size.
 
 After installation, select the exact profile and run **Test model**. This uses
 synthetic fixture FX-01, records the local model digest/runtime/prompt/settings,

@@ -13,11 +13,15 @@ import importlib.util
 import os
 import shutil
 import sqlite3
+import ssl
+import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import httpx
 from sqlalchemy.exc import OperationalError
 
+from .browser_runtime import print_browser_path
 from .config import settings
 
 OK = "ok"
@@ -80,13 +84,98 @@ def module_available(name: str) -> bool:
 
 
 def chrome_path() -> Path | None:
-    candidates = [
-        Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("PROGRAMFILES(X86)", "C:/Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
-        Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Microsoft/Edge/Application/msedge.exe",
+    return print_browser_path()
+
+
+def webview2_runtime_path() -> Path | None:
+    if os.name != "nt":
+        return None
+    roots = [
+        Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
+        / "Microsoft"
+        / "EdgeWebView"
+        / "Application",
+        Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
+        / "Microsoft"
+        / "EdgeWebView"
+        / "Application",
+        Path(os.environ.get("LOCALAPPDATA", ""))
+        / "Microsoft"
+        / "EdgeWebView"
+        / "Application",
     ]
-    return next((path for path in candidates if path.exists()), None)
+    for root in roots:
+        try:
+            versions = sorted(
+                (path for path in root.iterdir() if path.is_dir()),
+                key=lambda path: tuple(
+                    int(part) if part.isdigit() else -1 for part in path.name.split(".")
+                ),
+                reverse=True,
+            )
+        except OSError:
+            continue
+        for version in versions:
+            runtime = version / "msedgewebview2.exe"
+            if runtime.is_file():
+                return runtime
+    return None
+
+
+def internet_check(*, timeout_seconds: float = 4.0) -> Check:
+    try:
+        with httpx.Client(timeout=timeout_seconds, follow_redirects=True) as client:
+            with client.stream(
+                "GET",
+                "https://www.microsoft.com/",
+                headers={"Range": "bytes=0-0"},
+            ) as response:
+                status_code = response.status_code
+        if status_code < 500:
+            return Check("internet", "Internet access", OK, "An HTTPS connection succeeded.")
+        return Check(
+            "internet",
+            "Internet access",
+            WARN,
+            f"The HTTPS endpoint returned HTTP {status_code}.",
+            "Check the network proxy or captive-portal sign-in, then retry.",
+        )
+    except httpx.TimeoutException:
+        return Check(
+            "internet",
+            "Internet access",
+            WARN,
+            "The HTTPS connection timed out.",
+            "Check the internet connection or configured proxy, then retry.",
+        )
+    except httpx.ProxyError:
+        return Check(
+            "internet",
+            "Internet access",
+            WARN,
+            "The configured network proxy could not complete the HTTPS request.",
+            "Check the proxy settings and retry.",
+        )
+    except httpx.ConnectError as exc:
+        cause = exc.__cause__ or exc
+        if isinstance(cause, ssl.SSLError):
+            detail = "The HTTPS certificate could not be verified."
+            action = "Check the system date, certificate store or network proxy."
+        elif isinstance(cause, socket.gaierror):
+            detail = "The endpoint name could not be resolved."
+            action = "Check DNS settings or the configured network proxy."
+        else:
+            detail = "An internet connection could not be established."
+            action = "Check the internet connection or configured proxy, then retry."
+        return Check("internet", "Internet access", WARN, detail, action)
+    except httpx.HTTPError as exc:
+        return Check(
+            "internet",
+            "Internet access",
+            WARN,
+            f"The HTTPS check failed ({type(exc).__name__}).",
+            "Check the connection or proxy, then retry.",
+        )
 
 
 def _session_permissions_ok(path: Path) -> tuple[bool, str]:
@@ -195,13 +284,12 @@ def ollama_environment(*, probe: bool = True) -> dict:
                 profile = profile_for_model(wanted)
             except (OSError, ValueError):
                 profile = None
-            state["model_present"] = bool(
-                model
-                and (
-                    profile is None
-                    or int(model.get("size") or 0) == int(profile["download_bytes"])
-                )
-            )
+            if model and profile:
+                expected_digest = profile["registry_manifest_digest"].removeprefix("sha256:")
+                installed_digest = str(model.get("digest") or "").removeprefix("sha256:")
+                state["model_present"] = installed_digest == expected_digest
+            else:
+                state["model_present"] = bool(model)
             if model and state["model_present"]:
                 state["model_digest"] = str(model.get("digest") or "")
                 smoke_error = ""
@@ -227,7 +315,7 @@ def ollama_environment(*, probe: bool = True) -> dict:
                     state["detail"] = f"Model {wanted} is installed; run its local draft test in AI Models."
             elif model:
                 state["detail"] = (
-                    f"Installed {wanted} does not match the reviewed model package size; "
+                    f"Installed {wanted} does not match the reviewed model digest; "
                     "repair it from AI Models."
                 )
             else:
@@ -277,14 +365,38 @@ def build_preflight(*, probe_ollama: bool = True) -> PreflightReport:
     report.checks.append(database_check())
     report.checks.append(disk_check())
 
+    webview2 = webview2_runtime_path()
+    report.checks.append(
+        Check(
+            "webview2",
+            "Windows desktop runtime",
+            OK if webview2 else (MISSING if os.name == "nt" else WARN),
+            (
+                f"WebView2 Runtime {webview2.parent.name} is installed."
+                if webview2
+                else (
+                    "WebView2 Runtime was not found."
+                    if os.name == "nt"
+                    else "WebView2 is only required by the Windows desktop build."
+                )
+            ),
+            (
+                "Install the Microsoft Edge WebView2 Evergreen Runtime and restart Channel Press."
+                if os.name == "nt" and not webview2
+                else ""
+            ),
+            "Windows desktop shell",
+        )
+    )
+
     chrome = chrome_path()
     report.checks.append(
         Check(
             "chrome",
             "Print browser",
             OK if chrome else MISSING,
-            str(chrome) if chrome else "Chrome or Edge was not found; PDF rendering will fail.",
-            "" if chrome else "Install Google Chrome.",
+            str(chrome) if chrome else "No matching Playwright Chromium, Chrome or Edge was found.",
+            "" if chrome else "Repair the bundled print renderer or install a supported browser.",
             "PDF and page proofs",
         )
     )

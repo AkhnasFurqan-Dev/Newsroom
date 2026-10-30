@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from channel_press import desktop, processes
@@ -58,6 +59,33 @@ def test_desktop_pause_stops_api_and_destroys_window(monkeypatch):
     assert stopped.wait(2)
     assert bridge.server.should_exit is True
     assert bridge.allow_close is True
+
+
+def test_desktop_close_callback_does_not_block_on_webview(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    returned = threading.Event()
+
+    class Window:
+        def evaluate_js(self, _):
+            entered.set()
+            release.wait(timeout=1)
+
+    bridge = desktop.DesktopBridge()
+    bridge.window = Window()
+    threading.Timer(0.5, release.set).start()
+    started = time.monotonic()
+
+    def request_close():
+        bridge.on_closing()
+        returned.set()
+
+    threading.Thread(target=request_close, daemon=True).start()
+
+    assert returned.wait(timeout=0.2)
+    assert time.monotonic() - started < 0.2
+    assert entered.wait(timeout=1)
+    assert release.wait(timeout=1)
 
 
 def test_windows_worker_launch_has_no_console():

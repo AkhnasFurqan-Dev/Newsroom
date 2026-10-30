@@ -41,6 +41,7 @@
   <a href="/schedules" class="{{ 'is-active' if active == 'schedules' }}">Schedules</a>
   <a href="/jobs" class="{{ 'is-active' if active == 'jobs' }}">Jobs</a>
   {% if can.edit %}<a href="/ai-models" class="{{ 'is-active' if active == 'ai_models' }}">AI Models</a>{% endif %}
+  {% if can.own %}<a href="/connections" class="{{ 'is-active' if active == 'connections' }}">Connections</a>{% endif %}
   {% if can.edit %}<a href="/media-cache" class="{{ 'is-active' if active == 'media_cache' }}">Media cache</a>{% endif %}
   <a href="/branding" class="{{ 'is-active' if active == 'branding' }}">Branding</a>
   {% if can.edit %}<a href="/appearance" class="{{ 'is-active' if active == 'appearance' }}">Appearance</a>{% endif %}

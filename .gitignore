@@ -18,6 +18,7 @@ venv/
 node_modules/
 dist/
 build/
+.build/
 *.egg-info/
 .coverage
 htmlcov/

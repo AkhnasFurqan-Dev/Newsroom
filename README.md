@@ -72,8 +72,10 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
   the FastAPI newsroom, model setup, diagnostics, article/edition views and worker
   progress. Managed workers are no-console child processes with private logs;
   **Continue in background** hides the window without stopping the local service,
-  while **Pause safely and exit** waits for safe checkpoints. The installer and
-  clean-machine release are not complete yet.
+  while **Pause safely and exit** waits for safe checkpoints. The candidate now
+  bundles the Playwright-pinned Chromium, Paged.js, and print/e-paper templates.
+  The per-user online installer passed isolated install/update/uninstall checks
+  on the development machine; no clean-machine release is certified.
 - **Multiple newspapers on one computer.** Each publication keeps its own
   branding, source list, schedules, drafts, editions, archive and editor
   membership. The header selector switches the working newspaper; the server
@@ -92,21 +94,25 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
   `qwen3.5:9b-q4_K_M` (6,550,825,373 bytes) and optional Compact `qwen3.5:2b`
   (2,683,396,637 bytes). Registry manifest, layer and Apache-2.0 license hashes
   are checked before an in-window download. New selections require a synthetic
-  local smoke test before real-channel drafting. Qwen3.5 weights and real
-  Qwen3.5 inference have **not** yet been verified on this machine; Qwen2.5
-  results below are historical measurements, not evidence for the new models.
+  local smoke test before real-channel drafting. Standard and Compact passed
+  their synthetic local smoke tests; Standard also passed a live editorial draft
+  and evidence-audit path. Enhanced was downloaded and digest-verified but was
+  not loaded because this laptop has 6 GB VRAM and insufficient free RAM at the
+  time of the check. These are local observations, not a 9B quality or
+  performance claim.
 
 ![Edition detail](docs/images/edition-detail.png)
 
 ## Requirements
 
-- Windows 10/11, Python 3.12.
-- Microsoft Edge WebView2 Runtime for the desktop shell.
-- Google Chrome installed (the PDF pipeline launches the installed Chrome
-  channel through Playwright). No cloud account or paid API is required.
-- Optional: Ollama for local non-fixture drafting and in-app model downloads.
-  Ollama must be installed and its local service reachable; model weights are
-  downloaded only after an editor confirms the displayed size.
+- Windows 10/11, 64-bit. The packaged application includes its Python runtime
+  and the Playwright-pinned Chromium renderer. WebView2 Runtime is required; the
+  online installer attempts to install it if missing.
+- No developer Python, Chrome, cloud account or paid API is required to launch
+  the packaged fixture/import workflow.
+- Non-fixture local AI currently requires an installed, reachable Ollama runtime.
+  The installer does not bundle Ollama or model weights; AI readiness remains
+  incomplete until an exact pinned model passes the in-app smoke test.
 - No FFmpeg is required; OpenCV supplies video frame extraction.
 
 ## Install
@@ -118,9 +124,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
 The script creates `.venv`, installs pinned application/test/desktop/build
-dependencies, copies `.env.example` to `.env` if needed, checks for Chrome and
-initialises the SQLite database. This is a developer/source-checkout setup, not
-the promised no-Python end-user installer.
+dependencies, copies `.env.example` to `.env` if needed, checks renderer
+prerequisites and initialises the SQLite database. This is a developer
+source-checkout setup. To build a packaged candidate and online installer, use
+`scripts\build-windows.ps1` followed by `scripts\build-installer.ps1`; neither
+command certifies a clean Windows installation or supplies the Ollama runtime
+and model weights.
 
 ## Five-minute demo
 

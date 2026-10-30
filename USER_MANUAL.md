@@ -35,11 +35,20 @@ registration screen; accounts are created by an owner.
 
 ![Dashboard](docs/images/dashboard.png)
 
-### If the first-run screen appears
+### First-run setup
 
 When no owner exists, the app shows **Set up Channel Press**. Enter a username,
 display name and a password of at least 12 characters. The first account becomes
-the owner. This screen only exists while the user table is empty.
+the owner. After setup, the same window opens **Connections** with a first-run
+checklist for local AI, newspaper identity, authorized sources or licensed
+imports, schedules and the first proof. This screen only appears while the user
+table is empty; the checklist remains available while the installation has no
+edition.
+
+Use **Check again** to refresh the bounded local/network checks. A missing
+Telegram login does not block a rights-cleared import. Do not select Enhanced
+unless the device has sufficient memory; an installed model is not marked ready
+until its local smoke test passes.
 
 ### Signing out
 

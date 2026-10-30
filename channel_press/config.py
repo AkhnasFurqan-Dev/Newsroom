@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .browser_runtime import is_frozen_application
+
+if is_frozen_application():
+    runtime_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(runtime_root / "pw-browsers")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 

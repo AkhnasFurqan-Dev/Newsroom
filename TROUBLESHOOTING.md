@@ -1,12 +1,13 @@
 # Channel Press — Troubleshooting
 
-Start with **Diagnostics** in the UI or:
+Start with **Connections** in the desktop app for bounded status and remediation
+links. **Diagnostics** shows detailed local reports. For a source checkout, use:
 
 ```powershell
 .\.venv\Scripts\python.exe -m channel_press.cli diagnostics
 ```
 
-It reports the database revision, Chrome, model reachability, FFmpeg/OpenCV,
+It reports the database revision, print renderer, model reachability, FFmpeg/OpenCV,
 public URL and counts without exposing secrets. Also check `data\logs\` and the
 **Jobs** page for the failing stage.
 
@@ -37,9 +38,11 @@ server is running.
 
 ## The desktop window does not open or close as expected
 
-- The source preview requires the desktop extra and the Microsoft Edge WebView2
-  Runtime. A missing runtime or startup error is written to the private desktop
-  log; packaged runtime detection and the installer are not yet certified.
+- The packaged app requires Microsoft Edge WebView2 Runtime. The online
+  installer includes Microsoft's signed bootstrapper and attempts a silent
+  install when WebView2 is absent. If the runtime is blocked by policy, install
+  the supported Evergreen Runtime and retry. A startup error is written to the
+  private desktop log.
 - If another Channel Press instance is already running, starting it again
   focuses the existing window. **Continue in background** hides that window but
   leaves the app and queued work running; launch Channel Press again to restore
@@ -485,11 +488,18 @@ root `fonts\` folder when imports were used, and the e-paper's `assets\fonts\`.
 To re-render an older edition, install the family again or re-import the licensed
 file.
 
-**Chrome failed to launch** — install Google Chrome, close a hung Chrome process,
-and re-run. The renderer first uses installed Google Chrome, then Microsoft
-Edge, and finally Playwright's bundled Chromium if it is installed. If none is
-available, install Google Chrome or run
+**Bundled print browser missing or corrupt** — packaged builds require the exact
+Playwright-pinned Chromium under `ChannelPress\_internal\pw-browsers`. Use the
+installer's update/repair path or rebuild the candidate with
+`scripts\build-windows.ps1`; do not install an arbitrary Chromium revision into
+the package. A source checkout may use installed Chrome/Edge or run
 `.\.venv\Scripts\python.exe -m playwright install chromium`.
+
+**The installer completes but Local AI is not ready** — the current installer
+does not bundle Ollama or model weights. Install/reuse a supported local Ollama
+runtime, open **AI Models**, download the confirmed pinned model and pass its
+smoke test. The app does not load Enhanced 9B automatically on a low-memory
+device. An offline AI installer is not available in this build.
 
 **The edition is still a draft and the job says `layout`** — this means the
 worker reached the PDF stage but did not finish it. Run

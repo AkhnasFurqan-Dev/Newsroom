@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +17,7 @@ from ..constants import SECTION_LABELS
 from ..logging_setup import get_logger
 from ..models import Edition
 from ..timeutil import human_local
+from ..browser_runtime import launch_print_browser
 from .planner import EditionPlan, StoryPackage, create_plan
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -708,65 +708,8 @@ def render_edition_pdf(
 
     with sync_playwright() as playwright:
         browser_timeout = max(1, int(settings.layout_browser_timeout_seconds * 1000))
-        launch_attempts: list[dict[str, str]] = []
-        chrome_candidates = [
-            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
-            / "Google"
-            / "Chrome"
-            / "Application"
-            / "chrome.exe",
-            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
-            / "Google"
-            / "Chrome"
-            / "Application"
-            / "chrome.exe",
-            Path(os.environ.get("LOCALAPPDATA", ""))
-            / "Google"
-            / "Chrome"
-            / "Application"
-            / "chrome.exe",
-        ]
-        edge_candidates = [
-            Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
-            / "Microsoft"
-            / "Edge"
-            / "Application"
-            / "msedge.exe",
-            Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
-            / "Microsoft"
-            / "Edge"
-            / "Application"
-            / "msedge.exe",
-        ]
-        browser_options = {"headless": True, "args": ["--allow-file-access-from-files", "--disable-gpu"]}
-        browser = None
         notify("layout_launch_browser", "Starting the print browser")
-        for candidate in chrome_candidates:
-            if candidate.exists():
-                launch_attempts.append({"browser": "chrome", "path": str(candidate)})
-                browser = playwright.chromium.launch(
-                    channel="chrome", timeout=browser_timeout, **browser_options
-                )
-                break
-        if browser is None:
-            for candidate in edge_candidates:
-                if candidate.exists():
-                    launch_attempts.append({"browser": "edge", "path": str(candidate)})
-                    browser = playwright.chromium.launch(
-                        channel="msedge", timeout=browser_timeout, **browser_options
-                    )
-                    break
-        if browser is None:
-            launch_attempts.append({"browser": "playwright-chromium", "path": ""})
-            try:
-                browser = playwright.chromium.launch(timeout=browser_timeout, **browser_options)
-            except Exception as exc:
-                attempted = ", ".join(item["browser"] for item in launch_attempts)
-                raise RuntimeError(
-                    "No supported print browser could be launched. "
-                    f"Tried {attempted}; install Google Chrome or run "
-                    "'playwright install chromium'."
-                ) from exc
+        browser = launch_print_browser(playwright, timeout_ms=browser_timeout)
         page = None
         try:
             notify("layout_load_page", "Opening the local print document")

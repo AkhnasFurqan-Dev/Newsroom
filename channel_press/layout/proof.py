@@ -9,7 +9,6 @@ without pretending an unverified article is print-ready.
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -17,6 +16,7 @@ from playwright.sync_api import sync_playwright
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..browser_runtime import launch_print_browser
 from ..logging_setup import get_logger
 from ..models import PublicationProfile
 from ..theming import ThemeRender, available_font_assets, compile_payload, compile_theme
@@ -74,43 +74,7 @@ def build_proof_html(
 
 
 def _launch(playwright):
-    options = {"headless": True, "args": ["--allow-file-access-from-files", "--disable-gpu"]}
-    chrome_candidates = [
-        Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
-        / "Google"
-        / "Chrome"
-        / "Application"
-        / "chrome.exe",
-        Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
-        / "Google"
-        / "Chrome"
-        / "Application"
-        / "chrome.exe",
-        Path(os.environ.get("LOCALAPPDATA", ""))
-        / "Google"
-        / "Chrome"
-        / "Application"
-        / "chrome.exe",
-    ]
-    edge_candidates = [
-        Path(os.environ.get("PROGRAMFILES", "C:\\Program Files"))
-        / "Microsoft"
-        / "Edge"
-        / "Application"
-        / "msedge.exe",
-        Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"))
-        / "Microsoft"
-        / "Edge"
-        / "Application"
-        / "msedge.exe",
-    ]
-    for candidate in chrome_candidates:
-        if candidate.exists():
-            return playwright.chromium.launch(channel="chrome", **options)
-    for candidate in edge_candidates:
-        if candidate.exists():
-            return playwright.chromium.launch(channel="msedge", **options)
-    return playwright.chromium.launch(**options)
+    return launch_print_browser(playwright)
 
 
 def render_theme_proof(

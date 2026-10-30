@@ -40,7 +40,7 @@ def test_healthz_and_first_run_setup_flow(client):
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers["location"].startswith("/")
+    assert response.headers["location"].startswith("/connections")
     assert "cp_session" in response.cookies
 
     dashboard = client.get("/")
@@ -151,6 +151,9 @@ def test_web_import_and_withdraw_use_the_same_ingestion_rules(client, owner, dem
     )
     assert response.status_code == 303
     assert "Imported+26" in response.headers["location"] or "Imported%2026" in response.headers["location"]
+    source_page = client.get(f"/sources/{demo_channel.id}")
+    assert source_page.status_code == 200
+    assert "Why this classification" in source_page.text
 
     with SessionLocal() as session:
         assert session.query(SourcePost).count() == 26

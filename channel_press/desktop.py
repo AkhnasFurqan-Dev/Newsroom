@@ -91,10 +91,23 @@ class DesktopBridge:
         if self.allow_close:
             return True
         if self.window is not None:
+            threading.Timer(0.05, self._show_close_choice).start()
+        return False
+
+    def _show_close_choice(self) -> None:
+        if self.allow_close or self.window is None:
+            return
+        try:
             self.window.evaluate_js(
                 "window.dispatchEvent(new Event('channel-press-close-request'))"
             )
-        return False
+        except Exception:
+            from .logging_setup import get_logger
+
+            get_logger("desktop").exception(
+                "desktop_close_prompt_failed",
+                extra={"kind": "desktop"},
+            )
 
     def shutdown(self, choice: str) -> dict[str, str | bool]:
         if choice not in {"continue", "pause"}:

@@ -1,10 +1,19 @@
+import os
 from pathlib import Path
 
 from PyInstaller.building.build_main import Analysis
 from PyInstaller.building.api import COLLECT, EXE, PYZ
+from PyInstaller.building.datastruct import Tree
 from PyInstaller.utils.hooks import collect_all
 
 ROOT = Path(SPECPATH).parent
+BROWSER_ROOT = Path(os.environ.get("CHANNEL_PRESS_PLAYWRIGHT_BROWSERS", ""))
+if not BROWSER_ROOT.is_dir():
+    raise SystemExit(
+        "A matching Playwright Chromium cache is required. "
+        "Run scripts/build-windows.ps1 to prepare the renderer."
+    )
+
 DATAS = [
     (str(ROOT / "alembic"), "alembic"),
     (str(ROOT / "alembic.ini"), "."),
@@ -12,8 +21,18 @@ DATAS = [
     (str(ROOT / "fixtures"), "fixtures"),
     (str(ROOT / "channel_press" / "web" / "templates"), "channel_press/web/templates"),
     (str(ROOT / "channel_press" / "web" / "static"), "channel_press/web/static"),
+    (str(ROOT / "channel_press" / "layout" / "templates"), "channel_press/layout/templates"),
+    (str(ROOT / "channel_press" / "publishing" / "templates"), "channel_press/publishing/templates"),
     (str(ROOT / "channel_press" / "ai" / "prompts"), "channel_press/ai/prompts"),
     (str(ROOT / "channel_press" / "ai" / "model_manifest.json"), "channel_press/ai"),
+]
+DATAS += [
+    (source, os.path.dirname(destination))
+    for destination, source, _typecode in Tree(
+        str(BROWSER_ROOT),
+        prefix="pw-browsers",
+        excludes=[".links", "__dirlock"],
+    )
 ]
 WEBVIEW_DATA, WEBVIEW_BINARIES, WEBVIEW_HIDDEN = collect_all("webview")
 DATAS += WEBVIEW_DATA

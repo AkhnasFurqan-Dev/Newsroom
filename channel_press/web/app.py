@@ -109,7 +109,7 @@ from ..editorial.revisions import (
 from ..ingestion.adapters import ImportFormatError, normalize_messages
 from ..ingestion.service import ensure_import_media_dir, import_payload
 from ..migrations import upgrade_database
-from ..preflight import build_preflight
+from ..preflight import build_preflight, internet_check
 from ..publications import (
     PUBLICATION_COOKIE,
     accessible_publications,
@@ -656,7 +656,7 @@ def setup_submit(
     audit(db, user, "setup.complete", "user", user.id)
     raw, _login = create_login_session(db, user, request.client.host if request.client else "", request.headers.get("user-agent", ""))
     db.commit()
-    response = _redirect("/", "Setup complete.")
+    response = _redirect("/connections", "Owner account created. Continue the first-run checks below.")
     set_session_cookie(response, raw)
     return response
 
@@ -1252,6 +1252,13 @@ def _live_handle(channel: Channel) -> str:
 def _telegram_error(exc: Exception) -> str:
     """Actionable, redacted copy; Telegram errors already explain the remedy."""
     if isinstance(exc, TelegramTransportError):
+        if "timed out" in str(exc).casefold() or "timeout" in str(exc).casefold():
+            return (
+                "Telegram could not be reached before the connection timed out. If other "
+                "internet services work, Telegram access may be restricted by your ISP or "
+                "region. Check your connection, firewall or configured network proxy, then "
+                "retry. Rights-cleared manual import remains available."
+            )
         return redact(str(exc))[:400]
     return redact(f"{type(exc).__name__}: {exc}")[:400]
 
@@ -4527,6 +4534,58 @@ def diagnostics_page(request: Request, user: User = Depends(require_role("owner"
             pending_jobs=int(pending),
             env_file=str(settings.env_file),
             session_file=str(settings.telegram_session_file),
+        ),
+    )
+
+
+@app.get("/connections")
+def connections_page(
+    request: Request,
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+):
+    report = build_preflight(probe_ollama=True)
+    telegram = report.telegram
+    telegram_status = telegram.get("status", "missing")
+    telegram_messages = {
+        "missing": (
+            "Telegram API credentials are not configured. Rights-cleared import remains "
+            "available without a Telegram connection."
+        ),
+        "blocked": "The Telegram client dependency is unavailable in this installation.",
+        "configured": (
+            "Credentials are configured, but no authorized session is saved. Sign in from "
+            "the source connection page."
+        ),
+        "session_unreadable": (
+            "The saved session could not be read. Reconnect from the source connection page."
+        ),
+        "session_present": (
+            "A session file exists. Test the authorized source before collecting; its presence "
+            "alone does not prove that Telegram is reachable."
+        ),
+    }
+    channel = db.scalar(select(Channel).order_by(Channel.id.asc()))
+    telegram_url = f"/sources/{channel.id}/telegram" if channel else "/sources"
+    checks = [internet_check(), *report.checks]
+    return render(
+        request,
+        "connections.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "connections",
+            checks=checks,
+            telegram_message=telegram_messages.get(
+                telegram_status,
+                "Telegram status is unknown. Test the authorized source connection before collecting.",
+            ),
+            telegram_url=telegram_url,
+            telegram_status=telegram_status,
+            checked_at=utcnow(),
+            ollama_status=report.ollama.get("detail", "Local AI readiness is unavailable."),
+            is_first_run=db.scalar(select(Edition.id).limit(1)) is None,
         ),
     )
 
