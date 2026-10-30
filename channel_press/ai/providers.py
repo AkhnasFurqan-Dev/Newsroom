@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from ..config import settings
 from ..models import SourcePost, StoryClaim, StoryCluster, StoryTimelineEvent
 from ..editorial.claims import contains_injection, strip_injection
+from ..editorial.clean_text import is_near_duplicate, repair_prose, strip_output_decor
 from ..editorial.entities import sentence_split
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
@@ -69,12 +70,25 @@ class SourceEvidence:
 
 
 @dataclass
+class ResearchEvidence:
+    url: str
+    publisher: str
+    title: str
+    excerpt: str
+    published_at: str = ""
+
+
+@dataclass
 class StoryBundle:
     story: StoryCluster
     sources: list[SourceEvidence]
     claims: list[StoryClaim]
     timeline: list[StoryTimelineEvent]
     seed: dict | None = None
+    # Independently discovered pages an editor has accepted as context. They
+    # are attributed to their own outlet and are never presented as the
+    # channel's reporting or as automatic verification.
+    research: list[ResearchEvidence] = field(default_factory=list)
 
 
 @dataclass
@@ -109,9 +123,52 @@ def prompt_version(name: str) -> str:
     return "unversioned"
 
 
+# Sentences that comment on the channel's own reporting rather than report a
+# development. They are legitimate source material for an analysis or a note,
+# but they must not become the body of a news article.
+_COMMENTARY_ONLY = re.compile(
+    r"(?i)^(?:this (?:basically |essentially )?means|in other words|"
+    r"your (?:key )?reminder|it is worth (?:noting|remembering)|"
+    r"note that|remember that|as (?:we|i) (?:said|noted)|"
+    r"let (?:us|me) (?:be clear|explain)|to put it (?:simply|bluntly))\b"
+)
+
+
+_TRAILING_STOP = re.compile(
+    r"(?i)\s+(?:in|on|at|to|of|for|and|or|with|from|by|the|a|an|after|before|"
+    r"as|that|which|who|whom|its|his|her|their|is|are|was|were|has|have|had|"
+    r"will|would|could|should|said|says|reported)$"
+)
+
+
+def _headline_from_lead(lead: str, limit: int = 92) -> str:
+    """Build a complete-looking headline from a lead without an ellipsis.
+
+    The cluster title is sometimes a truncated first line. A printed headline
+    that stops mid-clause ("... leave the 12") is worse than a shorter, clean
+    clause. This only chooses where to stop; it never adds a word.
+    """
+    text = lead.strip().rstrip(".")
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for separator in (": ", " \u2014 ", " \u2013 ", "; ", ", "):
+        index = cut.rfind(separator)
+        if index >= 40:
+            cut = cut[:index]
+            break
+    else:
+        cut = cut.rsplit(" ", 1)[0]
+    cut = _TRAILING_STOP.sub("", cut).strip(" ,;:")
+    return cut or text[:limit].rstrip()
+
+
 def _clean_source_sentence(sentence: str) -> str:
-    sentence = re.sub(r"^\s*(Update|Correction|Analysis|Editorial)\s*:\s*", "", sentence, flags=re.I)
+    sentence = re.sub(
+        r"^\s*(Update|Correction|Analysis|Editorial)\s*:\s*", "", sentence, flags=re.I
+    )
     sentence = re.sub(r"https?://\S+", "", sentence)
+    sentence = strip_output_decor(sentence)
     sentence = re.sub(r"\s+", " ", sentence).strip(" ,;")
     return sentence.strip()
 
@@ -125,26 +182,42 @@ def compose_from_evidence(bundle: StoryBundle) -> DraftResult:
     """
     sentences: list[tuple[str, StoryClaim | None]] = []
     seen: set[str] = set()
+    kept: list[str] = []
+    # Commentary is only reportable when the story is explicitly an analysis or
+    # an opinion piece. A news report must lead with what happened.
+    allow_commentary = bundle.story.genre in {"analysis", "opinion", "editor_note"}
     correction_claims = [c for c in bundle.claims if c.claim_type == "correction"]
     ordered_claims = correction_claims + [c for c in bundle.claims if c.claim_type != "correction"]
     for claim in ordered_claims:
-        sentence = _clean_source_sentence(claim.text)
+        sentence = repair_prose(_clean_source_sentence(claim.text))
         if len(sentence.split()) < 6:
+            continue
+        if not allow_commentary and _COMMENTARY_ONLY.search(sentence):
             continue
         key = sentence.lower()
         if key in seen:
             continue
+        if any(is_near_duplicate(sentence, prior, threshold=0.8) for prior in kept):
+            continue
         if contains_injection(sentence):
             continue
         seen.add(key)
+        kept.append(sentence)
         sentences.append((sentence, claim))
     if not sentences:
         # Fall back to fragments when no claims exist yet.
         for source in bundle.sources:
             for sentence in sentence_split(source.text):
-                cleaned = _clean_source_sentence(sentence)
-                if len(cleaned.split()) >= 6 and cleaned.lower() not in seen:
+                cleaned = repair_prose(_clean_source_sentence(sentence))
+                if (
+                    len(cleaned.split()) >= 6
+                    and cleaned.lower() not in seen
+                    and (allow_commentary or not _COMMENTARY_ONLY.search(cleaned))
+                ):
+                    if any(is_near_duplicate(cleaned, prior, threshold=0.8) for prior in kept):
+                        continue
                     seen.add(cleaned.lower())
+                    kept.append(cleaned)
                     sentences.append((cleaned, None))
     if not sentences:
         raise ValueError("No publishable evidence sentences were found for this story.")
@@ -159,8 +232,13 @@ def compose_from_evidence(bundle: StoryBundle) -> DraftResult:
             current = []
     if current:
         body.append(" ".join(current))
-    title = bundle.story.canonical_title.strip() or lead[:90]
-    title = re.sub(r"^(Update|Correction|Analysis|Editorial)\s*:\s*", "", title, flags=re.I).strip()
+    raw_title = bundle.story.canonical_title.strip()
+    if not raw_title or raw_title.endswith(("\u2026", "...")) or len(raw_title) > 95:
+        title = _headline_from_lead(lead)
+    else:
+        title = raw_title
+    title = repair_prose(re.sub(r"^(Update|Correction|Analysis|Editorial)\s*:\s*", "", title, flags=re.I))
+    title = title.strip().rstrip(" /\\~|>\u2013\u2014-")
     standfirst = ""
     if len(sentences) > 1:
         candidate = sentences[1][0]
@@ -303,6 +381,10 @@ class OllamaDraftProvider:
             evidence.append(line)
             used += len(line)
         claim_lines = [f"[C{i}] {c.text} (certainty={c.certainty}, status={c.verification_status})" for i, c in enumerate(bundle.claims, start=1)]
+        research_lines = [
+            f"[R{index}] {item.publisher} ({item.published_at or 'date not stated'}): {item.title}. {item.excerpt}"
+            for index, item in enumerate(bundle.research, start=1)
+        ]
         user = (
             f"STORY: {bundle.story.canonical_title}\nGENRE: {bundle.story.genre}\n"
             f"TRUSTED SCHEMA: title, deck, standfirst, body array.\n\n"
@@ -310,6 +392,13 @@ class OllamaDraftProvider:
             + "\n\n".join(evidence)
             + "\n\nCLAIM LEDGER:\n"
             + "\n".join(claim_lines)
+            + (
+                "\n\nACCEPTED EXTERNAL CONTEXT (independent pages; attribute to the named outlet, "
+                "never present as channel evidence or automatic verification):\n"
+                + "\n\n".join(research_lines)
+                if research_lines
+                else ""
+            )
         )
         last_error = ""
         for attempt in range(2):
@@ -400,4 +489,36 @@ def gather_bundle(db, story: StoryCluster) -> StoryBundle:
             .order_by(StoryTimelineEvent.event_at.asc())
         )
     )
-    return StoryBundle(story=story, sources=sources, claims=claims, timeline=timeline, seed=build_seed(db, story))
+    from ..models import ExternalReference
+
+    research_rows = list(
+        db.scalars(
+            select(ExternalReference)
+            .where(
+                ExternalReference.story_id == story.id,
+                ExternalReference.review_status == "accepted",
+                ExternalReference.provider.like("search:%"),
+            )
+            .order_by(ExternalReference.published_at.desc().nullslast(), ExternalReference.id.asc())
+            .limit(4)
+        )
+    )
+    research = [
+        ResearchEvidence(
+            url=row.url,
+            publisher=row.publisher,
+            title=row.title,
+            excerpt=(row.excerpt or "")[:900],
+            published_at=row.published_at.date().isoformat() if row.published_at else "",
+        )
+        for row in research_rows
+        if row.excerpt
+    ]
+    return StoryBundle(
+        story=story,
+        sources=sources,
+        claims=claims,
+        timeline=timeline,
+        seed=build_seed(db, story),
+        research=research,
+    )

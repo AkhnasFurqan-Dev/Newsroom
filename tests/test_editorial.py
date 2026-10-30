@@ -212,6 +212,46 @@ def test_draft_cleanup_removes_source_plumbing_and_duplicate_leads():
     assert cleaned.standfirst == ""
 
 
+def test_attribution_repair_and_near_duplicate_paragraphs():
+    from channel_press.ai.providers import DraftResult
+    from channel_press.editorial.clean_text import repair_prose
+    from channel_press.editorial.drafting import _clean_draft
+
+    assert (
+        repair_prose(
+            "The council met on Monday, according to a recent message from the channel reported."
+        )
+        == "The council met on Monday."
+    )
+    assert repair_prose("The channel reported noted that the road was closed.") == (
+        "The channel said that the road was closed."
+    )
+    assert repair_prose("The country's official news channel, @ExampleNews, said it.") == (
+        "The country's official news channel, said it."
+    )
+    assert ",." not in repair_prose("The channel said the road closed,.")
+
+    cleaned = _clean_draft(
+        DraftResult(
+            title="ARDC to hold talks with militants",
+            deck="",
+            standfirst="",
+            body=[
+                "The council will hold talks through traditional jirgas with local elders.",
+                "The council will hold talks through traditional jirgas with local elders and community cooperation.",
+                "Each member will oversee negotiations in their district.",
+                "Each member will oversee negotiations in their own district, according to a message from the channel reported.",
+            ],
+            provider="ollama",
+            model="test",
+            prompt_version="test",
+        )
+    )
+    assert len(cleaned.body) == 2, cleaned.body
+    assert "reported noted" not in " ".join(cleaned.body)
+    assert "according to a message" not in " ".join(cleaned.body).lower()
+
+
 def test_draft_cleanup_drops_duplicate_deck_and_truncated_tail():
     from channel_press.ai.providers import DraftResult
     from channel_press.editorial.drafting import _clean_draft

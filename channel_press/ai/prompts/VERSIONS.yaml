@@ -1,7 +1,7 @@
 # Prompt version index
 # Update the version when changing instructions; the version is stored on each model run.
-news_article: news-article-v4
-analysis_article: analysis-article-v3
+news_article: news-article-v6
+analysis_article: analysis-article-v5
 editorial_note: editorial-note-v2
 headlines: headlines-v2
 style_revision: style-revision-v1

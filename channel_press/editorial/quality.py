@@ -86,6 +86,41 @@ def _repeated_phrases(body: list[str]) -> list[str]:
     return sorted(repeated, key=lambda phrase: (-len(phrase), phrase))[:3]
 
 
+def _verbatim_source_runs(body: list[str], source_text: str, *, size: int = 12) -> list[str]:
+    """Long word runs copied verbatim from the source evidence.
+
+    A newspaper may quote a short phrase, but a paragraph lifted wholesale from
+    a Telegram post is not synthesis. This is a note for the editor, not an
+    automatic rewrite: a genuine direct quotation is an editorial decision.
+    """
+    source_tokens = [token.lower() for token in _words(source_text)]
+    if len(source_tokens) < size:
+        return []
+    source_runs = {
+        " ".join(source_tokens[index : index + size])
+        for index in range(len(source_tokens) - size + 1)
+    }
+    body_tokens = [token.lower() for token in _words("\n".join(body))]
+    runs: list[str] = []
+    for index in range(max(0, len(body_tokens) - size + 1)):
+        candidate = " ".join(body_tokens[index : index + size])
+        if candidate in source_runs and candidate not in runs:
+            runs.append(candidate)
+        if len(runs) >= 3:
+            break
+    return runs
+
+
+def _repeated_openings(body: list[str]) -> list[str]:
+    starts: Counter[str] = Counter()
+    for paragraph in body:
+        for sentence in sentence_split(paragraph):
+            words = sentence.split()
+            if len(words) >= 2:
+                starts[" ".join(words[:2]).lower()] += 1
+    return sorted(key for key, count in starts.items() if count >= 3)
+
+
 def quality_review(
     *,
     title: str,
@@ -185,6 +220,26 @@ def quality_review(
                 phrases=repeated,
             )
         )
+    openings = _repeated_openings(clean_body)
+    if openings:
+        findings.append(
+            _finding(
+                "repeated_openings",
+                "note",
+                "The same sentence opening is used three or more times: " + ", ".join(openings),
+                openings=openings,
+            )
+        )
+    verbatim = _verbatim_source_runs(clean_body, source_text) if source_text else []
+    if verbatim:
+        findings.append(
+            _finding(
+                "verbatim_source_text",
+                "note",
+                "A long run of wording is copied verbatim from the source; verify this is synthesis rather than paraphrase-by-padding.",
+                phrases=verbatim,
+            )
+        )
     lower = body_text.lower()
     stock = [phrase for phrase in STOCK_PHRASES if phrase in lower]
     if stock:
@@ -270,5 +325,7 @@ def quality_review(
         "paragraph_words": paragraph_words,
         "opinion_leaks": leaks,
         "repetitions": repeated,
+        "repeated_openings": openings,
+        "verbatim_source_runs": verbatim,
         "stock_phrases": stock,
     }

@@ -32,12 +32,13 @@ from dataclasses import dataclass, field
 
 from ..ingestion.adapters import NormalizedMessage
 
-CLASSIFIER_VERSION = "post-moderation-2026-10-24-v2"
+CLASSIFIER_VERSION = "post-moderation-2026-10-30-v3"
 
 CLASSIFICATION_LABELS = {
     "editorially_relevant": "Editorially relevant",
     "context_only": "Context only (no reportable development)",
     "promotion": "Promotion / channel call",
+    "channel_administration": "Channel administration (not news)",
     "duplicate": "Duplicate or forwarded copy",
     "empty": "No content",
     "low_information": "Low information",
@@ -54,6 +55,11 @@ EDITOR_OVERRIDES = {
     "exclude": ("excluded", "editor_excluded", "low_information"),
     "context_only": ("excluded", "editor_context_only", "context_only"),
     "promotion": ("excluded", "editor_promotion", "promotion"),
+    "channel_administration": (
+        "excluded",
+        "editor_channel_administration",
+        "channel_administration",
+    ),
     "profanity": ("excluded", "editor_profanity", "profanity_only"),
 }
 
@@ -280,6 +286,28 @@ _PROMOTION = re.compile(
 _ENGAGEMENT_BAIT = re.compile(
     r"(?i)\b(like\s+and\s+share|share\s+if|comment\s+below|repost\s+if|retweet|"
     r"who\s+else\s+thinks|100[\s%]|copy[\s-]?paste\s+and\s+share|like\s+if\s+you)\b"
+)
+
+# Channel housekeeping: posting schedules, Telegram-search problems, boosts,
+# apologies and audience administration. These are operational notices about
+# the channel itself, not developments a newspaper reports. The rule is narrow:
+# it requires a self-referential operational phrase, so an official body's
+# substantive notice ("the ministry suspended permits") is unaffected.
+_ADMIN_HOUSEKEEPING = re.compile(
+    r"(?i)(?:"
+    r"\b(?:limit|reduce|slow(?:ing)?|pause|suspend|stop)\w*\b[^.!?\n]{0,60}"
+    r"\b(?:posting|postings|updates|output|frequency)\b|"
+    r"\b(?:posting|postings)\b[^.!?\n]{0,45}"
+    r"\b(?:frequency|schedule|upcoming days|reduce|limited|difficult)\b|"
+    r"\bhectic schedule\b|"
+    r"\btelegram search\b|"
+    r"\bboost (?:the|our|this|its) channel\b|"
+    r"\bsupport (?:the|our|this|its) channel\b|"
+    r"\bchannel (?:notice|announcement|admin(?:istration)?|update)\b|"
+    r"\badmin(?:istrative)? (?:notice|message|post|update)\b|"
+    r"\b(?:we|we'll|we will)\b[^.!?\n]{0,70}\b(?:post|posting|posts|postings)\b|"
+    r"\bposting regularly\b"
+    r")"
 )
 
 # ---------------------------------------------------------------------------
@@ -682,6 +710,7 @@ def _classification_signals(
         add("slogan", ["generic_slogan"])
     add("promotion", _unique_matches(_PROMOTION, normalized))
     add("engagement_bait", _unique_matches(_ENGAGEMENT_BAIT, normalized))
+    add("channel_administration", _unique_matches(_ADMIN_HOUSEKEEPING, normalized))
     if _EMOJI.search(text):
         add("emoji", ["emoji_present"])
     if injected:
@@ -738,6 +767,7 @@ def classify_message(message: NormalizedMessage, *, rights_ok: bool) -> Moderati
     weak = len(_WEAK_SIGNAL.findall(text))
     injected = contains_injection(text)
     has_media = bool(kinds)
+    admin_notice = bool(_ADMIN_HOUSEKEEPING.search(normalized))
     signals = _classification_signals(
         text=text,
         normalized=normalized,
@@ -802,6 +832,13 @@ def classify_message(message: NormalizedMessage, *, rights_ok: bool) -> Moderati
             return result("low_information", "instruction_injection_without_news")
         return result("promotion", "promotion_or_channel_call")
 
+    # 10b: channel housekeeping — posting schedules, Telegram-search problems,
+    # boosts and admin notices. These describe the channel's operations, not a
+    # development in the world. Excluded before story clustering; an editor can
+    # override the decision and the reason is recorded.
+    if admin_notice:
+        return result("channel_administration", "channel_administration_notice")
+
     # 11: prompt injection is neutralised; alone it carries no news.
     if injected and events == 0 and not has_media:
         return result("low_information", "instruction_injection_without_news")
@@ -865,5 +902,6 @@ def exclusion_for(
         return result.reason
     return {
         "promotion": "promotion_only",
+        "channel_administration": "channel_administration",
         "rights_blocked": "rights_unconfirmed",
     }.get(result.classification, result.classification)

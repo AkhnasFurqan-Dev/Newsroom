@@ -37,6 +37,7 @@ JOB_PAUSED = {"awaiting_review", "ready_to_publish", "resumable", "failed_retrya
 EXCLUSION_REASONS = {
     "telegram_forward": "Telegram-native forwarded post",
     "promotion_only": "Promotion/channel-link-only post",
+    "channel_administration": "Channel administration notice, not news",
     "empty": "No text or media",
     "service_event": "Service event without news content",
     "rights_unconfirmed": "No active content-rights grant",
@@ -71,6 +72,7 @@ EDITOR_OVERRIDE_CHOICES = {
     "exclude": "Exclude from story processing",
     "context_only": "Include as context only",
     "promotion": "Mark as promotional",
+    "channel_administration": "Mark as channel administration",
     "profanity": "Mark as profanity/abuse",
 }
 

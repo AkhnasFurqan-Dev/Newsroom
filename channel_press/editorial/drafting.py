@@ -26,6 +26,12 @@ from ..models import (
 from ..timeutil import utcnow
 from .audit import audit_article
 from .claims import build_claims, contains_injection, strip_injection
+from .clean_text import (
+    has_verbatim_run,
+    is_near_duplicate,
+    is_redundant_paragraph,
+    repair_prose,
+)
 from .entities import parse_entity_json
 from .moderation import attribution_issues, profanity_details, redact_profanity
 from .quality import quality_review
@@ -77,11 +83,12 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
-def _clean_paragraph(text: str) -> str:
+def _clean_paragraph(text: str, seen_sentences: list[str] | None = None) -> str:
     """Strip model-echoed source plumbing without touching the facts."""
     text = _EVIDENCE_MARKER.sub("", text)
     text = _MESSAGE_WITH_TIME.sub("", text)
     text = _MESSAGE_REF.sub("", text)
+    text = repair_prose(text)
     text = _ISO_TIMESTAMP.sub(_human_date, text)
     text = _ISO_DATE.sub(_human_date, text)
     text = re.sub(r"\s+([.,;:])", r"\1", text)
@@ -89,12 +96,33 @@ def _clean_paragraph(text: str) -> str:
     sentences: list[str] = []
     seen: set[str] = set()
     for sentence in _SENTENCE_BOUNDARY.split(text):
-        sentence = sentence.strip()
+        sentence = repair_prose(sentence).strip()
         key = _normalise(sentence)
-        if sentence and key and key not in seen:
-            seen.add(key)
-            sentences.append(sentence)
+        if not sentence or not key or key in seen:
+            continue
+        # A model asked for five paragraphs often restates the same update in
+        # different words. Printing both is padding, not journalism.
+        if seen_sentences and any(
+            is_near_duplicate(sentence, prior, threshold=0.82)
+            for prior in seen_sentences[-8:]
+        ):
+            continue
+        seen.add(key)
+        sentences.append(sentence)
+        if seen_sentences is not None:
+            seen_sentences.append(sentence)
     return " ".join(sentences).strip()
+
+
+def _starts_with_title(text: str, title: str) -> bool:
+    """True when a paragraph opens by repeating the headline word for word."""
+    title_words = _normalise(title).split()
+    text_words = _normalise(text).split()
+    if len(title_words) < 4 or len(text_words) < len(title_words):
+        return False
+    if text_words[: len(title_words)] != title_words:
+        return False
+    return len(text_words) <= len(title_words) + 10
 
 
 def _similar(a: str, b: str) -> bool:
@@ -115,23 +143,37 @@ def _containment(short: str, long: str) -> float:
 
 
 def _clean_draft(result: DraftResult) -> DraftResult:
-    title = result.title.strip()
+    title = repair_prose(result.title.strip())
+    title = re.sub(r"[\s/\\~|>\u2013\u2014-]*(?:\.{2,}|\u2026)$", "", title).strip()
+    title = title.rstrip(" /\\~|>\u2013\u2014-")
     if contains_injection(title):
         title, _ = strip_injection(title)
-    standfirst = result.standfirst.strip()
-    deck = result.deck.strip()[:300]
+    standfirst = repair_prose(result.standfirst.strip())
+    deck = repair_prose(result.deck.strip())[:300]
     if deck and standfirst and _similar(deck, standfirst):
         deck = ""
     seen_paragraphs: set[str] = set()
+    seen_sentences: list[str] = []
     body = []
     for paragraph in result.body:
-        text = _clean_paragraph(paragraph)
+        text = _clean_paragraph(paragraph, seen_sentences)
         if not text:
             continue
         if contains_injection(text):
             text, _ = strip_injection(text)
         key = _normalise(text)
         if not key or key in seen_paragraphs:
+            continue
+        # A whole paragraph can be a restatement of an earlier one even when
+        # the sentences were not individually identical. Asking a small local
+        # model for "more" length reliably produces such padding.
+        if any(is_near_duplicate(text, prior, threshold=0.8) for prior in body[-4:]):
+            continue
+        if body and any(has_verbatim_run(text, prior) for prior in body[-4:]):
+            continue
+        if body and is_redundant_paragraph(text, " ".join(body)):
+            continue
+        if title and _starts_with_title(text, title):
             continue
         seen_paragraphs.add(key)
         body.append(text)
@@ -359,7 +401,10 @@ def draft_story(
                 message="At least one source post uses an unrecognised script; verify the translation and names.",
             )
         )
-    corpus = "\n".join(source.text for source in bundle.sources)
+    corpus = "\n".join(
+        [source.text for source in bundle.sources]
+        + [f"{item.title} {item.excerpt}" for item in bundle.research]
+    )
     audit = audit_article(
         db,
         article_id=article.id,
@@ -484,7 +529,10 @@ def reaudit_article(db: Session, article: Article) -> dict:
     claims = list(db.scalars(select(StoryClaim).where(StoryClaim.story_id == article.story_id)))
     db.execute(delete(ArticleClaimLink).where(ArticleClaimLink.article_id == article.id))
     body = json.loads(article.body_json or "[]")
-    corpus = "\n".join(source.text for source in bundle.sources)
+    corpus = "\n".join(
+        [source.text for source in bundle.sources]
+        + [f"{item.title} {item.excerpt}" for item in bundle.research]
+    )
     audit = audit_article(
         db,
         article_id=article.id,

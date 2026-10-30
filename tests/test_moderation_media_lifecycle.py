@@ -139,6 +139,34 @@ def test_short_alerts_in_english_urdu_roman_urdu_and_mixed_language_are_retained
         assert exclusion_for(result) is None
 
 
+def test_channel_administration_notices_are_excluded_but_official_notices_are_news():
+    notice = (
+        "NOTE: The Pakistan News shall limit its posting in the upcoming days because of "
+        "several reasons. We are already on a hectic schedule, so posting regularly is "
+        "already difficult for us. Combined that with the fact that the channel doesn't "
+        "appear in Telegram Search is another factor. Although we'll try to repeal the ban, "
+        "in the meantime, we'll reduce our postings. If anyone wants to boost the channel, "
+        "it'd be appreciated."
+    )
+    result = _classify(notice)
+    assert result.classification == "channel_administration"
+    assert result.reason == "channel_administration_notice"
+    assert exclusion_for(result) == "channel_administration"
+    assert any(
+        signal["kind"] == "channel_administration" for signal in result.signals
+    )
+
+    # A consequential operational notice from a public institution is still
+    # news; the rule is about the channel's own housekeeping, not the word
+    # "notice" or "posting".
+    official = _classify(
+        "The district administration issued a notification suspending building "
+        "permits in the flood zone for three days."
+    )
+    assert official.classification == "editorially_relevant"
+    assert exclusion_for(official) is None
+
+
 def test_language_families_are_distinguished_and_unknown_scripts_are_kept_for_review():
     assert detect_language_family("Police confirmed the arrest.") == "en"
     assert detect_language_family("پولیس نے گرفتار کیا") == "ur"

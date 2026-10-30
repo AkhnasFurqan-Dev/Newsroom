@@ -88,6 +88,31 @@ def test_quality_detects_repeated_wording_long_headline_and_invented_reporter():
     assert "attribution" in {finding["code"] for finding in invented["findings"]}
 
 
+def test_quality_flags_verbatim_source_copy_and_repeated_openings():
+    source = (
+        "The district administration said the road would reopen on Tuesday after "
+        "engineers completed a safety inspection of the bridge."
+    )
+    report = quality_review(
+        title="Bridge road to reopen on Tuesday",
+        deck="",
+        standfirst="",
+        body=[
+            source,
+            source,
+            "The district administration said traffic would resume in stages.",
+            "The district administration said the inspection found no structural damage.",
+        ],
+        genre="news",
+        publication_names=["The Pakistan News"],
+        source_text=source,
+    )
+    codes = {finding["code"] for finding in report["findings"]}
+    assert "verbatim_source_text" in codes
+    assert "repeated_openings" in codes
+    assert report["verbatim_source_runs"]
+
+
 def test_quality_passes_a_plain_attributed_report():
     report = quality_review(
         title="Quetta market blast kills two",

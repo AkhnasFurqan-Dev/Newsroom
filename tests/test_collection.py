@@ -157,26 +157,36 @@ def test_forwards_and_promotions_are_excluded_but_never_published_as_news(db, de
                 "after engineers completed a safety inspection of the bridge."
             ),
         },
+        {
+            "id": 4,
+            "date": "2026-10-19T05:15:00Z",
+            "text": (
+                "NOTE: The Pakistan News shall limit its posting in the upcoming days. "
+                "We are on a hectic schedule and the channel does not appear in Telegram "
+                "Search. If anyone wants to boost the channel, it would be appreciated."
+            ),
+        },
     ]
     stats = collect_window(db, demo_channel, window, FixtureWindowSource(messages), rights=None)
     db.commit()
 
-    assert stats.fetched == 3
+    assert stats.fetched == 4
     assert stats.included == 1
-    assert stats.excluded == 2
+    assert stats.excluded == 3
     statuses = {
         post.telegram_message_id: post.inclusion_status
         for post in db.scalars(
             select(SourcePost).where(SourcePost.channel_id == demo_channel.id)
         )
     }
-    assert statuses == {1: "excluded", 2: "excluded", 3: "included"}
+    assert statuses == {1: "excluded", 2: "excluded", 3: "included", 4: "excluded"}
     reasons = {
         post.telegram_message_id: post.exclusion_reason
         for post in db.scalars(
             select(SourcePost).where(SourcePost.channel_id == demo_channel.id)
         )
     }
+    assert reasons[4] == "channel_administration"
     assert reasons[1] == "telegram_forward"
     assert reasons[2] == "promotion_only"
 
