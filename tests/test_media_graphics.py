@@ -159,11 +159,19 @@ def test_charts_require_sourced_matching_values_and_render_svg():
 
 def test_timeline_is_ordered_and_escaped():
     events = [
-        StoryTimelineEvent(event_at=datetime(2026, 10, 20, 8, 0, tzinfo=UTC), description="Second <script>", certainty="reported"),
-        StoryTimelineEvent(event_at=datetime(2026, 10, 20, 6, 0, tzinfo=UTC), description="First", certainty="attributed"),
+        StoryTimelineEvent(
+            event_at=datetime(2026, 10, 20, 8, 0, tzinfo=UTC),
+            description="The second inspection found <script> damage.",
+            certainty="reported",
+        ),
+        StoryTimelineEvent(
+            event_at=datetime(2026, 10, 20, 6, 0, tzinfo=UTC),
+            description="The first inspection closed the market.",
+            certainty="attributed",
+        ),
     ]
     html = render_timeline_html(events, "Asia/Karachi")
-    assert html.index("First") < html.index("Second")
+    assert html.index("first inspection") < html.index("second inspection")
     assert "&lt;script&gt;" in html
     assert "20 Oct" in html
 
@@ -172,14 +180,16 @@ def test_timeline_cap_states_the_omitted_count():
     events = [
         StoryTimelineEvent(
             event_at=datetime(2026, 10, 20, hour, 0, tzinfo=UTC),
-            description=f"Entry {hour}",
+            description=f"The relief operation issued update {hour} for the district.",
             certainty="reported",
         )
         for hour in range(1, 10)
     ]
     html = render_timeline_html(events, "Asia/Karachi", max_events=3)
     assert html.count("<li>") == 3
-    assert "Entry 1" in html and "Entry 3" in html
-    assert "Entry 4" not in html
-    assert "first 3 of 9" in html
-    assert "remaining 6" in html
+    assert "update 1" in html and "update 3" in html
+    assert "update 4" not in html
+    # The printed notice states that the list is incomplete without exposing
+    # internal counters or message IDs.
+    assert "Earlier developments are summarised" in html
+    assert "remaining" not in html.lower()

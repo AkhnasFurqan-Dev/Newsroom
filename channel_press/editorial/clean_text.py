@@ -287,7 +287,16 @@ def similarity(left: str, right: str) -> float:
 
 
 def is_near_duplicate(left: str, right: str, threshold: float = 0.82) -> bool:
-    """True when two source updates say materially the same thing."""
+    """True when two source updates say materially the same thing.
+
+    Different numbers are a material difference: "six injured" and "nine
+    injured" are not the same update, even though the strings are almost
+    identical.
+    """
+    left_numbers = set(_NUMBER.findall(left or ""))
+    right_numbers = set(_NUMBER.findall(right or ""))
+    if left_numbers and right_numbers and left_numbers != right_numbers:
+        return False
     if similarity(left, right) >= threshold:
         return True
     a = set(re.findall(r"[a-z0-9\u0600-\u06ff]+", (left or "").lower()))
