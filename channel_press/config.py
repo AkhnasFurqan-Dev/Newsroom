@@ -38,6 +38,21 @@ class Settings(BaseSettings):
     public_base_url: str = ""
     secret_key: str | None = None
 
+    # Automatic story discovery. Google and Brave need their own API
+    # credentials; GDELT DOC 2.0 is the keyless fallback so the feature works
+    # without a paid provider. No adapter scrapes a search results page.
+    google_cse_api_key: str = ""
+    google_cse_cx: str = ""
+    brave_search_api_key: str = ""
+    search_timeout_seconds: float = 10.0
+    search_timespan_days: int = 7
+    # Comma-separated publisher RSS feeds used by the keyless fallback. Each
+    # outlet serves its own feed; no search results page is scraped.
+    search_rss_feeds: str = (
+        "https://www.dawn.com/feeds/home,"
+        "https://feeds.bbci.co.uk/news/world/rss.xml"
+    )
+
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:3b-instruct"
     ollama_keep_alive: str = "60s"

@@ -100,6 +100,7 @@ from ..publications import (
     channel_is_unassigned,
     edition_source_channels,
     publication_channels,
+    publication_for_channel,
     publication_for_edition,
     resolve_publication,
     unassigned_channels,
@@ -150,7 +151,15 @@ from ..media.service import (
     rank_media,
     update_media_caption,
 )
-from ..research import ResearchError, accept_reference, reject_reference, research_reference
+from ..research import (
+    ResearchError,
+    accept_reference,
+    discover_candidates,
+    provider_status,
+    reject_reference,
+    research_reference,
+)
+from ..research.service import normalise_url
 from ..fonts import (
     FontError,
     MAX_FONT_BYTES,
@@ -1728,6 +1737,8 @@ def story_detail(
             .order_by(ExternalReference.accessed_at.desc(), ExternalReference.id.desc())
         )
     )
+    publication = publication_for_channel(db, db.get(Channel, story.channel_id))
+    search_state = provider_status(publication.research_provider if publication else "auto")
     return render(
         request,
         "story.html",
@@ -1742,6 +1753,8 @@ def story_detail(
             fragments=rows,
             article=article,
             external=external,
+            research_policy=publication.research_policy if publication else "editor_triggered",
+            research_provider=search_state,
         ),
     )
 
@@ -1778,6 +1791,69 @@ def story_research_add(
         message="Research candidate fetched. It stays out of print until an editor accepts it."
         if created
         else "That page is already recorded for this story.",
+    )
+
+
+@app.post("/stories/{story_id}/research/discover")
+def story_research_discover(
+    story_id: int,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Ask the configured search provider for independent candidate sources."""
+    story = db.get(StoryCluster, story_id)
+    if story is None:
+        raise HTTPException(404, "Story not found.")
+    _channel_or_404(db, story.channel_id, user, "editor")
+    publication = publication_for_channel(db, db.get(Channel, story.channel_id))
+    if publication is None:
+        return _redirect(f"/stories/{story.id}", error="No newspaper is configured for this source.")
+    if (publication.research_policy or "editor_triggered") == "off":
+        return _redirect(
+            f"/stories/{story.id}",
+            error="Automatic search is turned off for this newspaper. Add a URL manually or enable it in settings.",
+        )
+    # Release the read transaction before the provider and page fetches.
+    db.commit()
+    try:
+        result = discover_candidates(db, story, publication)
+    except Exception as exc:  # provider/network failures are editorial state
+        db.rollback()
+        return _redirect(f"/stories/{story.id}", error=f"Search failed: {type(exc).__name__}: {str(exc)[:160]}")
+    audit(
+        db,
+        user,
+        "research.discover",
+        object_type="story",
+        object_id=story.id,
+        detail={
+            "provider": result.provider,
+            "status": result.status,
+            "queries": result.queries,
+            "created": len(result.created),
+            "skipped": result.skipped,
+        },
+    )
+    db.commit()
+    if result.status in {"unavailable", "error"}:
+        return _redirect(
+            f"/stories/{story.id}",
+            error=f"Search unavailable: {result.detail or 'configure a provider or add a URL manually.'}",
+        )
+    if result.status == "disabled":
+        return _redirect(f"/stories/{story.id}", error=result.detail)
+    if not result.created:
+        return _redirect(
+            f"/stories/{story.id}",
+            message=result.detail or "No new independent candidates were found. Add a URL manually if you have one.",
+        )
+    return _redirect(
+        f"/stories/{story.id}",
+        message=(
+            f"Found {len(result.created)} candidate source(s) via {result.provider}. "
+            "They stay out of the paper until an editor accepts them."
+        ),
     )
 
 
@@ -2701,6 +2777,37 @@ def edition_article_order(
     if not ok:
         return _redirect(target, error=note)
     return _redirect(target, f"Article order updated.{note}")
+
+
+@app.post("/editions/{edition_id}/rename")
+def edition_rename(
+    edition_id: int,
+    request: Request,
+    display_name: str = Form(""),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Editor-defined edition name; workflow kind stays internal."""
+    edition = _edition_or_404(db, edition_id, user)
+    _channel_or_404(db, edition.channel_id, user, "editor")
+    if edition.status == "published":
+        return _redirect(
+            f"/editions/{edition.id}",
+            error="Published versions keep their released name. Create a new revision to rename it.",
+        )
+    edition.display_name = display_name.strip()[:160]
+    edition.updated_at = utcnow()
+    audit(
+        db,
+        user,
+        "edition.rename",
+        "edition",
+        edition.id,
+        {"display_name": edition.display_name},
+    )
+    db.commit()
+    return _redirect(f"/editions/{edition.id}", "Edition name saved.")
 
 
 @app.post("/editions/{edition_id}/preview")
@@ -3699,14 +3806,22 @@ def branding_save(
     byline: str = Form("Editorial Desk"),
     source_disclosure: str = Form(""),
     slogan: str = Form(""),
-    footer_text: str = Form(""),
+    show_slogan: str = Form(""),
     city: str = Form(""),
     timezone: str = Form("Asia/Karachi"),
     accent: str = Form("#7b1f24"),
     paper_size: str = Form("tabloid"),
     contact_url: str = Form(""),
+    public_base_url: str = Form(""),
+    public_base_url_verified: str = Form(""),
     map_profile: str = Form("neutral"),
-    qr_strategy: str = Form("appendix"),
+    qr_strategy: str = Form("story"),
+    show_chronology: str = Form("auto"),
+    research_policy: str = Form("editor_triggered"),
+    research_provider: str = Form("auto"),
+    research_queries_per_story: int = Form(3),
+    research_max_per_story: int = Form(5),
+    research_auto_accept: str = Form("review"),
     issue_volume: int = Form(1),
     section_order: list[str] = Form(default=[]),
     allow_closing_light: str = Form(""),
@@ -3731,21 +3846,45 @@ def branding_save(
         return _redirect("/branding", error="Paper size must be tabloid or a3.")
     if db.scalar(select(CartographicProfile).where(CartographicProfile.key == map_profile)) is None:
         return _redirect("/branding", error="Unknown cartographic profile.")
-    if qr_strategy not in {"appendix", "verified_only", "none"}:
+    if qr_strategy not in {"story", "verified_only", "none"}:
         return _redirect("/branding", error="Unknown QR strategy.")
+    if show_chronology not in {"auto", "on", "off"}:
+        return _redirect("/branding", error="Chronology must be auto, on or off.")
+    if research_policy not in {"off", "editor_triggered", "automatic_substantial", "automatic_all"}:
+        return _redirect("/branding", error="Unknown research policy.")
+    if research_provider not in {"auto", "google_cse", "brave", "gdelt", "rss"}:
+        return _redirect("/branding", error="Unknown search provider.")
+    if research_auto_accept not in {"review", "auto_context"}:
+        return _redirect("/branding", error="Unknown research acceptance policy.")
+    if public_base_url.strip():
+        try:
+            base = normalise_url(public_base_url.strip())
+        except ResearchError as exc:
+            return _redirect("/branding", error=str(exc))
+        profile.public_base_url = base[:500]
+    else:
+        profile.public_base_url = ""
+        profile.public_base_url_verified = False
     profile.name = name.strip()[:160]
     profile.channel_handle = channel_handle.strip()[:120]
     profile.byline = (byline.strip()[:120] or "Editorial Desk")
     profile.source_disclosure = source_disclosure.strip()[:600]
     profile.slogan = slogan.strip()[:240]
-    profile.footer_text = footer_text.strip()
+    profile.show_slogan = bool(show_slogan)
     profile.city = city.strip()[:120]
     profile.timezone = timezone
     profile.accent = accent
     profile.paper_size = paper_size
     profile.contact_url = contact_url.strip()[:500]
+    profile.public_base_url_verified = bool(public_base_url_verified and profile.public_base_url)
     profile.map_profile = map_profile
     profile.qr_strategy = qr_strategy
+    profile.show_chronology = show_chronology
+    profile.research_policy = research_policy
+    profile.research_provider = research_provider
+    profile.research_queries_per_story = max(1, min(5, int(research_queries_per_story)))
+    profile.research_max_per_story = max(1, min(10, int(research_max_per_story)))
+    profile.research_auto_accept = research_auto_accept
     profile.issue_volume = max(1, int(issue_volume))
     ordered = [value for value in section_order if value in dict(SECTIONS)]
     profile.section_order_json = json.dumps(ordered or ["national", "regional", "international", "defence", "conflict", "analysis", "opinion", "briefs"])
@@ -4438,11 +4577,244 @@ async def unhandled_error(request: Request, exc: Exception):
         },
         status_code=500,
     )
+def _health_rows(
+    db: Session,
+    report,
+    publication: PublicationProfile | None,
+    channel: Channel | None,
+    telegram_result: dict | None,
+    telegram_error: str,
+) -> list[dict]:
+    """Readable status rows. No PIDs, raw JSON, paths or credentials."""
+    from zoneinfo import ZoneInfo
+
+    rows: list[dict] = [
+        {
+            "label": "Application",
+            "state": "ready",
+            "state_label": "Ready",
+            "detail": f"Web server responding · {settings.app_name}",
+            "action_url": "",
+            "action": "",
+        }
+    ]
+    database = next((check for check in report.checks if check.key == "database"), None)
+    if database is not None:
+        rows.append(
+            {
+                "label": "Database",
+                "state": "ready" if database.status == "ok" else "attention",
+                "state_label": "Ready" if database.status == "ok" else "Attention required",
+                "detail": database.detail,
+                "action_url": "",
+                "action": database.action,
+            }
+        )
+
+    if telegram_error:
+        rows.append(
+            {
+                "label": "Telegram account",
+                "state": "not_connected",
+                "state_label": "Not connected",
+                "detail": telegram_error,
+                "action_url": f"/sources/{channel.id}/telegram" if channel else "/sources",
+                "action": "Open Telegram connection",
+            }
+        )
+    elif telegram_result:
+        rows.append(
+            {
+                "label": "Telegram account",
+                "state": "ready",
+                "state_label": "Connected",
+                "detail": f"{telegram_result.get('title') or 'Account'} · session verified just now",
+                "action_url": "",
+                "action": "",
+            }
+        )
+    elif report.telegram.get("session_present"):
+        rows.append(
+            {
+                "label": "Telegram account",
+                "state": "degraded",
+                "state_label": "Session found",
+                "detail": "A local session exists but was not contacted in this check.",
+                "action_url": f"/sources/{channel.id}/telegram" if channel else "/sources",
+                "action": "Test source",
+            }
+        )
+    else:
+        rows.append(
+            {
+                "label": "Telegram account",
+                "state": "not_connected",
+                "state_label": "Not connected",
+                "detail": "No authorized Telegram session is available; fixtures and imports still work.",
+                "action_url": f"/sources/{channel.id}/telegram" if channel else "/sources",
+                "action": "Connect Telegram",
+            }
+        )
+
+    if channel is None:
+        rows.append(
+            {
+                "label": "Selected source channel",
+                "state": "not_connected",
+                "state_label": "Not selected",
+                "detail": "No source channel is linked to this newspaper.",
+                "action_url": "/sources",
+                "action": "Choose a source",
+            }
+        )
+    else:
+        rights = active_rights(db, channel.id)
+        rows.append(
+            {
+                "label": "Selected source channel",
+                "state": "ready" if rights else "attention",
+                "state_label": "Ready" if rights else "Attention required",
+                "detail": (
+                    f"{channel.title} ({channel.handle}) · content rights recorded"
+                    if rights
+                    else f"{channel.title} ({channel.handle}) · no active content-rights grant"
+                ),
+                "action_url": "" if rights else f"/sources/{channel.id}",
+                "action": "" if rights else "Record authorization",
+            }
+        )
+
+    ollama = report.ollama or {}
+    if ollama.get("model_present"):
+        rows.append(
+            {
+                "label": "Local AI",
+                "state": "ready",
+                "state_label": "Ready",
+                "detail": f"{settings.ollama_model} responded",
+                "action_url": "",
+                "action": "",
+            }
+        )
+    else:
+        rows.append(
+            {
+                "label": "Local AI",
+                "state": "not_connected" if not ollama.get("reachable") else "attention",
+                "state_label": "Not connected" if not ollama.get("reachable") else "Attention required",
+                "detail": ollama.get("detail") or "Ollama is not reachable.",
+                "action_url": "/diagnostics",
+                "action": "Open diagnostics",
+            }
+        )
+    rows.append(
+        {
+            "label": "Configured model",
+            "state": "ready" if ollama.get("model_present") else "degraded",
+            "state_label": settings.ollama_model,
+            "detail": "Installed and available for drafting." if ollama.get("model_present") else "Not confirmed installed.",
+            "action_url": "",
+            "action": "",
+        }
+    )
+
+    running = db.scalar(select(func.count()).select_from(Job).where(Job.status == "running")) or 0
+    queued = db.scalar(
+        select(func.count()).select_from(Job).where(Job.status.in_(["scheduled", "failed_retryable"]))
+    ) or 0
+    failed = db.scalar(select(func.count()).select_from(Job).where(Job.status == "failed_terminal")) or 0
+    if failed:
+        worker_state, worker_label = "attention", "Attention required"
+    elif running:
+        worker_state, worker_label = "ready", "Working"
+    elif queued:
+        worker_state, worker_label = "ready", "Queued"
+    else:
+        worker_state, worker_label = "paused", "Idle"
+    rows.append(
+        {
+            "label": "Edition worker",
+            "state": worker_state,
+            "state_label": worker_label,
+            "detail": (
+                f"{running} running · {queued} queued · {failed} failed"
+                if (running or queued or failed)
+                else "No active jobs"
+            ),
+            "action_url": "/jobs",
+            "action": "Open jobs",
+        }
+    )
+
+    search = provider_status(publication.research_provider if publication else "auto")
+    rows.append(
+        {
+            "label": "Source discovery",
+            "state": "ready" if search.get("status") == "ready" else "attention",
+            "state_label": "Ready" if search.get("status") == "ready" else "Unavailable",
+            "detail": (
+                f"{search.get('label') or search.get('provider')} · policy "
+                f"{(publication.research_policy if publication else 'editor_triggered').replace('_', ' ')}"
+                if search.get("status") == "ready"
+                else search.get("detail", "Configure a provider or add a URL manually.")
+            ),
+            "action_url": "/branding",
+            "action": "Research settings",
+        }
+    )
+    timezone = publication.timezone if publication else settings.timezone
+    checked = datetime.now(ZoneInfo(timezone)).strftime("%d %b %Y, %I:%M %p")
+    for row in rows:
+        row["checked"] = checked
+    return rows
+
+
 @app.post("/system/check")
-def system_check(user: User = Depends(require_role("owner")),
-                 db: Session = Depends(session_dependency),
-                 _csrf: None = Depends(require_csrf)):
+def system_check(
+    request: Request,
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Browser action: a readable status view, never a raw JSON dump."""
+    report = build_preflight(probe_ollama=True)
+    publication = resolve_publication(db, request, user)
+    channels = publication_channels(db, publication) if publication else []
+    channel = channels[0] if channels else db.scalar(
+        select(Channel).where(Channel.is_demo.is_(False)).limit(1)
+    )
+    telegram_result: dict | None = None
+    telegram_error = ""
+    if channel and active_rights(db, channel.id):
+        db.commit()
+        try:
+            telegram_result = telegram_service.preflight(
+                channel.handle, expected_id=str(channel.telegram_channel_id or "")
+            )
+        except TelegramTransportError as exc:
+            telegram_error = str(exc)
+        except Exception as exc:  # a transport crash must not hide the rest
+            telegram_error = f"Telegram check failed: {type(exc).__name__}"
+    rows = _health_rows(db, report, publication, channel, telegram_result, telegram_error)
+    template = _ENV.get_template("health.html.j2")
+    return HTMLResponse(
+        template.render(
+            request=request,
+            rows=rows,
+            checked_at=rows[0]["checked"] if rows else "",
+        )
+    )
+
+
+@app.post("/system/check.json")
+def system_check_json(
+    user: User = Depends(require_role("owner")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    """Programmatic health endpoint retained for scripts and diagnostics."""
     from ..operations import health
+
     result = health()
     channel = db.scalar(select(Channel).where(Channel.is_demo.is_(False)).limit(1))
     result["web"] = "Connected and tested"
@@ -4450,7 +4822,8 @@ def system_check(user: User = Depends(require_role("owner")),
         db.commit()
         try:
             result["source_channel"] = telegram_service.preflight(
-                channel.handle, expected_id=str(channel.telegram_channel_id or ""))
+                channel.handle, expected_id=str(channel.telegram_channel_id or "")
+            )
             result["telegram"] = telegram_service.status(probe=False)
         except TelegramTransportError as exc:
             result["source_channel"] = str(exc)

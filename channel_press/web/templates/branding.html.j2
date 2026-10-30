@@ -3,9 +3,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Publication identity</div>
     <h1>Branding &amp; edition policy</h1>
-    <p class="lede">These values drive the masthead, section order, cartographic convention and source-link policy. Changes apply to the next build; existing editions keep their profile snapshot.</p>
   </div>
 </div>
 
@@ -16,8 +14,8 @@
     <div class="field"><label for="name">Publication name</label><input id="name" name="name" type="text" value="{{ profile.name }}" required></div>
     <div class="field"><label for="channel_handle">Source channel handle</label><input id="channel_handle" name="channel_handle" type="text" value="{{ profile.channel_handle }}"></div>
     <div class="field"><label for="byline">Byline (printed under every headline)</label><input id="byline" name="byline" type="text" value="{{ profile.byline }}" placeholder="Editorial Desk"></div>
-    <div class="field"><label for="source_disclosure">Source disclosure (evidence statement)</label><textarea id="source_disclosure" name="source_disclosure" style="min-height:70px" placeholder="Editorial roundup based primarily on authorized posts published by …">{{ profile.source_disclosure }}</textarea></div>
-    <div class="field"><label for="slogan">Slogan</label><input id="slogan" name="slogan" type="text" value="{{ profile.slogan }}"></div>
+    <div class="field"><label for="source_disclosure">Internal source note</label><textarea id="source_disclosure" name="source_disclosure" style="min-height:70px" placeholder="Editor-only note about the source relationship; never printed.">{{ profile.source_disclosure }}</textarea></div>
+    <div class="field"><label for="slogan">Slogan (optional)</label><input id="slogan" name="slogan" type="text" value="{{ profile.slogan }}"></div>
     <div class="field"><label for="city">City</label><input id="city" name="city" type="text" value="{{ profile.city }}"></div>
     <div class="field"><label for="timezone">Timezone (IANA)</label><input id="timezone" name="timezone" type="text" value="{{ profile.timezone }}" required></div>
     <div class="field"><label for="accent">Accent colour</label><input id="accent" name="accent" type="text" value="{{ profile.accent }}" pattern="#[0-9a-fA-F]{6}" required></div>
@@ -33,20 +31,58 @@
         {% for item in maps %}<option value="{{ item.key }}" {% if profile.map_profile == item.key %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
       </select>
     </div>
-    <div class="field"><label for="qr_strategy">Source link / QR policy</label>
+    <div class="field"><label for="qr_strategy">Source code policy</label>
       <select id="qr_strategy" name="qr_strategy">
-        <option value="appendix" {% if profile.qr_strategy == 'appendix' %}selected{% endif %}>Appendix links; QR only when verified reachable</option>
-        <option value="verified_only" {% if profile.qr_strategy == 'verified_only' %}selected{% endif %}>Verified public QR only</option>
-        <option value="none" {% if profile.qr_strategy == 'none' %}selected{% endif %}>No QR codes</option>
+        <option value="story" {% if profile.qr_strategy in ['story', 'appendix'] %}selected{% endif %}>One compact code per story when a verified public target exists</option>
+        <option value="verified_only" {% if profile.qr_strategy == 'verified_only' %}selected{% endif %}>Verified public target only</option>
+        <option value="none" {% if profile.qr_strategy == 'none' %}selected{% endif %}>No printed codes</option>
       </select>
     </div>
     <div class="field"><label for="contact_url">Contact / public URL</label><input id="contact_url" name="contact_url" type="text" value="{{ profile.contact_url }}"></div>
+    <div class="field"><label for="show_chronology">Timeline</label>
+      <select id="show_chronology" name="show_chronology">
+        <option value="auto" {% if profile.show_chronology == 'auto' %}selected{% endif %}>Automatic when the evidence shows distinct stages</option>
+        <option value="on" {% if profile.show_chronology == 'on' %}selected{% endif %}>Always when source times exist</option>
+        <option value="off" {% if profile.show_chronology == 'off' %}selected{% endif %}>Off</option>
+      </select>
+    </div>
+    <div class="field"><label for="public_base_url">Public evidence-page base URL</label><input id="public_base_url" name="public_base_url" type="url" value="{{ profile.public_base_url }}" placeholder="https://news.example.org/editions"></div>
   </div>
 
-  <div class="field"><label for="footer_text">Footer / provenance text</label><textarea id="footer_text" name="footer_text" style="min-height:90px">{{ profile.footer_text }}</textarea></div>
+  <label class="field--inline"><input type="checkbox" name="show_slogan" value="1" {% if profile.show_slogan %}checked{% endif %}> Print the slogan under the masthead</label>
+  <label class="field--inline"><input type="checkbox" name="public_base_url_verified" value="1" {% if profile.public_base_url_verified %}checked{% endif %}> I have verified that the public evidence-page base URL serves the exported source bundles</label>
+
+  <h2>Automatic research</h2>
+  <div class="grid grid--2">
+    <div class="field"><label for="research_policy">Research policy</label>
+      <select id="research_policy" name="research_policy">
+        <option value="off" {% if profile.research_policy == 'off' %}selected{% endif %}>Off</option>
+        <option value="editor_triggered" {% if profile.research_policy == 'editor_triggered' %}selected{% endif %}>Editor-triggered only</option>
+        <option value="automatic_substantial" {% if profile.research_policy == 'automatic_substantial' %}selected{% endif %}>Automatic for substantial news</option>
+        <option value="automatic_all" {% if profile.research_policy == 'automatic_all' %}selected{% endif %}>Automatic for all eligible stories</option>
+      </select>
+    </div>
+    <div class="field"><label for="research_provider">Search provider</label>
+      <select id="research_provider" name="research_provider">
+        <option value="auto" {% if profile.research_provider == 'auto' %}selected{% endif %}>Automatic (configured API, then publisher feeds)</option>
+        <option value="google_cse" {% if profile.research_provider == 'google_cse' %}selected{% endif %}>Google Programmable Search</option>
+        <option value="brave" {% if profile.research_provider == 'brave' %}selected{% endif %}>Brave Search API</option>
+        <option value="gdelt" {% if profile.research_provider == 'gdelt' %}selected{% endif %}>GDELT DOC 2.0</option>
+        <option value="rss" {% if profile.research_provider == 'rss' %}selected{% endif %}>Publisher RSS feeds</option>
+      </select>
+    </div>
+    <div class="field"><label for="research_queries_per_story">Queries per story</label><input id="research_queries_per_story" name="research_queries_per_story" type="number" min="1" max="5" value="{{ profile.research_queries_per_story }}"></div>
+    <div class="field"><label for="research_max_per_story">Candidate cap per story</label><input id="research_max_per_story" name="research_max_per_story" type="number" min="1" max="10" value="{{ profile.research_max_per_story }}"></div>
+    <div class="field"><label for="research_auto_accept">Acceptance</label>
+      <select id="research_auto_accept" name="research_auto_accept">
+        <option value="review" {% if profile.research_auto_accept == 'review' %}selected{% endif %}>Every candidate waits for an editor</option>
+        <option value="auto_context" {% if profile.research_auto_accept == 'auto_context' %}selected{% endif %}>Accept ordinary dated context; hold contested or high-risk claims</option>
+      </select>
+    </div>
+  </div>
 
   <h2>Section order</h2>
-  <p class="help">Sections without articles are omitted. The front page is always first and the source appendix is always last.</p>
+  <p class="help">Sections without articles are omitted. The front page is always first.</p>
   <div class="field-row">
     {% for key, label in sections %}{% if key != 'front' %}
     <label class="field--inline"><input type="checkbox" name="section_order" value="{{ key }}" {% if key in order or not order %}checked{% endif %}> {{ label }}</label>

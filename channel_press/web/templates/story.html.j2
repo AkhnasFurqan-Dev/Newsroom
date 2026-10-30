@@ -52,14 +52,29 @@
     {% endfor %}
 
     <h2 id="research">Research context</h2>
-    <p class="help">Fetch one public HTML page as background. Research is untrusted data: it never becomes claim evidence, and a candidate stays out of the printed appendix until an editor accepts it.</p>
+    <div class="small muted">
+      Search:
+      {% if research_provider.status == 'ready' %}
+        {{ research_provider.label }} · Ready
+      {% else %}
+        Unavailable · {{ research_provider.detail }}
+      {% endif %}
+      · Policy: {{ research_policy|replace('_', ' ') }}
+    </div>
     {% if can.edit %}
-    <form method="post" action="/stories/{{ story.id }}/research" class="field-row" style="margin-bottom:12px">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <input name="url" type="url" placeholder="https://example.org/report" required style="min-width:280px">
-      <button type="submit">Fetch candidate</button>
-    </form>
+    <div class="field-row" style="margin:10px 0">
+      <form method="post" action="/stories/{{ story.id }}/research/discover">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit"{% if research_provider.status != 'ready' %} disabled title="{{ research_provider.detail }}"{% endif %}>Search sources</button>
+      </form>
+      <form method="post" action="/stories/{{ story.id }}/research" class="field-row">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input name="url" type="url" placeholder="https://example.org/report" required style="min-width:280px" aria-label="Public source URL">
+        <button type="submit">Add URL</button>
+      </form>
+    </div>
     {% endif %}
+    <p class="help">Candidates stay out of the paper until an editor accepts them. Accepted pages are attributed context, not automatic verification.</p>
     {% for ref in external %}
       <div class="card" style="margin-bottom:8px">
         <div class="split">
@@ -67,7 +82,8 @@
           <span class="badge badge--{{ 'approved' if ref.review_status == 'accepted' else ('rejected' if ref.review_status == 'rejected' else 'review') }}">{{ ref.review_status|status_label }}</span>
         </div>
         <div class="small"><a href="{{ ref.url }}" rel="noopener nofollow noreferrer">{{ ref.url }}</a></div>
-        <div class="small">{{ ref.publisher }}{% if ref.http_status %} · HTTP {{ ref.http_status }}{% endif %} · accessed {{ ref.accessed_at|shortdate }}</div>
+        <div class="small">{{ ref.publisher }}{% if ref.published_at %} · published {{ ref.published_at|shortdate }}{% endif %}{% if ref.http_status %} · HTTP {{ ref.http_status }}{% endif %} · accessed {{ ref.accessed_at|shortdate }}</div>
+        {% if ref.search_query %}<div class="small muted">Query: {{ ref.search_query }}{% if ref.relevance %} · match {{ '%.2f'|format(ref.relevance) }}{% endif %}</div>{% endif %}
         {% if ref.excerpt %}<p class="small">{{ ref.excerpt[:280] }}{% if ref.excerpt|length > 280 %}…{% endif %}</p>{% endif %}
         {% if ref.terms_note %}<div class="small muted">{{ ref.terms_note }}</div>{% endif %}
         {% if can.edit and ref.review_status != 'accepted' %}

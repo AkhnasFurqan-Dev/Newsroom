@@ -53,6 +53,7 @@ from .publications import (
 from .publishing.service import PublishResult, publish_edition
 from .media.service import prepare_edition_media
 from .ingestion.service import reclassify_posts
+from .research.search import SearchUnavailable, build_adapter, discover_candidates
 from .timeutil import utcnow
 
 ProgressCallback = Callable[[str, str], None]
@@ -154,6 +155,83 @@ def select_provider(
 def _notify(request: PipelineRequest, stage: str, detail: str = "") -> None:
     if request.progress:
         request.progress(stage, detail)
+
+
+AUTOMATIC_RESEARCH_POLICIES = {"automatic_substantial", "automatic_all"}
+RESEARCH_EDITION_CAP = 12
+
+
+def _run_automatic_research(
+    db: Session,
+    publication: PublicationProfile,
+    stories: list[StoryCluster],
+    request: PipelineRequest,
+) -> dict:
+    """Discover independent context without blocking the renderer.
+
+    Network work happens outside a long write transaction: the pipeline commits
+    its clustering state first and each story's candidates are committed as they
+    arrive. A provider failure is recorded and drafting continues from the
+    evidence the channel supplied.
+    """
+    policy = (publication.research_policy or "editor_triggered").strip()
+    if policy not in AUTOMATIC_RESEARCH_POLICIES:
+        return {"status": "not_requested", "policy": policy}
+    try:
+        adapter = build_adapter(publication.research_provider)
+    except SearchUnavailable as exc:
+        return {"status": "unavailable", "policy": policy, "detail": str(exc)}
+    ready, reason = adapter.available()
+    if not ready:
+        return {
+            "status": "unavailable",
+            "policy": policy,
+            "provider": adapter.name,
+            "detail": reason,
+        }
+
+    # Release the clustering write transaction before any network call.
+    db.commit()
+    targets = [
+        story
+        for story in stories
+        if policy == "automatic_all" or float(story.importance or 0) >= 0.5
+    ]
+    totals = {"status": "ok", "policy": policy, "provider": adapter.name, "stories": 0, "found": 0}
+    for index, story in enumerate(targets, start=1):
+        if totals["found"] >= RESEARCH_EDITION_CAP:
+            totals["detail"] = f"Per-edition research cap of {RESEARCH_EDITION_CAP} reached."
+            break
+        _notify(request, "research", f"Searching context {index}/{len(targets)}: {story.canonical_title[:70]}")
+        try:
+            result = discover_candidates(
+                db,
+                story,
+                publication,
+                adapter=adapter,
+                max_per_story=min(
+                    publication.research_max_per_story or 5,
+                    RESEARCH_EDITION_CAP - totals["found"],
+                ),
+                window_start=request.window_start,
+                window_end=request.window_end,
+            )
+        except Exception as exc:  # one provider failure must not lose the edition
+            db.rollback()
+            totals.setdefault("errors", []).append(f"story {story.id}: {type(exc).__name__}")
+            continue
+        totals["stories"] += 1
+        totals["found"] += result.found
+        if result.status == "unavailable":
+            totals["status"] = "unavailable"
+            totals["detail"] = result.detail
+            db.commit()
+            break
+        if result.errors:
+            totals.setdefault("errors", []).extend(result.errors[:2])
+        db.commit()
+    db.commit()
+    return totals
 
 
 def _open_flags(db: Session, article_ids: list[int]) -> list[ReviewFlag]:
@@ -382,6 +460,7 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         source_status="complete",
         kind=request.kind,
         title=title[:240],
+        display_name=(request.title.strip() or "")[:160],
         volume=volume,
         issue_number=issue_number,
         status="draft",
@@ -411,6 +490,8 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         edition.channel_id = primary.id
         edition.publication_id = publication.id
         edition.source_channel_ids_json = source_ids_json
+        if request.title.strip():
+            edition.display_name = request.title.strip()[:160]
     db.add(edition)
     db.flush()
 
@@ -502,6 +583,17 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         job.edition_id = edition.id
         job.result_json = json.dumps({"story_ids": [story.id for story in stories]})
         db.commit()
+    research_stats = (
+        _run_automatic_research(db, publication, stories, request) if not resumed else {"status": "resumed"}
+    )
+    if research_stats.get("found"):
+        _notify(
+            request,
+            "research",
+            f"Research: {research_stats['found']} candidate source(s) via {research_stats.get('provider', '')}",
+        )
+    elif research_stats.get("status") == "unavailable":
+        _notify(request, "research", f"Search unavailable: {research_stats.get('detail', '')}")
     provider, provider_note = select_provider(channels, request.provider)
     _notify(request, "drafting", f"Drafting {len(stories)} stories with {getattr(provider, 'name', 'provider')}")
     articles: list[Article] = []
@@ -622,6 +714,7 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
             ),
             "draft_errors": draft_errors,
             "source_errors": story_errors,
+            "research": research_stats,
             "sources": [
                 {"id": item.id, "title": item.title, "handle": item.handle}
                 for item in channels

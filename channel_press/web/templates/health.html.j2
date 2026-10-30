@@ -1,0 +1,13 @@
+<div class="health-list">
+{% for row in rows %}
+  <div class="health-row health-row--{{ row.state }}">
+    <div class="health-row__label">{{ row.label }}</div>
+    <div class="health-row__state">{{ row.state_label }}</div>
+    <div class="health-row__detail">
+      {{ row.detail }}
+      {% if row.action and row.action_url %}<a href="{{ row.action_url }}" class="health-row__action">{{ row.action }}</a>{% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+<div class="small muted">Checked {{ checked_at }} · live results, not cached</div>

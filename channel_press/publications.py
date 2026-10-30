@@ -191,6 +191,21 @@ def resolve_publication(db: Session, request, user: User) -> PublicationProfile 
     return options[0]
 
 
+def publication_for_channel(db: Session, channel: Channel) -> PublicationProfile | None:
+    """The newspaper a source channel feeds, used for per-paper research policy."""
+    link = db.scalar(
+        select(PublicationSource)
+        .where(PublicationSource.channel_id == channel.id)
+        .order_by(PublicationSource.priority.asc(), PublicationSource.id.asc())
+        .limit(1)
+    )
+    if link is not None:
+        found = db.get(PublicationProfile, link.publication_id)
+        if found is not None:
+            return found
+    return default_publication(db)
+
+
 def publication_for_edition(db: Session, edition: Edition) -> PublicationProfile | None:
     if edition.publication_id:
         found = db.get(PublicationProfile, edition.publication_id)

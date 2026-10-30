@@ -225,8 +225,10 @@ class _Extractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.title_parts: list[str] = []
         self.text_parts: list[str] = []
+        self.paragraph_parts: list[str] = []
         self._skip_depth = 0
         self._in_title = False
+        self._in_paragraph = 0
 
     def handle_starttag(self, tag: str, attrs) -> None:  # noqa: ANN001
         tag = tag.lower()
@@ -236,6 +238,8 @@ class _Extractor(HTMLParser):
         if tag == "title":
             self._in_title = True
             return
+        if tag == "p":
+            self._in_paragraph += 1
         if tag in _BLOCK_TAGS:
             self.text_parts.append("\n")
 
@@ -247,6 +251,9 @@ class _Extractor(HTMLParser):
         if tag == "title":
             self._in_title = False
             return
+        if tag == "p" and self._in_paragraph:
+            self._in_paragraph -= 1
+            self.paragraph_parts.append("\n")
         if tag in _BLOCK_TAGS:
             self.text_parts.append("\n")
 
@@ -257,6 +264,8 @@ class _Extractor(HTMLParser):
             self.title_parts.append(data)
         else:
             self.text_parts.append(data)
+            if self._in_paragraph:
+                self.paragraph_parts.append(data)
 
 
 def _extract(html: str) -> tuple[str, str]:
@@ -266,6 +275,11 @@ def _extract(html: str) -> tuple[str, str]:
     except Exception:  # malformed markup must not fail the whole request
         pass
     text = " ".join(" ".join(parser.text_parts).split())
+    # A news page's navigation and footer can fill the first thousand
+    # characters. Prefer the article body paragraphs when the page has them.
+    paragraphs = " ".join(" ".join(parser.paragraph_parts).split())
+    if len(paragraphs) >= 200:
+        text = paragraphs
     title = " ".join(" ".join(parser.title_parts).split())
     if not title:
         title = text[:120]

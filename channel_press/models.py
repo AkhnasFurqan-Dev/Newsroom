@@ -371,6 +371,12 @@ class ExternalReference(Base):
     http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     content_sha256: Mapped[str] = mapped_column(String(64), default="")
     terms_note: Mapped[str] = mapped_column(String(300), default="")
+    # Discovery metadata: which query found this candidate, how closely its
+    # title matched the story, and the outlet's own publication date. These are
+    # internal editorial signals, never printed as reader-facing provenance.
+    search_query: Mapped[str] = mapped_column(String(200), default="")
+    relevance: Mapped[float] = mapped_column(Float, default=0.0)
+    published_at: Mapped[Optional[datetime]] = mapped_column(UTCDateTime, nullable=True)
 
 
 class Article(Base):
@@ -502,6 +508,10 @@ class PublicationProfile(Base):
     research_provider: Mapped[str] = mapped_column(String(30), default="auto")
     research_queries_per_story: Mapped[int] = mapped_column(Integer, default=3)
     research_max_per_story: Mapped[int] = mapped_column(Integer, default=5)
+    # review | auto_context. ``review`` keeps every discovered page as a
+    # candidate for an editor. ``auto_context`` accepts only ordinary, dated,
+    # reachable non-social context; contested or high-risk stories still wait.
+    research_auto_accept: Mapped[str] = mapped_column(String(20), default="review")
     issue_volume: Mapped[int] = mapped_column(Integer, default=1)
     section_order_json: Mapped[str] = mapped_column(Text, default="[]")
     allow_closing_light: Mapped[bool] = mapped_column(Boolean, default=True)

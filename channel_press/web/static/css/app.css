@@ -440,3 +440,16 @@ form.is-dirty .field > label { color: var(--accent); }
 .pub-select { display: flex; align-items: center; gap: 6px; margin-left: auto; margin-right: 24px; font-size: 12px; }
 .pub-select label { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 .pub-select select { padding: 4px 6px; border: 1px solid var(--rule-strong); background: #fffdf8; font-family: var(--sans); font-size: 12px; max-width: 240px; }
+
+/* Readable system-health rows: state, reason and one recovery action. */
+.health-list { display: grid; gap: 0; border-top: 1px solid var(--hairline, #d8d4ca); }
+.health-row { display: grid; grid-template-columns: 1.2fr 1fr 2.6fr; gap: 12px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--hairline, #d8d4ca); }
+.health-row__label { font-weight: 600; }
+.health-row__state { font-size: 0.86rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.health-row--ready .health-row__state { color: #2f6b3a; }
+.health-row--attention .health-row__state { color: #8a4a12; }
+.health-row--not_connected .health-row__state { color: #7b1f24; }
+.health-row--degraded .health-row__state { color: #6b5a18; }
+.health-row--paused .health-row__state { color: #555; }
+.health-row__detail { font-size: 0.9rem; color: var(--ink-soft, #4a4a44); }
+.health-row__action { margin-left: 8px; white-space: nowrap; }

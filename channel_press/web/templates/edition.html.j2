@@ -1,17 +1,24 @@
 {% extends "base.html.j2" %}
-{% block title %}{{ edition.title }} · v{{ edition.version }}{% endblock %}
+{% block title %}{{ edition.display_name or edition.title }} · v{{ edition.version }}{% endblock %}
 {% block shell_class %}shell--wide{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">{{ edition.kind|status_label }} · Vol. {{ edition.volume }} No. {{ edition.issue_number }} · <strong>Version {{ edition.version }}</strong>{% if edition.parent_edition_id %} of edition #{{ edition.parent_edition_id }}{% endif %}</div>
+    <div class="kicker">Vol. {{ edition.volume }} No. {{ edition.issue_number }} · <strong>Version {{ edition.version }}</strong>{% if edition.parent_edition_id %} of edition #{{ edition.parent_edition_id }}{% endif %}</div>
 {% if source_channels %}
 <div class="small">Sources: {% for source in source_channels %}{{ source.title }}{% if not loop.last %} · {% endif %}{% endfor %}
   {% if edition.source_status == 'partial' %}<span class="badge badge--review">partial sources</span>{% endif %}
 </div>
 {% endif %}
-    <h1>{{ edition.title }}</h1>
-    <p class="lede">Window {{ edition.window_start|localtime(edition.timezone) }} to {{ edition.window_end|localtime(edition.timezone) }} · cutoff {{ edition.cutoff_at|localtime(edition.timezone) }}</p>
+    <h1>{{ edition.display_name or edition.title }}</h1>
+    <div class="small">Window {{ edition.window_start|localtime(edition.timezone) }} to {{ edition.window_end|localtime(edition.timezone) }} · cutoff {{ edition.cutoff_at|localtime(edition.timezone) }}</div>
+    {% if edition.status != 'published' and can.edit %}
+    <form method="post" action="/editions/{{ edition.id }}/rename" class="field-row" style="margin-top:6px">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input name="display_name" type="text" value="{{ edition.display_name or '' }}" placeholder="Edition name" aria-label="Edition name" style="max-width:280px">
+      <button class="btn btn--small btn--ghost" type="submit">Rename</button>
+    </form>
+    {% endif %}
   </div>
   <div class="page-head__actions">
     <span class="badge badge--{{ edition.status }}">{{ edition.status|status_label }}</span>

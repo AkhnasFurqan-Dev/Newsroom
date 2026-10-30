@@ -3,9 +3,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Production</div>
     <h1>Build an edition</h1>
-    <p class="lede">The build creates a persistent job. A detached worker clusters the window, drafts and audits articles, renders the tabloid PDF and writes the e-paper bundle. Closing this browser does not cancel it.</p>
   </div>
 </div>
 
@@ -81,16 +79,11 @@
         <p class="help">Uses the saved user session to fetch exactly this window. Leave unchecked to build only from posts already stored. The cutoff watermark advances only when a release is committed, not when collection starts.</p>
       </div>
       {% endif %}
+      <input type="hidden" name="kind" value="manual">
       <div class="field">
-        <label for="kind">Edition kind</label>
-        <select id="kind" name="kind">
-          <option value="manual">Manual edition</option>
-          <option value="special">Special edition</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="title">Edition title (optional)</label>
-        <input id="title" name="title" type="text" placeholder="Leave blank for the publication name and kind">
+        <label for="title">Edition name</label>
+        <input id="title" name="title" type="text" placeholder="Daily Edition" aria-describedby="edition-name-help">
+        <p class="help" id="edition-name-help">Printed on the masthead and used in the archive. Leave blank for “Edition”.</p>
       </div>
       <input type="hidden" name="publish" value="publish">
       <div><button type="submit">Queue build</button></div>

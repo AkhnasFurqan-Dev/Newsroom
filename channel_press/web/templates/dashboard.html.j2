@@ -3,28 +3,28 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="kicker">Newsroom overview</div>
-    <h1>Today’s desk</h1>
-    <p class="lede">Source evidence, editorial review and production state for {{ profile.name if profile else 'this publication' }}.</p>
+    <h1>{{ profile.name if profile else 'Dashboard' }}</h1>
   </div>
   <div class="page-head__actions">
     {% if can.operate %}<a class="btn" href="/build">Build edition</a>{% endif %}
-    <a class="btn btn--ghost" href="/sources">Source desk</a>
+    <a class="btn btn--ghost" href="/sources">Sources</a>
   </div>
 </div>
 
 {% if can.own %}
 <section class="card">
-  <h2>System Health</h2>
-  <pre id="system-health" aria-live="polite">Web server: responding. Other connections: not tested.</pre>
-  <form><input type="hidden" name="csrf_token" value="{{ csrf }}">
-    <button type="button" class="btn" data-health-check>Check Connections</button>
-  </form>
-  <form method="post" action="/system/restart" onsubmit="return confirm('Pause active work and restart Channel Press services?')">
-    <input type="hidden" name="csrf_token" value="{{ csrf }}">
-    <input type="hidden" name="confirm" value="restart">
-    <button class="btn btn--ghost">Restart Channel Press Services</button>
-  </form>
+  <h2>System health</h2>
+  <div id="system-health" aria-live="polite"><div class="small muted">Connections have not been tested in this session.</div></div>
+  <div class="field-row" style="margin-top:10px">
+    <form><input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button type="button" class="btn btn--small" data-health-check>Check connections</button>
+    </form>
+    <form method="post" action="/system/restart" onsubmit="return confirm('Pause active work and restart Channel Press services?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="confirm" value="restart">
+      <button class="btn btn--ghost btn--small">Restart services</button>
+    </form>
+  </div>
 </section>
 <script src="/static/js/health.js" defer></script>
 {% endif %}
