@@ -128,6 +128,8 @@ def test_fixture_to_printable_edition_and_epaper(db, demo_channel, owner, tmp_pa
     assert (published.epaper_dir / "sources" / "index.html").exists()
     epaper_text = published.epaper_dir.joinpath("text.html").read_text(encoding="utf-8")
     assert "By Editorial Desk" in epaper_text
+    assert "Full source record" in epaper_text
+    assert "sources/e" in epaper_text
 
     checksums = json.loads((published.output_dir / "checksums.json").read_text(encoding="utf-8"))
     for relative, expected in checksums.items():

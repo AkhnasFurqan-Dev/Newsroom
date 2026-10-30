@@ -248,5 +248,5 @@ def fallback_location_html(story: StoryCluster, reason: str = "No verified coord
         '<div class="locator-fallback"><div class="kicker">LOCATION</div>'
         f'<h3>{_escape(story.canonical_title[:90])}</h3>'
         f'<p>{_escape(reason)} The edition does not publish an unverified map. '
-        "See the source appendix for the original channel reference.</p></div>"
+        "The original channel reference remains in the editorial record.</p></div>"
     )

@@ -43,6 +43,7 @@
         </li>
         {% endfor %}
       </ul>
+      {% if article.public_id %}<p class="transcript__source-meta"><a href="sources/{{ article.public_id }}/index.html">Full source record</a></p>{% endif %}
     </details>
     {% endif %}
   </article>
