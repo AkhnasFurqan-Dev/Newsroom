@@ -200,6 +200,17 @@
       brief.appendChild(span);
     });
 
+    // The second front-page story is a real article, not a rail teaser, but its
+    // full report still runs in its section.
+    Array.prototype.slice.call(document.querySelectorAll(".front-secondary")).forEach(function (block) {
+      const id = block.getAttribute("data-story-id");
+      const entries = storyIndex.get(id) || [];
+      const target = entries.filter(function (e) { return e.page > 1; })[0];
+      const ref = block.querySelector(".front-secondary__more .page-ref");
+      if (ref && target) { ref.textContent = String(target.page); }
+      else if (ref) { ref.parentElement.style.display = "none"; }
+    });
+
     const firstPage = pageRecords[0] || {};
     window.__layoutMeta = {
       pagedReady: true,

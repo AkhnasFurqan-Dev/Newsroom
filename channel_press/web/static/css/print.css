@@ -158,7 +158,12 @@ a { color: inherit; text-decoration: none; }
   gap: 0.24in;
   align-items: start;
 }
-.story--front { border-right: 1px solid var(--hair); padding-right: 0.22in; }
+.front-main { min-width: 0; border-right: 1px solid var(--hair); padding-right: 0.22in; }
+.story--front { border-right: 0; padding-right: 0; }
+.front-secondary { border-top: 2px solid var(--rule); margin-top: 0.12in; padding-top: 0.09in; }
+.story__headline--secondary { font-size: calc(22pt * var(--headline-scale)); line-height: 1.03; }
+.story__body--secondary { columns: 2; column-gap: 0.22in; column-rule: 1px solid var(--hair); }
+.front-secondary__more { font-family: var(--font-caption); font-size: 7.1pt; letter-spacing: 0.09em; text-transform: uppercase; margin-top: 2pt; color: var(--ink-soft); }
 .story--front .story__headline--major { font-size: calc(39pt * var(--headline-scale)); line-height: 0.95; }
 .story--front .story__headline--front { font-size: calc(38pt * var(--headline-scale)); line-height: 1.0; }
 .story--front .story__headline { letter-spacing: var(--headline-tracking); margin: 0.04in 0 0.07in; }
@@ -245,15 +250,18 @@ a { color: inherit; text-decoration: none; }
    instead of stacking one report per page with half the page left blank. */
 .story-flow--rows { column-count: 1; }
 .story-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* Flex, not grid: Chromium does not honour break-inside on grid containers,
+     so a paired report could leave its headline on one page and its body on
+     the next. A flex row moves or splits as one unit. */
+  display: flex;
   gap: 0.3in;
-  align-items: start;
+  align-items: flex-start;
   break-inside: avoid;
   margin-bottom: 0.1in;
   padding-bottom: 0.06in;
   border-bottom: 1px solid var(--hairline);
 }
+.story-row > .story { flex: 1 1 0; min-width: 0; }
 .story-row:last-child { border-bottom: 0; margin-bottom: 0; }
 .story-row--single { grid-template-columns: minmax(0, 1fr); }
 .story-row .story { break-inside: avoid; margin: 0; padding: 0; border: 0; }

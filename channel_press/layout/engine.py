@@ -101,6 +101,10 @@ class PageChunkPlan:
     # Multi-story sections are laid out two reports to a row so a section with
     # four reports fills a tabloid page instead of leaving most of it blank.
     section_rows: dict[str, list[list[StoryChunk]]] = field(default_factory=dict)
+    # A second reported story below the lead. On a thin news day the lead alone
+    # leaves half the tabloid front blank; this carries real copy, not filler.
+    front_secondary: StoryPackage | None = None
+    front_tertiary: StoryPackage | None = None
 
 
 def _words(paragraphs: list[str]) -> int:
@@ -239,8 +243,31 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
     else:
         section_chunks = {}
 
+    secondary_candidates = [
+        package
+        for package in plan.front_briefs
+        if package is not lead
+        and package.genre == "news"
+        and len(package.body_paragraphs) >= 2
+        and _words(package.body_paragraphs) <= 420
+    ]
+    front_secondary = secondary_candidates[0] if secondary_candidates else None
+    # On a thin news day a second lower-front story fills the tabloid without
+    # padding; on a rich day the rail keeps the extra reports.
+    front_tertiary = (
+        secondary_candidates[1]
+        if len(secondary_candidates) > 1
+        and len(plan.packages) <= 8
+        and _words(secondary_candidates[1].body_paragraphs) <= 300
+        else None
+    )
+
     for section, items in plan.sections:
-        filtered = [p for p in items if p is not lead]
+        filtered = [
+            p
+            for p in items
+            if p is not lead and p is not front_secondary and p is not front_tertiary
+        ]
         if not filtered:
             continue
         entries = section_chunks.get(section, [])
@@ -265,11 +292,18 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
         if section not in seen:
             ordered.append((section, []))
 
-    front_briefs = [p for p in plan.front_briefs if p is not lead]
+    front_briefs = [
+        p
+        for p in plan.front_briefs
+        if p is not lead and p is not front_secondary and p is not front_tertiary
+    ][:4]
     # Short items under the lead let a thin news day still fill the tabloid
     # front page with real reports rather than white space. They are teasers
     # only; the full report still runs in its section and is page-referenced.
     rail_ids = {p.article.id for p in front_briefs}
+    for promoted in (front_secondary, front_tertiary):
+        if promoted is not None:
+            rail_ids.add(promoted.article.id)
     digest_pool = [
         p
         for p in plan.packages
@@ -337,6 +371,8 @@ def build_page_plan(plan: EditionPlan) -> PageChunkPlan:
         lead_chunks=lead_chunks,
         front_briefs=front_briefs,
         front_digest=front_digest,
+        front_secondary=front_secondary,
+        front_tertiary=front_tertiary,
         sections=ordered,
         section_chunks=section_chunks,
         templates=templates,
@@ -629,6 +665,8 @@ def build_print_html(
         lead_chunks=chunk_plan.lead_chunks,
         front_briefs=chunk_plan.front_briefs,
         front_digest=chunk_plan.front_digest,
+        front_secondary=chunk_plan.front_secondary,
+        front_tertiary=chunk_plan.front_tertiary,
         sections=chunk_plan.sections,
         section_chunks=chunk_plan.section_chunks,
         section_rows=chunk_plan.section_rows,

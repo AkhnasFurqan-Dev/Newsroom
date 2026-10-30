@@ -17,6 +17,17 @@
 </div>
 {% endif %}
 {%- endmacro %}
+{% macro front_lower(package) -%}
+<article class="front-secondary" data-story-id="{{ package.story.id }}" data-article-id="{{ package.article.id }}" data-chunk="1" data-chunk-count="1">
+  <div class="kicker">{{ section_label(package.section) }}</div>
+  <h2 class="story__headline story__headline--secondary">{{ package.headline }}</h2>
+  {% if profile.byline %}<div class="story__byline">By {{ profile.byline }}</div>{% endif %}
+  {{ story_qr({"package": package}) }}
+  {% if package.standfirst %}<p class="story__standfirst">{{ package.standfirst }}</p>{% endif %}
+  <div class="story__body story__body--secondary">{{ paragraphs_html(package.body_paragraphs[:2]) }}</div>
+  <div class="front-secondary__more">Full report, page <span class="page-ref">?</span></div>
+</article>
+{%- endmacro %}
 {% macro story_article(chunk, section, tmpl) -%}
 <article class="story story--{{ tmpl }}" data-story-id="{{ chunk.package.story.id }}" data-article-id="{{ chunk.package.article.id }}" data-chunk="{{ chunk.index }}" data-chunk-count="{{ chunk.count }}" data-template="{{ tmpl }}">
   {% if chunk.index == 1 %}
@@ -64,6 +75,7 @@
     </header>
 
     <div class="front-grid">
+      <div class="front-main">
       <article class="story story--front" data-story-id="{{ lead.story.id }}" data-article-id="{{ lead.article.id }}" data-chunk="1" data-chunk-count="{{ lead_chunks|length }}" data-template="{{ front_template }}">
         <div class="kicker">{{ section_label(lead.section) }}{% if lead.genre != 'news' %} · {{ genre_label(lead.genre) }}{% endif %}</div>
         <h2 class="story__headline story__headline--{{ lead.headline_size }}">{{ lead.headline }}</h2>
@@ -78,6 +90,10 @@
         {% if lead.correction_note %}<p class="correction-note">{{ lead.correction_note }}</p>{% endif %}
         {% if lead_chunks|length > 1 %}<div class="continues" data-story-id="{{ lead.story.id }}" data-next-chunk="2">Continued on page <span class="page-ref">?</span></div>{% endif %}
       </article>
+
+      {% if front_secondary %}{{ front_lower(front_secondary) }}{% endif %}
+      {% if front_tertiary %}{{ front_lower(front_tertiary) }}{% endif %}
+      </div>
 
       <aside class="front-rail">
         <div class="rail-heading">Front briefs</div>
