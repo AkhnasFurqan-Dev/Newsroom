@@ -120,7 +120,12 @@ def test_fixture_to_printable_edition_and_epaper(db, demo_channel, owner, tmp_pa
 
     print_html = (published.output_dir / "print.html").read_text(encoding="utf-8")
     assert "By Editorial Desk" in print_html
-    assert "editorial roundup based primarily on authorized posts" in print_html
+    # Reader-facing provenance boilerplate is gone; the evidence stays in the
+    # manifest, database and the per-article digital source pages.
+    assert "editorial roundup based primarily on authorized posts" not in print_html
+    assert "About this edition" not in print_html
+    assert "source-table" not in print_html
+    assert (published.epaper_dir / "sources" / "index.html").exists()
     epaper_text = published.epaper_dir.joinpath("text.html").read_text(encoding="utf-8")
     assert "By Editorial Desk" in epaper_text
 
@@ -167,7 +172,10 @@ def test_fixture_to_printable_edition_and_epaper(db, demo_channel, owner, tmp_pa
 
     epaper_index = published.epaper_dir.joinpath("index.html").read_text(encoding="utf-8")
     assert "The Channel Dispatch" in epaper_index
-    assert "Synthetic fixture edition" in epaper_index
+    # A manual job is a job kind, not a reader-facing edition name. Demo output
+    # replaces the edition name with the sample notice.
+    assert "SAMPLE" in epaper_index
+    assert "Manual edition" not in epaper_index
     assert "sample_issue.pdf" in epaper_index
     assert "localhost" not in epaper_index
     assert "127.0.0.1" not in epaper_index

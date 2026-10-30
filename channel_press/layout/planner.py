@@ -27,6 +27,8 @@ from ..models import (
     StoryTimelineEvent,
 )
 from ..timeutil import iso_utc
+from ..editorial.chronology import chronology_allowed, distinct_entries
+from ..editorial.clean_text import clean_sentence, strip_output_decor
 from ..editorial.entities import sentence_split
 
 
@@ -60,6 +62,21 @@ class StoryPackage:
     teaser_body: list[str] = field(default_factory=list)
     body_paragraphs: list[str] = field(default_factory=list)
     source_refs: list[str] = field(default_factory=list)
+    # Clean reader-facing copy. The Article row remains the authoritative
+    # editor-approved revision; these fields carry only presentational cleaning
+    # (no emoji, handles or bulletin status stamps) for print and e-paper.
+    headline: str = ""
+    deck: str = ""
+    standfirst: str = ""
+    # Reader-facing story identity. The same stable id is used for the printed
+    # QR target, the optional exported evidence page and the digital manifest.
+    public_id: str = ""
+    primary_source_url: str = ""
+    qr_data_uri: str = ""
+    qr_target: str = ""
+    qr_status: str = "unavailable"
+    qr_reason: str = ""
+    qr_label: str = ""
 
 
 @dataclass
@@ -87,21 +104,24 @@ class EditionPlan:
                     "defence": "defence",
                 }.get(section, "national")
             )
-        names.append("sources")
         return names
 
 
 def _body(article: Article) -> list[str]:
     try:
         value = json.loads(article.body_json or "[]")
-        return [str(p) for p in value if str(p).strip()]
+        paragraphs = [str(p) for p in value if str(p).strip()]
     except json.JSONDecodeError:
-        return [p for p in article.body_text.split("\n\n") if p.strip()]
+        paragraphs = [p for p in article.body_text.split("\n\n") if p.strip()]
+    # Reader-facing copy never carries broadcast furniture. The stored article
+    # revision keeps the editor-approved wording; only decorative bulletin
+    # material (emoji, handles, status stamps) is removed for print.
+    return [strip_output_decor(paragraph) for paragraph in paragraphs if strip_output_decor(paragraph)]
 
 
 def _first_sentence(article: Article, limit: int = 220) -> str:
     sentences = sentence_split(article.body_text)
-    value = sentences[0] if sentences else article.title
+    value = strip_output_decor(sentences[0]) if sentences else article.title
     if len(value) > limit:
         value = value[: limit - 1].rsplit(" ", 1)[0] + "…"
     return value
@@ -169,6 +189,9 @@ def _build_package(
         teaser=_first_sentence(article, limit=190),
         source_count=len(_source_entries(db, article)),
         sources=_source_entries(db, article),
+        headline=strip_output_decor(article.title),
+        deck=strip_output_decor(article.deck or ""),
+        standfirst=strip_output_decor(article.standfirst or ""),
     )
     if is_front:
         package.headline_size = "major" if story.importance >= 0.78 or story.risk_level == "high" else "front"
@@ -254,10 +277,11 @@ def _build_package(
                 .order_by(StoryTimelineEvent.event_at.asc())
             )
         )
-        if len(events) >= 2:
+        entries = distinct_entries(events)
+        if chronology_allowed(entries, profile.show_chronology):
             # The front page has a fixed height and carries the lead image/map.
             # A long chronology was the one unbounded element that could push
-            # the lead past the page; cap it and state the omitted count.
+            # the lead past the page; cap it.
             limit = 6 if is_front else 8
             package.timeline_html = render_timeline_html(
                 events, profile.timezone, max_events=limit
@@ -266,8 +290,8 @@ def _build_package(
         claim.claim_type == "correction" for claim in claims
     ):
         package.correction_note = (
-            "The channel published a correction to an earlier report. This article uses the corrected figure "
-            "and records the change in its source appendix."
+            "The channel published a correction to an earlier report. This article uses the "
+            "corrected figure."
         )
     return package
 

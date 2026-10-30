@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import html
-import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -44,13 +44,27 @@ GENRE_LABELS = {
     "brief": "Brief",
 }
 
-KIND_LABELS = {
-    "daily": "Daily edition",
-    "weekly_roundup": "Weekly roundup",
-    "monthly_roundup": "Monthly roundup",
-    "special": "Special edition",
-    "manual": "Manual edition",
+KIND_PUBLIC_NAMES = {
+    "daily": "Daily Edition",
+    "weekly_roundup": "Weekly Edition",
+    "monthly_roundup": "Monthly Edition",
+    "special": "Special Edition",
+    # "Manual" describes how a job was started, not what the reader is holding.
+    "manual": "Edition",
 }
+
+
+def edition_display_name(edition: Edition) -> str:
+    """Reader-facing edition name.
+
+    An editor-supplied name always wins. Legacy editions without one receive a
+    neutral publication label derived from the internal kind; the historic
+    database rows are never rewritten.
+    """
+    name = (edition.display_name or "").strip()
+    if name:
+        return name
+    return KIND_PUBLIC_NAMES.get(edition.kind, "Edition")
 
 
 @dataclass
@@ -162,7 +176,6 @@ SECTION_BREAK_MIN_LOAD = 760
 # own opening also keeps a short editorial from being stranded at the foot of a
 # section page.
 OPINION_BREAK_SECTIONS = {"opinion"}
-SECTION_RECORD_SECTIONS = {"conflict", "regional", "defence", "national", "international"}
 
 
 def _package_load(package: StoryPackage) -> int:
@@ -200,9 +213,6 @@ def _section_needs_break(section: str, chunks: list[StoryChunk]) -> bool:
     if section in OPINION_BREAK_SECTIONS:
         return True
     load = sum(_package_load(chunk.package) for chunk in chunks)
-    if section in SECTION_RECORD_SECTIONS and len(chunks) <= 2:
-        # These sections print a source/provenance record beneath the reports.
-        load += 90
     if section == "briefs":
         load += 80
     return load >= SECTION_BREAK_MIN_LOAD
@@ -505,101 +515,90 @@ def _environment() -> Environment:
     return env
 
 
-def _section_context(db: Session, plan: EditionPlan) -> dict[str, dict]:
-    """Evidence-based filler for short section pages.
+_PUBLIC_TELEGRAM = re.compile(
+    r"^https?://(?:t\.me|telegram\.me)/([A-Za-z][A-Za-z0-9_]{3,})/(\d+)(?:[/?#].*)?$"
+)
 
-    A sparse page should carry useful source record, not white space. The box
-    lists only events and messages that already exist in the evidence ledger.
+
+def _public_telegram_url(value: str) -> str:
+    """Return a direct, publicly addressable Telegram post URL, else ''.
+
+    Private invite links (``t.me/+...``), ``t.me/c/...`` internal links and
+    placeholder addresses are never printed as a QR target.
     """
-    from sqlalchemy import select
-
-    from ..models import StoryClaim, StoryTimelineEvent
-
-    context: dict[str, dict] = {}
-    for section, items in plan.sections:
-        events = []
-        messages: dict[int, dict] = {}
-        claims: list[StoryClaim] = []
-        for package in items:
-            for event in db.scalars(
-                select(StoryTimelineEvent)
-                .where(StoryTimelineEvent.story_id == package.story.id)
-                .order_by(StoryTimelineEvent.event_at.asc())
-            ):
-                events.append(
-                    {
-                        "when": human_local(event.event_at, plan.profile.timezone, "%d %b %H:%M"),
-                        "story": package.article.title,
-                        "description": event.description,
-                        "certainty": event.certainty,
-                    }
-                )
-            claims.extend(
-                db.scalars(select(StoryClaim).where(StoryClaim.story_id == package.story.id))
-            )
-            for source in package.sources:
-                messages.setdefault(
-                    int(source["post_id"]),
-                    {
-                        "message_id": source["message_id"],
-                        "date": source["date_label"],
-                        "url": source["source_url"],
-                        "story": package.article.title,
-                    },
-                )
-        if not events and not messages:
-            continue
-        context[section] = {
-            "events": events[:10],
-            "messages": list(messages.values())[:12],
-            "claims": len(claims),
-            "corrections": sum(1 for claim in claims if claim.claim_type == "correction"),
-            "unverified": sum(1 for claim in claims if claim.certainty == "unverified"),
-            "high_risk": sum(1 for claim in claims if claim.risk_tag),
-        }
-    return context
+    value = (value or "").strip()
+    match = _PUBLIC_TELEGRAM.match(value)
+    if not match:
+        return ""
+    return f"https://t.me/{match.group(1)}/{match.group(2)}"
 
 
-def _edition_evidence(
-    db: Session, edition: Edition, plan: EditionPlan, chunk_plan: PageChunkPlan
-) -> dict:
-    from sqlalchemy import select
+def _public_base(profile) -> str:
+    """Configured, explicitly verified public origin, or ''."""
+    base = (getattr(profile, "public_base_url", "") or "").strip().rstrip("/")
+    if not base or not getattr(profile, "public_base_url_verified", False):
+        return ""
+    lowered = base.lower()
+    if not lowered.startswith("https://"):
+        return ""
+    if any(token in lowered for token in ("localhost", "127.0.0.1", "[::1]", "file:")):
+        return ""
+    return base
 
-    from ..models import ArticleClaimLink, SourcePost, StoryClaim
 
-    posts = list(
-        db.scalars(
-            select(SourcePost).where(
-                SourcePost.channel_id == edition.channel_id,
-                SourcePost.posted_at >= edition.window_start,
-                SourcePost.posted_at < edition.window_end,
-            )
-        )
-    )
-    included = sum(1 for post in posts if post.inclusion_status == "included")
-    excluded = sum(1 for post in posts if post.inclusion_status != "included")
-    story_ids = [package.story.id for package in plan.packages]
-    claims = list(db.scalars(select(StoryClaim).where(StoryClaim.story_id.in_(story_ids)))) if story_ids else []
-    corrections = sum(1 for claim in claims if claim.claim_type == "correction")
-    article_ids = [package.article.id for package in plan.packages]
-    links = list(db.scalars(select(ArticleClaimLink).where(ArticleClaimLink.article_id.in_(article_ids)))) if article_ids else []
-    supported = sum(1 for link in links if link.supported)
-    review = sum(1 for package in plan.packages if package.article.status == "needs_review")
-    cited_messages = sum(len({source["post_id"] for source in package.sources}) for package in plan.packages)
-    return {
-        "included_posts": included,
-        "excluded_posts": excluded,
-        "articles": len(plan.packages),
-        "stories": len({package.story.id for package in plan.packages}),
-        "sources": cited_messages,
-        "claims": len(claims),
-        "corrections": corrections,
-        "claim_links": len(links),
-        "supported_links": supported,
-        "review_items": review,
-        "pages": len(chunk_plan.section_chunks),
-        "provider": (json.loads(plan.packages[0].article.audit_json or "{}").get("provider") if plan.packages else ""),
+def _attach_story_qr(plan: EditionPlan, edition: Edition, *, demo_edition: bool) -> None:
+    """Resolve one compact QR per story, or an explicit editor-only status.
+
+    Resolution order (see P09):
+      1. a verified public evidence page under the configured publication origin;
+      2. a verified public Telegram post URL for the primary source message;
+      3. no code at all, with an actionable reason for the editor.
+    """
+    from ..publishing.qr import citation_code
+
+    base = _public_base(plan.profile)
+    external_articles = {
+        int(entry["article_id"])
+        for entry in plan.appendix_entries
+        if entry.get("article_id") is not None
+        and entry.get("kind") == "external_link_unverified"
     }
+    for package in plan.packages:
+        package.public_id = f"e{edition.id}-a{package.article.id}"
+        public_sources = [
+            _public_telegram_url(source.get("source_url") or "")
+            for source in package.sources
+        ]
+        public_sources = [url for url in public_sources if url]
+        package.primary_source_url = public_sources[0] if public_sources else ""
+        target = ""
+        reason = ""
+        label = "Scan for sources"
+        if demo_edition:
+            reason = "demo_edition_no_public_target"
+        elif base and (public_sources or package.article.id in external_articles):
+            target = f"{base}/sources/{package.public_id}/"
+            label = "Scan for sources"
+        elif package.primary_source_url:
+            target = package.primary_source_url
+            label = "Scan for original post"
+        else:
+            reason = "publish_destination_required"
+        if not target:
+            package.qr_status = "unavailable"
+            package.qr_reason = reason
+            package.qr_label = ""
+            continue
+        code = citation_code(target, label=label)
+        package.qr_target = code.target
+        package.qr_reason = code.reason
+        if code.available:
+            package.qr_data_uri = code.data_uri
+            package.qr_status = "ok"
+            package.qr_label = label
+        else:
+            package.qr_status = "unavailable"
+            package.qr_label = ""
 
 
 def build_print_html(
@@ -612,8 +611,9 @@ def build_print_html(
 ) -> tuple[str, PageChunkPlan]:
     _assign_source_refs(plan)
     _attach_citations(plan, demo_edition=demo_edition)
+    _attach_story_qr(plan, edition, demo_edition=demo_edition)
     chunk_plan = build_page_plan(plan)
-    date_label, window_label, cutoff_label = _edition_labels(edition, plan.profile.timezone)
+    date_label, _window_label, _cutoff_label = _edition_labels(edition, plan.profile.timezone)
     css = CSS_PATH.read_text(encoding="utf-8")
     if theme is None:
         from ..theming import compile_theme
@@ -622,41 +622,6 @@ def build_print_html(
     css = css + "\n/* publication theme */\n" + theme.css + "\n"
     paged_js = (VENDOR_DIR / "paged.polyfill.min.js").read_text(encoding="utf-8")
     postprocess_js = (TEMPLATE_DIR / "postprocess.js").read_text(encoding="utf-8")
-    demo_note = (
-        "This is a synthetic demonstration edition built only from repository fixture data. "
-        "It is not a real news report and must not be published as journalism."
-        if demo_edition
-        else "This edition is an editorial roundup of the owner's authorized source channel."
-    )
-    byline = (plan.profile.byline or "").strip()
-    disclosure = (plan.profile.source_disclosure or "").strip()
-    provenance_note = (
-        (disclosure + " ") if disclosure else ""
-    ) + (
-        f"Compiled from {plan.profile.channel_handle or 'the authorized channel'} by the {byline or 'publication desk'}. "
-        "Every factual statement is traced to a dated source message in the appendix; analysis and "
-        "opinion are labelled. " + demo_note
-    )
-    appendix_intro = (
-        "Each report in this edition is tied to the dated source message(s) below. The appendix is the "
-        "publication's evidence trail: it records what the channel published, when, and which item each "
-        "report drew on. A compact QR code is printed only when the direct public source post exists; "
-        "fixture messages and unverified external pages are identified by message number or publisher "
-        "instead of a long or invented URL. The complete digital provenance remains in the edition "
-        "manifest."
-    )
-    appendix_method = (
-        f"{cutoff_label}. Article text is checked against the source corpus by an independent rule-based "
-        "audit before layout. Corrections are recorded as superseding claims. QR payloads are public "
-        "direct source URLs only; private, offline or placeholder addresses are never encoded. Where no "
-        "public link exists, this appendix is the source of record. "
-        f"{demo_note}"
-    )
-    appendix_footer = (
-        "Publication responsibility: the owner/editor of this edition. Source posts remain the property of "
-        "their author and are used under the recorded content-rights declaration for the channel. "
-        "This PDF is an office-print proof, not a certified print-shop PDF/X file."
-    )
     html = _environment().get_template("print.html.j2").render(
         edition=edition,
         profile=plan.profile,
@@ -670,17 +635,9 @@ def build_print_html(
         templates=chunk_plan.templates,
         section_break=chunk_plan.section_break,
         pair_sections=chunk_plan.pair_sections,
-        evidence=_edition_evidence(db, edition, plan, chunk_plan),
-        section_context=_section_context(db, plan),
         front_template=chunk_plan.templates["front"],
         edition_date=date_label,
-        edition_kind_label=KIND_LABELS.get(edition.kind, edition.kind.title()),
-        window_label=window_label,
-        appendix_entries=plan.appendix_entries,
-        appendix_intro=appendix_intro,
-        appendix_method=appendix_method,
-        appendix_footer=appendix_footer,
-        provenance_note=provenance_note,
+        edition_name=edition_display_name(edition),
         demo_edition=demo_edition,
         print_css=css,
         paged_js=paged_js,

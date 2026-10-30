@@ -480,6 +480,7 @@ class PublicationProfile(Base):
     byline: Mapped[str] = mapped_column(String(120), default="Editorial Desk")
     source_disclosure: Mapped[str] = mapped_column(Text, default="")
     slogan: Mapped[str] = mapped_column(String(240), default="A verified roundup of the day's reporting")
+    show_slogan: Mapped[bool] = mapped_column(Boolean, default=False)
     footer_text: Mapped[str] = mapped_column(Text, default="")
     city: Mapped[str] = mapped_column(String(120), default="Islamabad")
     timezone: Mapped[str] = mapped_column(String(80), default="Asia/Karachi")
@@ -487,7 +488,20 @@ class PublicationProfile(Base):
     paper_size: Mapped[str] = mapped_column(String(20), default="tabloid")
     contact_url: Mapped[str] = mapped_column(String(500), default="")
     map_profile: Mapped[str] = mapped_column(String(40), default="neutral")
-    qr_strategy: Mapped[str] = mapped_column(String(40), default="appendix")
+    qr_strategy: Mapped[str] = mapped_column(String(40), default="story")
+    # Public evidence-page origin, e.g. https://news.example.org/edition.
+    # A printed story QR is only pointed here when the owner has explicitly
+    # verified that the origin is deployed and publicly reachable.
+    public_base_url: Mapped[str] = mapped_column(String(500), default="")
+    public_base_url_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # auto | on | off. ``auto`` is deliberately conservative: a chronology is
+    # printed only for a genuinely staged sequence, never for repeated bulletins.
+    show_chronology: Mapped[str] = mapped_column(String(10), default="auto")
+    # off | editor_triggered | automatic_substantial | automatic_all
+    research_policy: Mapped[str] = mapped_column(String(30), default="editor_triggered")
+    research_provider: Mapped[str] = mapped_column(String(30), default="auto")
+    research_queries_per_story: Mapped[int] = mapped_column(Integer, default=3)
+    research_max_per_story: Mapped[int] = mapped_column(Integer, default=5)
     issue_volume: Mapped[int] = mapped_column(Integer, default=1)
     section_order_json: Mapped[str] = mapped_column(Text, default="[]")
     allow_closing_light: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -722,6 +736,10 @@ class Edition(Base):
     source_status: Mapped[str] = mapped_column(String(20), default="complete")
     kind: Mapped[str] = mapped_column(String(30), default="daily")
     title: Mapped[str] = mapped_column(String(240), default="")
+    # Reader-facing edition name ("Morning Edition", "Friday Magazine").
+    # Empty means the editor has not named this issue; templates fall back to
+    # a neutral date-based description instead of internal kind labels.
+    display_name: Mapped[str] = mapped_column(String(160), default="")
     volume: Mapped[int] = mapped_column(Integer, default=1)
     issue_number: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(30), default="draft", index=True)

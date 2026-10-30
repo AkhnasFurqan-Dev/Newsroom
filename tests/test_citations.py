@@ -11,7 +11,7 @@ import fitz
 import numpy as np
 
 from channel_press.layout.engine import _attach_citations
-from channel_press.models import EditionPage, SourcePost
+from channel_press.models import SourcePost
 from channel_press.pipeline import PipelineRequest, run_pipeline
 from channel_press.publishing.qr import citation_code
 from channel_press.timeutil import utcnow
@@ -71,7 +71,7 @@ def test_attach_citations_never_invents_a_target():
     assert "not_public" in plan.appendix_entries[2]["qr_reason"] or "local" in plan.appendix_entries[2]["qr_reason"]
 
 
-def test_printed_appendix_prints_a_qr_not_a_long_url_list(db, demo_channel, owner):
+def test_printed_story_qr_uses_a_real_target_and_no_appendix(db, demo_channel, owner):
     import_fixture(db, demo_channel, owner, "telegram_export_sample.json")
     post = db.query(SourcePost).filter(SourcePost.telegram_message_id == 101).one()
     target = "https://t.me/example_channel/101"
@@ -97,38 +97,41 @@ def test_printed_appendix_prints_a_qr_not_a_long_url_list(db, demo_channel, owne
     assert edition.output_dir
     html = (result.publish_result.output_dir / "print.html").read_text(encoding="utf-8")
     assert "data:image/png;base64," in html
-    # The long URL is encoded in the QR, never printed as a text list.
+    # The target is encoded in the code, never printed as a text list.
     assert target not in html
-    assert "width: 0.85in" in html or "width: .85in" in html
+    assert "story__qr" in html
+    # The reader-facing appendix is gone.
+    assert "Sources &amp; provenance" not in html
+    assert "source-table" not in html
 
     manifest = json.loads((result.publish_result.output_dir / "manifest.json").read_text(encoding="utf-8"))
     source = next(entry for entry in manifest["sources"] if entry["message_id"] == 101)
     assert source["url"] == target
-    assert source["qr_target"] == target
-    assert source["qr_printed"] is True
+    qr = next(item for item in manifest["qr"] if item["target"] == target)
+    assert qr["status"] == "ok"
     assert "qr_data_uri" not in source  # image bytes stay out of the manifest
 
+    # A code printed on the page must decode back to the same public target.
     db.expire_all()
-    appendix = db.query(EditionPage).filter(
-        EditionPage.edition_id == edition.id,
-        EditionPage.template == "sources",
-    ).one()
     with fitz.open(edition.pdf_path) as document:
-        page = document[appendix.page_number - 1]
-        pixmap = page.get_pixmap(dpi=200)
-        image = cv2.imdecode(
-            np.frombuffer(pixmap.tobytes("png"), dtype=np.uint8),
-            cv2.IMREAD_COLOR,
-        )
-    value, points, _ = cv2.QRCodeDetector().detectAndDecode(image)
-    assert value == target
-    assert points is not None
-    decoded_corners = points.reshape(-1, 2)
+        found = None
+        for page in document:
+            pixmap = page.get_pixmap(dpi=200)
+            image = cv2.imdecode(
+                np.frombuffer(pixmap.tobytes("png"), dtype=np.uint8),
+                cv2.IMREAD_COLOR,
+            )
+            value, points, _ = cv2.QRCodeDetector().detectAndDecode(image)
+            if value == target and points is not None:
+                found = points
+                break
+    assert found is not None, "the printed story code must decode to the public source URL"
+    decoded_corners = found.reshape(-1, 2)
     width_px = float(np.linalg.norm(decoded_corners[1] - decoded_corners[0]))
     width_inches = width_px / 200
-    # A 0.85in code at 200dpi is ~170px. Allow for detector inset but reject a
+    # A 0.6in code at 200dpi is ~120px. Allow for detector inset but reject a
     # tiny code that would not scan reliably on newsprint.
-    assert 0.6 <= width_inches <= 1.1
+    assert 0.45 <= width_inches <= 0.9
 
 
 def test_fixture_demo_edition_prints_no_fake_qr(db, demo_channel, owner):
@@ -149,4 +152,8 @@ def test_fixture_demo_edition_prints_no_fake_qr(db, demo_channel, owner):
     )
     html = (result.publish_result.output_dir / "print.html").read_text(encoding="utf-8")
     assert "data:image/png;base64," not in html
-    assert "No public link" in html
+    assert "Sources &amp; provenance" not in html
+    manifest = json.loads((result.publish_result.output_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["qr"]
+    assert all(item["status"] == "unavailable" for item in manifest["qr"])
+    assert all(item["reason"] == "demo_edition_no_public_target" for item in manifest["qr"])

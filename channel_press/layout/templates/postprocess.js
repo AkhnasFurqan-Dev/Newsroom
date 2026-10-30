@@ -44,8 +44,6 @@
       let template = "interior";
       if (content.querySelector(".masthead") || content.querySelector(".story--front")) {
         template = "front_major_event";
-      } else if (content.querySelector(".source-table")) {
-        template = "sources";
       } else if (stories.length) {
         template = stories[0].getAttribute("data-template") || "national";
       }
@@ -150,19 +148,10 @@
         : 0;
       record.trailing_whitespace_px = Math.round(Math.max(0, contentRect.bottom - usedBottom));
       record.underfull = !record.blank && record.chars >= 40 && record.fill_ratio < 0.62;
-      record.orphan_section_head = template !== "sources" &&
+      record.orphan_section_head =
         Boolean(content.querySelector(".section-head")) && stories.length === 0;
       pageRecords.push(record);
     });
-
-    // Appendix page reference, filled only where the appendix really rendered.
-    let appendixPage = 0;
-    pageRecords.forEach(function (p) { if (p.template === "sources") { appendixPage = p.page; } });
-    if (appendixPage) {
-      Array.prototype.slice.call(document.querySelectorAll(".appendix-page")).forEach(function (el) {
-        el.textContent = String(appendixPage);
-      });
-    }
 
     // Continuation labels with validated page references.
     storyIndex.forEach(function (entries) {
@@ -217,7 +206,6 @@
       width_px: firstPage.width_px || 0,
       height_px: firstPage.height_px || 0,
       page_count: pageRecords.length,
-      appendix_page: appendixPage,
       pages: pageRecords,
       story_pages: Array.from(storyIndex.entries()).map(function (pair) {
         return { story_id: pair[0], pages: pair[1].map(function (e) { return { page: e.page, chunk: e.chunk }; }) };

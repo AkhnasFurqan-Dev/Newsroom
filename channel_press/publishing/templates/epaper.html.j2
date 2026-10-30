@@ -4,14 +4,15 @@
 <header class="site-head">
   <div class="site-head__top">
     <span>{{ edition_date }}</span>
-    <span>{% if demo_edition %}Synthetic fixture edition — not for publication{% else %}Editorial roundup{% endif %}</span>
+    <span>{% if demo_edition %}SAMPLE · SYNTHETIC FIXTURE CONTENT{% else %}{{ edition_name }}{% endif %}</span>
     <a href="text.html">Text edition</a>
   </div>
   <h1>{{ profile.name }}</h1>
+  {% if profile.show_slogan and profile.slogan %}
   <div class="site-head__strap">
     <span>{{ profile.slogan }}</span>
-    <span>{{ profile.channel_handle }}</span>
   </div>
+  {% endif %}
 </header>
 
 <div class="viewer" id="viewer">
@@ -39,31 +40,6 @@
   </div>
 </div>
 
-<section class="appendix">
-  <h2>Sources &amp; provenance</h2>
-  <p class="appendix__intro">
-    Every report is tied to a dated source message. Public links are printed in full; fixture messages have no
-    public URL. No QR code is printed unless a public destination was verified reachable.
-  </p>
-  <table>
-    <thead><tr><th>Ref</th><th>Published (UTC)</th><th>Message</th><th>Item</th><th>Link / status</th></tr></thead>
-    <tbody>
-      {% for entry in appendix_entries %}
-      <tr>
-        <td>{{ entry.ref }}</td>
-        <td>{{ entry.date }}</td>
-        <td>{{ entry.message_id if entry.message_id is not none else '—' }}</td>
-        <td>{{ entry.article }}</td>
-        <td>{% if entry.url %}<a href="{{ entry.url }}" rel="noopener noreferrer">{{ entry.url }}</a>{% else %}Fixture message — no public URL{% endif %}{% if entry.kind == 'external_link_unverified' %} <em>(external, not independently verified)</em>{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <p class="appendix__note">
-    Edition {{ edition.issue_number }}, version {{ edition.version }}. {{ profile.footer_text }}
-  </p>
-</section>
-
 <section class="article-index">
   <h2>Reports in this edition</h2>
   <ul>
@@ -72,6 +48,23 @@
       <span class="article-index__section">{{ article.section }}</span>
       <a href="text.html#article-{{ loop.index }}">{{ article.title }}</a>
       <span class="article-index__page">{% if article.pages %}p. {{ article.pages|join(', ') }}{% endif %}</span>
+      {% if article.sources %}
+      <details class="article-index__sources">
+        <summary>Sources</summary>
+        <ul>
+          {% for source in article.sources %}
+          <li>
+            {% if source.url and source.kind != 'fixture' %}
+            <a href="{{ source.url }}" rel="noopener noreferrer">{{ source.title or source.channel or 'Original post' }}</a>
+            {% else %}
+            <span>{{ source.title or source.channel or 'Source report' }}</span>
+            {% endif %}
+            <span class="article-index__meta">{{ source.date }}{% if source.kind == 'external_link_unverified' %} · external, not independently verified{% endif %}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ article.title }} — sources — {{ profile.name }}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #f4f1e9; color: #181716; font-family: Georgia, "Times New Roman", serif; }
+  main { max-width: 44rem; margin: 0 auto; padding: 2.2rem 1.2rem 3rem; }
+  .masthead { border-bottom: 3px solid #181716; padding-bottom: 0.6rem; margin-bottom: 1.4rem; }
+  .masthead__name { font-size: 1.5rem; letter-spacing: 0.02em; margin: 0; }
+  .masthead__meta { font-family: Arial, Helvetica, sans-serif; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #55524c; margin-top: 0.35rem; }
+  h1 { font-size: 1.6rem; line-height: 1.2; margin: 0 0 0.5rem; }
+  .kicker { font-family: Arial, Helvetica, sans-serif; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: #8a2b1d; margin-bottom: 0.4rem; }
+  h2 { font-family: Arial, Helvetica, sans-serif; font-size: 0.78rem; letter-spacing: 0.1em; text-transform: uppercase; color: #55524c; border-top: 1px solid #b9b3a5; padding-top: 0.8rem; margin-top: 1.8rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { border-bottom: 1px solid #d8d2c4; padding: 0.65rem 0; }
+  a { color: #1c4f8a; overflow-wrap: anywhere; }
+  .meta { font-family: Arial, Helvetica, sans-serif; font-size: 0.74rem; color: #55524c; margin-top: 0.2rem; }
+  .note { font-size: 0.86rem; color: #55524c; margin-top: 2rem; border-top: 1px solid #b9b3a5; padding-top: 0.8rem; }
+  .demo { background: #181716; color: #f4f1e9; font-family: Arial, Helvetica, sans-serif; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.45rem 0.7rem; margin-bottom: 1rem; }
+</style>
+</head>
+<body>
+<main>
+  {% if demo_edition %}<div class="demo">Sample · synthetic fixture content</div>{% endif %}
+  <header class="masthead">
+    <div class="masthead__name">{{ profile.name }}</div>
+    <div class="masthead__meta">{{ edition_name }} · {{ edition_date }}</div>
+  </header>
+  <div class="kicker">Sources for this report</div>
+  <h1>{{ article.title }}</h1>
+  {% if article.sources %}
+  <h2>Source reporting</h2>
+  <ul>
+    {% for source in article.sources %}
+    <li>
+      {% if source.url and source.kind != 'fixture' %}
+      <a href="{{ source.url }}" rel="noopener noreferrer">{{ source.title or source.channel or 'Original post' }}</a>
+      {% else %}
+      <span>{{ source.title or source.channel or 'Original post' }}</span>
+      {% endif %}
+      <div class="meta">
+        {% if source.publisher %}{{ source.publisher }} · {% elif source.channel %}{{ source.channel }} · {% endif %}
+        {{ source.date }}
+        {% if source.kind == 'external_link_unverified' %} · external report, not independently verified by this publication{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="note">No public source link is available for this report. The publication holds the dated source material in its private editorial record.</p>
+  {% endif %}
+  <p class="note">
+    This page lists the sources used for one report in {{ edition_name }} of {{ profile.name }}.
+    It is provided so a printed code can lead to the underlying reporting without printing a
+    provenance appendix. Source material remains the property of its author.
+  </p>
+</main>
+</body>
+</html>

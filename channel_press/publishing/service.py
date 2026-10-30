@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import uuid
+from html import escape as html_escape
 from typing import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..layout.engine import RenderResult, compile_edition
+from ..layout.engine import RenderResult, compile_edition, edition_display_name
 from ..layout.planner import EditionPlan, create_plan
 from ..models import (
     Article,
@@ -106,6 +107,60 @@ def _copy_asset(source: Path, target: Path) -> dict:
     return {"path": target.name, "bytes": target.stat().st_size, "sha256": _sha256(target)}
 
 
+def _write_evidence_bundles(
+    *,
+    target: Path,
+    edition: Edition,
+    plan: EditionPlan,
+    articles: list[dict],
+    edition_date: str,
+    edition_name: str,
+    demo_edition: bool,
+) -> None:
+    """Write one small static evidence page per printed report.
+
+    The page is a plain folder of HTML so an owner can deploy the exported
+    e-paper bundle to any static host. A QR is only pointed at it when the
+    publication has an explicitly verified public base URL (see
+    :func:`channel_press.layout.engine._attach_story_qr`).
+    """
+    root = target / "sources"
+    root.mkdir(parents=True, exist_ok=True)
+    template = _environment().get_template("evidence.html.j2")
+    for article in articles:
+        public_id = article.get("public_id") or ""
+        if not public_id:
+            continue
+        folder = root / public_id
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "index.html").write_text(
+            template.render(
+                profile=plan.profile,
+                edition=edition,
+                edition_name=edition_name,
+                edition_date=edition_date,
+                article=article,
+                demo_edition=demo_edition,
+            ),
+            encoding="utf-8",
+        )
+    index_rows = "".join(
+        f'<li><a href="{html_escape(str(article.get("public_id")))}/index.html">'
+        f'{html_escape(str(article.get("title") or "Report"))}</a></li>'
+        for article in articles
+        if article.get("public_id")
+    )
+    (root / "index.html").write_text(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        f"<title>Sources — {html_escape(edition_name)}</title></head>"
+        "<body style=\"font-family:Georgia,serif;max-width:44rem;margin:2rem auto;padding:0 1rem\">"
+        f"<h1>{html_escape(plan.profile.name)}</h1>"
+        f"<p>{html_escape(edition_name)} · {html_escape(edition_date)}</p>"
+        f"<ul>{index_rows}</ul></body></html>",
+        encoding="utf-8",
+    )
+
+
 def _write_epaper(
     *,
     db: Session,
@@ -147,19 +202,28 @@ def _write_epaper(
             }
         )
     articles = []
+    sources_by_article: dict[int, list[dict]] = {}
+    for entry in plan.appendix_entries:
+        article_id = entry.get("article_id")
+        if article_id is not None:
+            sources_by_article.setdefault(int(article_id), []).append(entry)
     for package in plan.packages:
         pages = story_pages.get(str(package.story.id), [])
         page_numbers = sorted({item["page"] for item in pages})
         articles.append(
             {
-                "title": package.article.title,
-                "deck": package.article.deck,
-                "standfirst": package.article.standfirst,
+                "title": package.headline or package.article.title,
+                "deck": package.deck,
+                "standfirst": package.standfirst,
                 "genre": package.genre,
                 "section": package.section,
                 "paragraphs": package.body_paragraphs,
                 "pages": page_numbers,
+                "public_id": package.public_id,
                 "source_refs": package.source_refs,
+                "sources": sources_by_article.get(package.article.id, []),
+                "qr_status": package.qr_status,
+                "qr_target": package.qr_target,
                 "correction_note": package.correction_note,
                 "audit": json.loads(package.article.audit_json or "{}"),
             }
@@ -178,26 +242,37 @@ def _write_epaper(
         "demo_edition": demo_edition,
         "theme": theme.hash,
     }
+    edition_date = human_local(edition.window_end, edition.timezone, "%d %B %Y")
+    edition_name = edition_display_name(edition)
     html = _environment().get_template("epaper.html.j2").render(
         edition=edition,
         profile=plan.profile,
         pages=page_payload,
         articles=articles,
-        appendix_entries=plan.appendix_entries,
         evidence=evidence,
         demo_edition=demo_edition,
-        edition_date=human_local(edition.window_end, edition.timezone, "%d %B %Y"),
+        edition_date=edition_date,
+        edition_name=edition_name,
     )
     (target / "index.html").write_text(html, encoding="utf-8")
     text_html = _environment().get_template("epaper_text.html.j2").render(
         edition=edition,
         profile=plan.profile,
         articles=articles,
-        appendix_entries=plan.appendix_entries,
         demo_edition=demo_edition,
-        edition_date=human_local(edition.window_end, edition.timezone, "%d %B %Y"),
+        edition_date=edition_date,
+        edition_name=edition_name,
     )
     (target / "text.html").write_text(text_html, encoding="utf-8")
+    _write_evidence_bundles(
+        target=target,
+        edition=edition,
+        plan=plan,
+        articles=articles,
+        edition_date=edition_date,
+        edition_name=edition_name,
+        demo_edition=demo_edition,
+    )
     (target / "assets").mkdir(exist_ok=True)
     (target / "assets" / "epaper.css").write_text(
         (TEMPLATE_DIR / "epaper.css").read_text(encoding="utf-8"), encoding="utf-8"
@@ -213,6 +288,7 @@ def _write_epaper(
                 "edition": {
                     "id": edition.id,
                     "title": edition.title,
+                    "display_name": edition_display_name(edition),
                     "kind": edition.kind,
                     "issue_number": edition.issue_number,
                     "volume": edition.volume,
@@ -222,6 +298,16 @@ def _write_epaper(
                 "pages": page_payload,
                 "articles": articles,
                 "sources": plan.appendix_entries,
+                "qr": [
+                    {
+                        "article_id": package.article.id,
+                        "public_id": package.public_id,
+                        "status": package.qr_status,
+                        "target": package.qr_target,
+                        "reason": package.qr_reason,
+                    }
+                    for package in plan.packages
+                ],
                 "evidence": evidence,
             },
             ensure_ascii=False,
@@ -276,8 +362,8 @@ def _persist_pages(
     db.add(
         SourceAppendix(
             edition_id=edition.id,
-            page_number=int(render.meta.get("appendix_page") or 0),
-            title="Sources & provenance",
+            page_number=0,
+            title="Internal source record",
             content_html="",
             entries_json=json.dumps(plan.appendix_entries, ensure_ascii=False),
         )
@@ -569,6 +655,7 @@ def publish_edition(
             "edition": {
                 "id": edition.id,
                 "title": edition.title,
+                "display_name": edition_display_name(edition),
                 "kind": edition.kind,
                 "issue_number": edition.issue_number,
                 "volume": edition.volume,
@@ -611,6 +698,16 @@ def publish_edition(
             "quality": render.qa,
             "pages": render.pages,
             "sources": manifest_sources(plan.appendix_entries),
+            "qr": [
+                {
+                    "article_id": package.article.id,
+                    "public_id": package.public_id,
+                    "status": package.qr_status,
+                    "target": package.qr_target,
+                    "reason": package.qr_reason,
+                }
+                for package in plan.packages
+            ],
             "articles": manifest_articles,
             "epaper": {
                 "index": "epaper/index.html",

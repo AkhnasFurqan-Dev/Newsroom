@@ -626,8 +626,14 @@ def test_two_source_build_produces_one_merged_attributed_printable_edition(
             assert abs(page.rect.height - 1224) < 0.5
     finally:
         document.close()
-    assert (demo_channel.handle or demo_channel.title) in text
-    assert (second.handle or second.title) in text
-    assert article.title.split(":")[0][:24] in text or article.title[:24] in text
-    for forbidden in ("localhost", "127.0.0.1", "file:///"):
+    # Both channels are credited in the internal manifest and article source
+    # rows, but reader-facing pages carry no channel handles or provenance
+    # appendix.
+    assert manifest_channels == {demo_channel.id, second.id}
+    flat_text = " ".join(text.split())
+    headline = " ".join(article.title.split())
+    assert headline[:24] in flat_text or headline.split(":")[0][:24] in flat_text
+    assert (demo_channel.handle or demo_channel.title) not in text
+    assert (second.handle or second.title) not in text
+    for forbidden in ("localhost", "127.0.0.1", "file:///", "Sources & provenance"):
         assert forbidden not in text.lower()

@@ -526,7 +526,8 @@ def test_byline_and_source_disclosure_are_printed(db, owner, demo_channel):
     assert "editorial roundup" in profile.source_disclosure.lower()
     template = (Path(__file__).resolve().parents[1] / "channel_press/layout/templates/print.html.j2").read_text(encoding="utf-8")
     assert "By {{ profile.byline }}" in template
-    assert "provenance_note" in template
+    assert "About this edition" not in template
+    assert "provenance_note" not in template
 
 
 # ---------------------------------------------------------------------------

@@ -147,27 +147,33 @@ def render_chart_svg(
 def render_timeline_html(
     events: list[StoryTimelineEvent], timezone: str, *, max_events: int | None = None
 ) -> str:
-    ordered = sorted(events, key=lambda event: event.event_at)
-    if not ordered:
+    """Render a clean printed chronology.
+
+    Internal certainty labels (``reported``, ``attributed``) and raw channel
+    message references are deliberately not printed: they are audit vocabulary,
+    not newspaper copy. Decorative bulletin furniture is stripped from each
+    description, and near-identical repeated entries are collapsed.
+    """
+    from ..editorial.chronology import distinct_entries
+
+    entries = distinct_entries(events)
+    if len(entries) < 2:
         return ""
-    shown = ordered[:max_events] if max_events else ordered
+    shown = entries[:max_events] if max_events else entries
     rows = []
-    for event in shown:
-        local = to_local(event.event_at, timezone)
+    for entry in shown:
+        local = to_local(entry.when, timezone)
         stamp = local.strftime("%d %b, %H:%M") if local else ""
         rows.append(
             f'<li><span class="timeline-time">{_escape(stamp)}</span>'
-            f'<span class="timeline-text">{_escape(event.description)}</span>'
-            f'<span class="timeline-source">{_escape(event.certainty)}</span></li>'
+            f'<span class="timeline-text">{_escape(entry.text)}</span></li>'
         )
     html = '<ol class="timeline">' + "".join(rows) + "</ol>"
-    if max_events and len(ordered) > max_events:
-        # Print space is finite. Never imply the printed list is complete: state
-        # exactly how many dated entries exist and where the rest are held.
+    if max_events and len(entries) > max_events:
+        # Print space is finite. Never imply the printed list is complete.
         html += (
-            f'<p class="timeline-more">Showing the first {max_events} of {len(ordered)} '
-            f"dated entries. The remaining {len(ordered) - max_events} are held in the "
-            "edition source record and are not printed here.</p>"
+            f'<p class="timeline-more">Earlier developments are summarised in the '
+            f"report above.</p>"
         )
     return html
 

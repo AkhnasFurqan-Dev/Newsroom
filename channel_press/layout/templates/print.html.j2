@@ -3,73 +3,78 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=1056, initial-scale=1">
-<title>{{ profile.name }} — {{ edition.title }}</title>
+<title>{{ profile.name }} — {{ edition_date }}</title>
 <style>
 {{ print_css|safe }}
 </style>
 </head>
 <body class="{% if demo_edition %}is-demo{% endif %}">
+{% macro story_qr(chunk) -%}
+{% if chunk.package.qr_data_uri %}
+<div class="story__qr">
+  <img src="{{ chunk.package.qr_data_uri }}" alt="QR code linking to the sources for this report" width="72" height="72">
+  <span>{{ chunk.package.qr_label }}</span>
+</div>
+{% endif %}
+{%- endmacro %}
 {% macro story_article(chunk, section, tmpl) -%}
 <article class="story story--{{ tmpl }}" data-story-id="{{ chunk.package.story.id }}" data-article-id="{{ chunk.package.article.id }}" data-chunk="{{ chunk.index }}" data-chunk-count="{{ chunk.count }}" data-template="{{ tmpl }}">
   {% if chunk.index == 1 %}
   <div class="kicker">{{ section_label(section) }}{% if chunk.package.genre != 'news' and chunk.package.genre != section %} · {{ genre_label(chunk.package.genre) }}{% endif %}</div>
-  <h2 class="story__headline">{{ chunk.package.article.title }}</h2>
+  <h2 class="story__headline">{{ chunk.package.headline }}</h2>
   {% if profile.byline %}<div class="story__byline">By {{ profile.byline }}</div>{% endif %}
-  {% if chunk.package.article.deck %}<p class="story__deck">{{ chunk.package.article.deck }}</p>{% endif %}
-  {% if chunk.package.article.standfirst %}<p class="story__standfirst">{{ chunk.package.article.standfirst }}</p>{% endif %}
+  {{ story_qr(chunk) }}
+  {% if chunk.package.deck %}<p class="story__deck">{{ chunk.package.deck }}</p>{% endif %}
+  {% if chunk.package.standfirst %}<p class="story__standfirst">{{ chunk.package.standfirst }}</p>{% endif %}
   {% if tmpl == 'analysis_feature' %}<div class="genre-label">Analysis · interpretation of verified reporting</div>{% endif %}
   {% if tmpl == 'opinion' %}<div class="genre-label">Opinion · the publication's view</div>{% endif %}
   {% if media_html(chunk.package) %}{{ media_html(chunk.package) }}{% endif %}
   {% else %}
-  <div class="continuation-head">{{ chunk.package.article.title }}</div>
+  <div class="continuation-head">{{ chunk.package.headline }}</div>
   {% endif %}
   <div class="story__body">{{ paragraphs_html(chunk.paragraphs) }}</div>
   {% if chunk.index == chunk.count %}
-    {% if chunk.package.chart_svg and not chunk.package.media_path %}<figure class="story__graphic">{{ chunk.package.chart_svg|safe }}<figcaption>{{ chunk.package.chart_spec.title }} — figures tabulated from the source report; see appendix.</figcaption></figure>{% endif %}
+    {% if chunk.package.chart_svg and not chunk.package.media_path %}<figure class="story__graphic">{{ chunk.package.chart_svg|safe }}<figcaption>{{ chunk.package.chart_spec.title }}</figcaption></figure>{% endif %}
     {% if chunk.package.timeline_html %}{{ chunk.package.timeline_html|safe }}{% endif %}
-    <div class="source-line" data-story-id="{{ chunk.package.story.id }}">Sources: {{ source_refs(chunk.package) }}{% if chunk.package.source_count %} · appendix p. <span class="appendix-page">?</span>{% endif %}</div>
     {% if chunk.package.correction_note %}<p class="correction-note">{{ chunk.package.correction_note }}</p>{% endif %}
   {% endif %}
   {% if chunk.index < chunk.count %}<div class="continues" data-story-id="{{ chunk.package.story.id }}" data-next-chunk="{{ chunk.index + 1 }}">Continued on page <span class="page-ref">?</span></div>{% endif %}
 </article>
 {%- endmacro %}
 <main id="source">
-  {% if demo_edition %}
-  {% endif %}
 
   <section class="page-front" data-template="{{ front_template }}" data-section="front">
     <header class="masthead">
       {% if demo_edition %}
-      <div class="demo-notice">SYNTHETIC FIXTURE EDITION — NOT FOR PUBLICATION. Source posts are synthetic test data.</div>
+      <div class="demo-notice">SAMPLE · SYNTHETIC FIXTURE CONTENT — NOT FOR PUBLICATION</div>
       {% endif %}
       <div class="masthead__rule"></div>
       <div class="masthead__top">
         <span>{{ edition_date }}</span>
-        <span class="masthead__edition">{{ edition_kind_label }} · Vol. {{ profile.issue_volume }} No. {{ edition.issue_number }}</span>
+        <span class="masthead__edition">{{ edition_name }} · Vol. {{ profile.issue_volume }} No. {{ edition.issue_number }}</span>
         <span>{{ profile.city }}</span>
       </div>
       <h1 class="masthead__name">{{ profile.name }}</h1>
+      {% if profile.show_slogan and profile.slogan %}
       <div class="masthead__strap">
         <span>{{ profile.slogan }}</span>
-        <span class="masthead__handle">{{ profile.channel_handle }}</span>
       </div>
+      {% endif %}
       <div class="masthead__rule masthead__rule--thick"></div>
     </header>
 
     <div class="front-grid">
       <article class="story story--front" data-story-id="{{ lead.story.id }}" data-article-id="{{ lead.article.id }}" data-chunk="1" data-chunk-count="{{ lead_chunks|length }}" data-template="{{ front_template }}">
         <div class="kicker">{{ section_label(lead.section) }}{% if lead.genre != 'news' %} · {{ genre_label(lead.genre) }}{% endif %}</div>
-        <h2 class="story__headline story__headline--{{ lead.headline_size }}">{{ lead.article.title }}</h2>
+        <h2 class="story__headline story__headline--{{ lead.headline_size }}">{{ lead.headline }}</h2>
         {% if profile.byline %}<div class="story__byline">By {{ profile.byline }}</div>{% endif %}
-        {% if lead.article.deck %}<p class="story__deck">{{ lead.article.deck }}</p>{% endif %}
-        {% if lead.article.standfirst %}<p class="story__standfirst">{{ lead.article.standfirst }}</p>{% endif %}
+        {{ story_qr(lead_chunks[0]) }}
+        {% if lead.deck %}<p class="story__deck">{{ lead.deck }}</p>{% endif %}
+        {% if lead.standfirst %}<p class="story__standfirst">{{ lead.standfirst }}</p>{% endif %}
         {% if media_html(lead) %}{{ media_html(lead) }}{% endif %}
         <div class="story__body">{{ paragraphs_html(lead_chunks[0].paragraphs) }}</div>
         {% if lead.chart_svg and not lead.media_path %}<figure class="story__graphic">{{ lead.chart_svg|safe }}</figure>{% endif %}
         {% if lead.timeline_html %}{{ lead.timeline_html|safe }}{% endif %}
-        <div class="source-line" data-story-id="{{ lead.story.id }}">
-          Sources: {{ source_refs(lead) }}{% if lead.source_count %} · appendix p. <span class="appendix-page">?</span>{% endif %}
-        </div>
         {% if lead.correction_note %}<p class="correction-note">{{ lead.correction_note }}</p>{% endif %}
         {% if lead_chunks|length > 1 %}<div class="continues" data-story-id="{{ lead.story.id }}" data-next-chunk="2">Continued on page <span class="page-ref">?</span></div>{% endif %}
       </article>
@@ -79,7 +84,7 @@
         {% for brief in front_briefs %}
         <div class="front-brief" data-story-id="{{ brief.story.id }}">
           <div class="front-brief__kicker">{{ section_label(brief.section) }}</div>
-          <h3>{{ brief.article.title }}</h3>
+          <h3>{{ brief.headline }}</h3>
           <p>{{ brief.teaser }}</p>
           {% if brief.genre != 'news' %}<div class="front-brief__genre">{{ genre_label(brief.genre) }}</div>{% endif %}
         </div>
@@ -89,11 +94,7 @@
           {% for section, items in sections %}
           <li><span>{{ section_label(section) }}</span><span class="inside-count">{{ items|length }}</span></li>
           {% endfor %}
-          <li><span>Sources &amp; provenance</span><span class="inside-count">appendix</span></li>
         </ul>
-        <div class="rail-note">
-          <strong>About this edition.</strong> {{ provenance_note }}
-        </div>
       </aside>
     </div>
 
@@ -104,7 +105,7 @@
         {% for brief in front_digest %}
         <article class="front-brief front-digest__item" data-story-id="{{ brief.story.id }}">
           <div class="front-brief__kicker">{{ section_label(brief.section) }}</div>
-          <h3>{{ brief.article.title }}</h3>
+          <h3>{{ brief.headline }}</h3>
           <p>{{ brief.teaser|truncate(105, end='…') }}</p>
         </article>
         {% endfor %}
@@ -113,8 +114,8 @@
     {% endif %}
 
     <footer class="front-footer">
-      <span>{{ edition.window_label }}</span>
-      <span>{{ profile.name }} · {{ profile.footer_text }}</span>
+      <span>{{ edition_date }}</span>
+      <span>{{ profile.name }}</span>
       <span class="page-number" data-page-number="1">1</span>
     </footer>
   </section>
@@ -130,24 +131,11 @@
     <div class="brief-grid">
       {% for chunk in section_chunks[section] %}
       <article class="story story--brief" data-story-id="{{ chunk.package.story.id }}" data-article-id="{{ chunk.package.article.id }}" data-chunk="{{ chunk.index }}" data-chunk-count="{{ chunk.count }}" data-template="briefs">
-        <h2 class="story__headline story__headline--brief">{{ chunk.package.article.title }}</h2>
+        <h2 class="story__headline story__headline--brief">{{ chunk.package.headline }}</h2>
         <div class="story__body">{{ paragraphs_html(chunk.paragraphs) }}</div>
       </article>
       {% endfor %}
     </div>
-    <aside class="evidence-box">
-      <div class="evidence-box__title">Evidence summary for this edition</div>
-      <dl>
-        <div><dt>Source messages in window</dt><dd>{{ evidence.included_posts }} included ? {{ evidence.excluded_posts }} excluded</dd></div>
-        <div><dt>Stories / printed reports</dt><dd>{{ evidence.stories }} / {{ evidence.articles }}</dd></div>
-        <div><dt>Dated source citations</dt><dd>{{ evidence.sources }}</dd></div>
-        <div><dt>Claims checked</dt><dd>{{ evidence.claims }}{% if evidence.corrections %} ? {{ evidence.corrections }} correction(s){% endif %}</dd></div>
-        <div><dt>Claim links supported</dt><dd>{{ evidence.supported_links }} of {{ evidence.claim_links }}</dd></div>
-        <div><dt>Items held for review</dt><dd>{{ evidence.review_items }}</dd></div>
-        <div><dt>Drafting path</dt><dd>{{ evidence.provider or "source-bound fixture composer" }}</dd></div>
-      </dl>
-      <p class="evidence-box__note">Figures describe this edition only. A zero correction count means no correction was recorded in the window; it is not a claim that none exists.</p>
-    </aside>
     {% else %}
     {% if section_rows.get(section) %}
     <div class="story-flow story-flow--rows">
@@ -164,72 +152,9 @@
       {% endfor %}
     </div>
     {% endif %}
-    {% if section in ['conflict', 'regional', 'defence', 'national', 'international'] and section_context.get(section) and section_chunks[section]|length <= 2 %}
-    {% set ctx = section_context[section] %}
-    <aside class="section-record">
-      <div class="section-record__title">Source record — {{ section_label(section) }}</div>
-      <div class="section-record__cols">
-        {% if ctx.events %}
-        <div class="section-record__chronology">
-          <h4>Chronology from channel messages</h4>
-          <ol>
-            {% for event in ctx.events %}
-            <li><span class="when">{{ event.when }}</span><span>{{ event.description }}</span><span class="certainty">{{ event.certainty }}</span></li>
-            {% endfor %}
-          </ol>
-        </div>
-        {% endif %}
-        <div class="section-record__sources">
-          <h4>Messages cited</h4>
-          <ul>
-            {% for message in ctx.messages %}
-            <li><span class="msg">Msg {{ message.message_id }}</span> {{ message.date }}{% if message.url %} · public post (scan appendix){% endif %}</li>
-            {% endfor %}
-          </ul>
-          <p class="section-record__check">{{ ctx.claims }} claims checked · {{ ctx.corrections }} correction(s) · {{ ctx.unverified }} explicitly unverified · {{ ctx.high_risk }} risk-tagged.</p>
-        </div>
-      </div>
-    </aside>
-    {% endif %}
     {% endif %}
   </section>
   {% endfor %}
-
-  <section class="page-appendix" data-template="sources" data-section="sources">
-    <header class="section-head">
-      <div class="section-head__label">Sources &amp; provenance</div>
-      <div class="section-head__rule"></div>
-      <div class="section-head__meta">Edition {{ edition.issue_number }} · appendix</div>
-    </header>
-    <div class="appendix-intro">
-      <p>{{ appendix_intro }}</p>
-      <p class="appendix-method">{{ appendix_method }}</p>
-    </div>
-    <table class="source-table">
-      <thead>
-        <tr><th>Ref</th><th>Published (UTC)</th><th>Source message</th><th>Item</th><th>Citation</th></tr>
-      </thead>
-      <tbody>
-        {% for entry in appendix_entries %}
-        <tr>
-          <td class="ref">{{ entry.ref }}</td>
-          <td>{{ entry.date }}</td>
-          <td>{{ entry.message_id if entry.message_id is not none else '—' }}</td>
-          <td>{{ entry.article }}{% if entry.language and entry.language != 'en' %} <span class="lang">[{{ entry.language }}]</span>{% endif %}{% if entry.channel %}<div class="qr-label">{{ entry.channel }}</div>{% endif %}{% if entry.kind == 'external_link_unverified' %}<div class="qr-label">{{ entry.title or entry.publisher or 'External reference' }} · not independently verified</div>{% endif %}</td>
-          <td class="qr">
-            {% if entry.qr_data_uri %}
-            <img class="source-qr" src="{{ entry.qr_data_uri }}" alt="QR code for source message {{ entry.message_id }} from {{ profile.channel_handle or 'the source channel' }}" width="84" height="84">
-            <div class="qr-label">{{ entry.citation_label }}</div>
-            {% else %}
-            <span class="no-qr">{{ entry.citation_label }}</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <div class="appendix-note">{{ appendix_footer }}</div>
-  </section>
 </main>
 <script>
 {{ paged_js|safe }}

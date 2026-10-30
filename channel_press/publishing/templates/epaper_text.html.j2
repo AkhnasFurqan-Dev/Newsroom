@@ -1,22 +1,23 @@
 {% extends "epaper_base.html.j2" %}
-{% block title %}{{ profile.name }} — text edition{% endblock %}
+{% block title %}{{ profile.name }} — {{ edition_name }} — text edition{% endblock %}
 {% block body %}
 <header class="site-head site-head--text">
   <div class="site-head__top">
     <span>{{ edition_date }}</span>
-    <span>{% if demo_edition %}Synthetic fixture edition — not for publication{% else %}Editorial roundup{% endif %}</span>
+    <span>{% if demo_edition %}SAMPLE · SYNTHETIC FIXTURE CONTENT{% else %}{{ edition_name }}{% endif %}</span>
     <a href="index.html">Page viewer</a>
   </div>
   <h1>{{ profile.name }}</h1>
-  <div class="site-head__strap"><span>{{ profile.slogan }}</span><span>{{ profile.channel_handle }}</span></div>
+  {% if profile.show_slogan and profile.slogan %}
+  <div class="site-head__strap"><span>{{ profile.slogan }}</span></div>
+  {% endif %}
 </header>
 
 <main class="transcript">
   <p class="transcript__note">
-    Text edition generated from the same edition data and quality-checked layout as the PDF. Source references
-    point to the appendix below. This accessible transcript is not a substitute for the print proof when checking
-    typography and page geometry.
-    {% if profile.source_disclosure %}{{ profile.source_disclosure }}{% endif %}
+    Accessible text edition generated from the same edition data and quality-checked layout as the PDF.
+    Source links appear beneath each report. This transcript is not a substitute for the print proof when
+    checking typography and page geometry.
   </p>
   {% for article in articles %}
   <article id="article-{{ loop.index }}" class="transcript__article">
@@ -27,27 +28,24 @@
     {% if article.standfirst %}<p class="transcript__standfirst">{{ article.standfirst }}</p>{% endif %}
     {% for paragraph in article.paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
     {% if article.correction_note %}<p class="transcript__correction">{{ article.correction_note }}</p>{% endif %}
-    <p class="transcript__sources">Sources: {{ article.source_refs|join(', ') if article.source_refs else 'see appendix' }}</p>
+    {% if article.sources %}
+    <details class="transcript__sources">
+      <summary>Sources</summary>
+      <ul>
+        {% for source in article.sources %}
+        <li>
+          {% if source.url and source.kind != 'fixture' %}
+          <a href="{{ source.url }}" rel="noopener noreferrer">{{ source.title or source.channel or 'Original post' }}</a>
+          {% else %}
+          <span>{{ source.title or source.channel or 'Source report' }}</span>
+          {% endif %}
+          <span class="transcript__source-meta">{{ source.date }}{% if source.kind == 'external_link_unverified' %} · external, not independently verified{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
   </article>
   {% endfor %}
 </main>
-
-<section class="appendix">
-  <h2>Sources &amp; provenance</h2>
-  <table>
-    <thead><tr><th>Ref</th><th>Published (UTC)</th><th>Message</th><th>Item</th><th>Link / status</th></tr></thead>
-    <tbody>
-      {% for entry in appendix_entries %}
-      <tr>
-        <td>{{ entry.ref }}</td>
-        <td>{{ entry.date }}</td>
-        <td>{{ entry.message_id if entry.message_id is not none else '—' }}</td>
-        <td>{{ entry.article }}</td>
-        <td>{% if entry.url %}<a href="{{ entry.url }}" rel="noopener noreferrer">{{ entry.url }}</a>{% else %}Fixture message — no public URL{% endif %}{% if entry.kind == 'external_link_unverified' %} <em>(external, not independently verified)</em>{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <p class="appendix__note">{{ profile.footer_text }}</p>
-</section>
 {% endblock %}
