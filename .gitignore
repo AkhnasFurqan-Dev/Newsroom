@@ -40,3 +40,8 @@ Desktop.ini
 executing-*.json
 ses_*.json
 .vscode/
+/START_LIVE_HANDOFF.md
+/START_CONCURRENCY_RECOVERY.md
+/LIVE_ENV_PLACEHOLDERS.env.template
+/docs/BUILD_CONTRACT.md
+/docs/test-run-full.txt
