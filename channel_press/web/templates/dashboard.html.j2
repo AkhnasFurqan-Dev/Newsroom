@@ -19,11 +19,13 @@
     <form><input type="hidden" name="csrf_token" value="{{ csrf }}">
       <button type="button" class="btn btn--small" data-health-check>Check connections</button>
     </form>
+    {% if not desktop_mode %}
     <form method="post" action="/system/restart" onsubmit="return confirm('Pause active work and restart Channel Press services?')">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <input type="hidden" name="confirm" value="restart">
       <button class="btn btn--ghost btn--small">Restart services</button>
     </form>
+    {% endif %}
   </div>
 </section>
 <script src="/static/js/health.js" defer></script>

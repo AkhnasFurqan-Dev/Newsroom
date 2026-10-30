@@ -135,7 +135,9 @@ def next_volume(db: Session, channel_id: int) -> int:
 
 
 def select_provider(
-    channel: Channel | list[Channel], requested: DraftProvider | None = None
+    channel: Channel | list[Channel],
+    requested: DraftProvider | None = None,
+    db: Session | None = None,
 ) -> tuple[DraftProvider, str]:
     channels = channel if isinstance(channel, list) else [channel]
     if requested is not None:
@@ -145,6 +147,13 @@ def select_provider(
     candidate = OllamaDraftProvider()
     available, message = candidate.available()
     if available:
+        from .ai.model_manager import model_smoke_record
+
+        if db is None or model_smoke_record(db, candidate.model, candidate.model_digest) is None:
+            raise PipelineError(
+                f"Local model {candidate.model} is installed but not tested for this exact digest. "
+                "Run AI Models → Test local model before processing source content."
+            )
         return candidate, f"ollama {candidate.model}"
     raise PipelineError(
         f"Real channel drafting cannot continue because Ollama is unavailable: {message}. "
@@ -594,7 +603,7 @@ def run_pipeline(db: Session, request: PipelineRequest) -> PipelineResult:
         )
     elif research_stats.get("status") == "unavailable":
         _notify(request, "research", f"Search unavailable: {research_stats.get('detail', '')}")
-    provider, provider_note = select_provider(channels, request.provider)
+    provider, provider_note = select_provider(channels, request.provider, db)
     _notify(request, "drafting", f"Drafting {len(stories)} stories with {getattr(provider, 'name', 'provider')}")
     articles: list[Article] = []
     draft_errors: list[str] = []

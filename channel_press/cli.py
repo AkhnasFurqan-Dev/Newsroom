@@ -501,10 +501,19 @@ def cmd_run_now(args: argparse.Namespace) -> int:
 
 def cmd_worker(args: argparse.Namespace) -> int:
     from .logging_setup import configure_logging
+    from .ai.model_profiles import apply_saved_model_selection
 
     settings.ensure_dirs()
     upgrade_database()
-    configure_logging("worker", console=True)
+    with SessionLocal() as db:
+        apply_saved_model_selection(db)
+    configure_logging(
+        "worker",
+        console=(
+            os.environ.get("CHANNEL_PRESS_HEADLESS_WORKER") != "1"
+            or bool(os.environ.get("CHANNEL_PRESS_WORKER_LOG_PATH"))
+        ),
+    )
 
     def show_progress(stage: str, detail: str) -> None:
         _print(f"[{utcnow().strftime('%H:%M:%S')}] {stage.replace('_', ' ')} — {detail}")

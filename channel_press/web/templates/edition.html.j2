@@ -27,9 +27,9 @@
     {% else %}
       <span class="badge badge--{{ 'review' if edition.preview_state != 'current' else 'approved' }}">Preview: {{ edition.preview_state|status_label }}</span>
     {% endif %}
-    {% if working_pdf_exists %}<a class="btn" href="/editions/{{ edition.id }}/working.pdf" target="_blank" rel="noopener">Open preview PDF</a>{% endif %}
-    {% if pdf_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/pdf" target="_blank" rel="noopener">Published PDF</a>{% endif %}
-    {% if epaper_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/epaper" target="_blank" rel="noopener">E-paper</a>{% endif %}
+    {% if working_pdf_exists %}<a class="btn" href="/editions/{{ edition.id }}/working.pdf"{% if not desktop_mode %} target="_blank" rel="noopener"{% endif %}>Open preview PDF</a>{% endif %}
+    {% if pdf_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/pdf"{% if not desktop_mode %} target="_blank" rel="noopener"{% endif %}>Published PDF</a>{% endif %}
+    {% if epaper_exists %}<a class="btn btn--ghost" href="/editions/{{ edition.id }}/epaper"{% if not desktop_mode %} target="_blank" rel="noopener"{% endif %}>E-paper</a>{% endif %}
   </div>
 </div>
 
@@ -330,7 +330,7 @@
         <article class="ws-evidence__item">
           <div class="small">
             <span class="mono">msg {{ post.telegram_message_id }}</span> · {{ post.posted_at|localtime(edition.timezone) }}
-            · {{ post.language }}{% if post.source_url %} · <a href="{{ post.source_url }}" rel="noopener nofollow">source</a>{% endif %}
+            · {{ post.language }}{% if post.source_url %} · <a href="{{ post.source_url }}" target="_blank" rel="noopener nofollow">source</a>{% endif %}
           </div>
           <p>{{ fragment.text[:700] }}</p>
         </article>
@@ -355,7 +355,7 @@
       <h4>External context (editor-inspected)</h4>
       <ul class="small">
         {% for ref in selected_context.external %}
-        <li><a href="{{ ref.url }}" rel="noopener nofollow">{{ ref.title or ref.url }}</a> · {{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate(edition.timezone) }}</li>
+        <li><a href="{{ ref.url }}" target="_blank" rel="noopener nofollow">{{ ref.title or ref.url }}</a> · {{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate(edition.timezone) }}</li>
         {% endfor %}
       </ul>
       {% endif %}
@@ -422,7 +422,7 @@
       {% for page in pages %}
       {% set page_number = page.page_number %}
       <figure class="ws-page{% if active_page == page_number %} is-active{% endif %}">
-        <a href="/editions/{{ edition.id }}/preview/{{ page_number }}?v={{ edition.preview_revision or edition.version }}" target="_blank" rel="noopener">
+        <a href="/editions/{{ edition.id }}/preview/{{ page_number }}?v={{ edition.preview_revision or edition.version }}"{% if not desktop_mode %} target="_blank" rel="noopener"{% endif %}>
           <img src="/editions/{{ edition.id }}/preview/{{ page_number }}?v={{ edition.preview_revision or edition.version }}" alt="Page {{ page_number }}" loading="lazy">
         </a>
         <figcaption>

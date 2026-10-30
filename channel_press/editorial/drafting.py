@@ -200,6 +200,9 @@ def _clean_draft(result: DraftResult) -> DraftResult:
         latency_ms=result.latency_ms,
         fallback_reason=result.fallback_reason,
         raw=result.raw,
+        model_digest=result.model_digest,
+        provider_version=result.provider_version,
+        generation_settings=result.generation_settings,
     )
 
 
@@ -422,6 +425,9 @@ def draft_story(
     audit["audited_at"] = utcnow().isoformat()
     audit["provider"] = result.provider
     audit["model"] = result.model
+    audit["model_digest"] = result.model_digest
+    audit["provider_version"] = result.provider_version
+    audit["generation_settings"] = result.generation_settings
     audit["prompt_version"] = result.prompt_version
     audit["fallback_reason"] = fallback_reason
     audit["quality"] = quality
@@ -443,13 +449,29 @@ def draft_story(
     db.add(
         ModelRun(
             job_id=job_id,
+            article_id=article.id,
             task="news_article" if article.genre == "news" else "analysis_article",
             provider=result.provider,
             model=result.model,
+            model_digest=result.model_digest,
+            provider_version=result.provider_version,
             prompt_version=result.prompt_version,
+            generation_settings_json=json.dumps(
+                result.generation_settings, ensure_ascii=False
+            ),
+            evidence_manifest_json=json.dumps(
+                {
+                    "source_post_ids": sorted({source.post_id for source in bundle.sources}),
+                    "message_ids": sorted({source.message_id for source in bundle.sources}),
+                    "claim_ids": sorted({claim.id for claim in bundle.claims}),
+                    "research_urls": sorted({item.url for item in bundle.research}),
+                },
+                ensure_ascii=False,
+            ),
             input_hash=__import__("hashlib").sha256(corpus.encode("utf-8")).hexdigest(),
             output_hash=__import__("hashlib").sha256(body_text.encode("utf-8")).hexdigest(),
             valid=not bool(fallback_reason),
+            status="fallback" if fallback_reason else "completed",
             latency_ms=result.latency_ms,
             error=fallback_reason,
         )

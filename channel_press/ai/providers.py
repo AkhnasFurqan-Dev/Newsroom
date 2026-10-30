@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -16,6 +17,7 @@ from ..models import SourcePost, StoryClaim, StoryCluster, StoryTimelineEvent
 from ..editorial.claims import contains_injection, strip_injection
 from ..editorial.clean_text import is_near_duplicate, repair_prose, strip_output_decor
 from ..editorial.entities import sentence_split
+from .model_profiles import profile_for_model
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -103,6 +105,9 @@ class DraftResult:
     latency_ms: int = 0
     fallback_reason: str = ""
     raw: dict = field(default_factory=dict)
+    model_digest: str = ""
+    provider_version: str = ""
+    generation_settings: dict = field(default_factory=dict)
 
 
 class DraftProvider(Protocol):
@@ -295,11 +300,24 @@ class OllamaDraftProvider:
 
     def __init__(self, base_url: str | None = None, model: str | None = None, keep_alive: str | None = None):
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
+        parts = urlsplit(self.base_url)
+        if (
+            parts.scheme != "http"
+            or parts.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or parts.username
+            or parts.password
+            or parts.path not in {"", "/"}
+            or parts.query
+            or parts.fragment
+        ):
+            raise ValueError("Editorial model requests must use a local Ollama service.")
         self.model = model or settings.ollama_model
         self.keep_alive = keep_alive or settings.ollama_keep_alive
         self.timeout = max(30, int(settings.ollama_timeout_seconds))
         self.num_ctx = max(2048, int(settings.ollama_num_ctx))
         self.num_predict = max(256, int(settings.ollama_num_predict))
+        self.model_digest = ""
+        self.provider_version = ""
 
     def _wanted_names(self) -> set[str]:
         wanted = self.model.strip()
@@ -312,11 +330,32 @@ class OllamaDraftProvider:
         try:
             with httpx.Client(timeout=5) as client:
                 response = client.get(f"{self.base_url}/api/tags")
+                try:
+                    version_response = client.get(f"{self.base_url}/api/version")
+                except (httpx.HTTPError, ValueError):
+                    version_response = None
             if response.status_code != 200:
                 return False, f"Ollama returned HTTP {response.status_code}."
-            models = {str(m.get("name") or "") for m in response.json().get("models", [])}
-            if not (models & self._wanted_names()):
-                return False, f"Model {self.model} is not installed (ollama pull {self.model})."
+            models = {
+                str(model.get("name") or ""): model
+                for model in response.json().get("models", [])
+                if isinstance(model, dict)
+            }
+            matches = self._wanted_names() & models.keys()
+            if not matches:
+                return False, f"Model {self.model} is not installed. Install it from AI Models."
+            selected = models[sorted(matches)[0]]
+            profile = profile_for_model(self.model)
+            if profile and int(selected.get("size") or 0) != int(profile["download_bytes"]):
+                return False, (
+                    f"Installed {self.model} does not match the reviewed model package size. "
+                    "Repair it from AI Models before drafting."
+                )
+            self.model_digest = str(selected.get("digest") or "")
+            if version_response is not None and version_response.status_code == 200:
+                self.provider_version = str(version_response.json().get("version") or "")
+            else:
+                self.provider_version = ""
             return True, "ready"
         except Exception as exc:  # network errors are expected when Ollama is off
             return False, f"Ollama is not reachable at {self.base_url}: {type(exc).__name__}"
@@ -342,7 +381,8 @@ class OllamaDraftProvider:
                 {"role": "user", "content": user},
             ],
             "stream": False,
-            "format": "json",
+            "format": DraftSchema.model_json_schema(),
+            "think": False,
             "keep_alive": self.keep_alive,
             "options": {
                 "temperature": 0.2,
@@ -357,7 +397,10 @@ class OllamaDraftProvider:
             raise RuntimeError(f"Ollama does not have the model {self.model}.")
         if response.status_code != 200:
             raise RuntimeError(f"Ollama HTTP {response.status_code}")
-        content = response.json().get("message", {}).get("content", "")
+        message = response.json().get("message", {})
+        content = message.get("content", "") if isinstance(message, dict) else ""
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("The local model returned no structured article content.")
         return self._parse_json(content)
 
     def draft(self, bundle: StoryBundle) -> DraftResult:
@@ -415,6 +458,16 @@ class OllamaDraftProvider:
                     prompt_version=prompt_version(task),
                     latency_ms=int((time.monotonic() - started) * 1000),
                     raw=raw,
+                    model_digest=self.model_digest,
+                    provider_version=self.provider_version,
+                    generation_settings={
+                        "think": False,
+                        "temperature": 0.2,
+                        "num_ctx": self.num_ctx,
+                        "num_predict": self.num_predict,
+                        "keep_alive": self.keep_alive,
+                        "format": "json_schema",
+                    },
                 )
             except (ValidationError, json.JSONDecodeError, KeyError) as exc:
                 last_error = str(exc)[:400]

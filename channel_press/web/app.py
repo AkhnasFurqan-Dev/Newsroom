@@ -13,7 +13,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,6 +21,7 @@ from typing import Iterable
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -52,6 +52,22 @@ from ..bootstrap import (
     setup_complete,
 )
 from ..config import BASE_DIR, settings
+from ..ai.model_profiles import (
+    MODEL_PROFILES,
+    apply_saved_model_selection,
+    profile_for_id,
+    profile_for_model,
+)
+from ..ai.model_manager import (
+    cancel_install,
+    install_status,
+    installed_models,
+    installed_profile,
+    model_smoke_record,
+    smoke_status,
+    start_install,
+    start_smoke_test,
+)
 from ..constants import (
     EDITOR_OVERRIDE_CHOICES,
     EXCLUSION_REASONS,
@@ -70,6 +86,7 @@ from ..collection.service import (
 from ..collection.window import local_cutoff_utc, parse_clock, window_for_cutoff
 from ..db import SessionLocal, session_dependency
 from ..logging_setup import configure_logging, get_logger
+from ..processes import hidden_process_options, launch_worker
 from ..editorial.audit import publish_gate
 from ..editorial.drafting import reaudit_article, save_editor_edit
 from ..editorial.revisions import (
@@ -110,6 +127,7 @@ from ..models import (
     Article,
     ArticleMedia,
     ArticleSource,
+    AppSetting,
     AuditEvent,
     CartographicProfile,
     Channel,
@@ -208,7 +226,7 @@ WEB_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = WEB_DIR / "templates"
 STATIC_DIR = WEB_DIR / "static"
 
-configure_logging("web")
+configure_logging("web", console=os.environ.get("CHANNEL_PRESS_DESKTOP") != "1")
 logger = get_logger("web")
 
 app = FastAPI(title="Channel Press", docs_url=None, redoc_url=None)
@@ -220,6 +238,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 def _startup() -> None:
     settings.ensure_dirs()
     upgrade_database()
+    with SessionLocal() as db:
+        apply_saved_model_selection(db)
 
 
 @app.on_event("shutdown")
@@ -269,6 +289,7 @@ def _env() -> Environment:
     env.filters["shortdate"] = shortdate
     env.filters["status_label"] = status_label
     env.filters["json_loads"] = json_loads
+    env.globals["desktop_mode"] = os.environ.get("CHANNEL_PRESS_DESKTOP") == "1"
     return env
 
 
@@ -435,25 +456,8 @@ def _launch_worker(background: bool = True) -> str:
         except Exception as exc:  # noqa: BLE001
             logger.exception("worker_launch_failed", extra={"kind": "sync"})
             return f"Worker error: {type(exc).__name__}: {str(exc)[:200]}"
-    log_dir = settings.data_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "worker-web.log"
-    handle = open(log_path, "a", encoding="utf-8")
-    flags = 0
-    if os.name == "nt":
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
-        )
     try:
-        subprocess.Popen(
-            [sys.executable, "-m", "channel_press.cli", "worker", "--once"],
-            cwd=str(BASE_DIR),
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            creationflags=flags,
-            close_fds=True,
-        )
+        process, log_path = launch_worker()
     except OSError as exc:
         # The job is already committed. A failed launch must not lose it: the
         # scheduled worker will pick it up, and the operator gets a warning
@@ -463,9 +467,7 @@ def _launch_worker(background: bool = True) -> str:
             f"Worker could not start ({type(exc).__name__}: {str(exc)[:160]}). "
             "The job stays queued; the scheduled worker will run it."
         )
-    finally:
-        handle.close()
-    return "Detached worker started; this page can be closed."
+    return f"Worker started in the background (process {process.pid}). Progress and logs are available here: {log_path}."
 
 
 def _channel_or_404(db: Session, channel_id: int, user: User, minimum: str = "viewer") -> Channel:
@@ -2888,7 +2890,30 @@ def edition_pdf(
     path = Path(edition.pdf_path)
     if not path.exists():
         raise HTTPException(404, "PDF file is missing.")
-    return FileResponse(path, media_type="application/pdf", filename=f"edition-{edition.id}-v{edition.version}.pdf")
+    filename = (
+        None
+        if os.environ.get("CHANNEL_PRESS_DESKTOP") == "1"
+        else f"edition-{edition.id}-v{edition.version}.pdf"
+    )
+    return FileResponse(path, media_type="application/pdf", filename=filename)
+
+
+@app.get("/editions/{edition_id}/working.pdf")
+def edition_working_pdf(
+    edition_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(session_dependency),
+):
+    edition = _edition_or_404(db, edition_id, user)
+    path = Path(edition.preview_pdf_path or edition.pdf_path or "")
+    if not path.is_file():
+        raise HTTPException(404, "Working preview PDF is missing.")
+    filename = (
+        None
+        if os.environ.get("CHANNEL_PRESS_DESKTOP") == "1"
+        else f"edition-{edition.id}-preview.pdf"
+    )
+    return FileResponse(path, media_type="application/pdf", filename=filename)
 
 
 @app.get("/editions/{edition_id}/sample_issue.pdf")
@@ -4506,6 +4531,189 @@ def diagnostics_page(request: Request, user: User = Depends(require_role("owner"
     )
 
 
+@app.get("/ai-models")
+def ai_models_page(
+    request: Request,
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+):
+    models_by_name: dict[str, dict] = {}
+    runtime_error = ""
+    try:
+        models_by_name = {
+            model["name"]: model for model in installed_models()
+        }
+    except (httpx.HTTPError, ValueError) as exc:
+        runtime_error = f"Local Ollama is unavailable ({type(exc).__name__})."
+    profiles = []
+    for profile in MODEL_PROFILES.values():
+        installed = models_by_name.get(profile["tag"])
+        package_matches = bool(
+            installed
+            and installed["size"] == int(profile["download_bytes"])
+        )
+        profiles.append(
+            {
+                **profile,
+                "installed": package_matches,
+                "local_digest": installed["digest"] if package_matches else "",
+                "smoke_tested": bool(
+                    package_matches
+                    and model_smoke_record(
+                        db, profile["tag"], installed["digest"]
+                    )
+                ),
+            }
+        )
+    selected_profile = profile_for_model(settings.ollama_model)
+    return render(
+        request,
+        "ai_models.html",
+        _ctx(
+            db,
+            request,
+            user,
+            "ai_models",
+            profiles=profiles,
+            selected_model=settings.ollama_model,
+            selected_profile=selected_profile["id"] if selected_profile else "",
+            runtime_error=runtime_error,
+            install=install_status(),
+            smoke=smoke_status(),
+        ),
+    )
+
+
+@app.post("/ai-models/install")
+def ai_models_install(
+    profile_id: str = Form(...),
+    download_confirm: str = Form(""),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    try:
+        profile = profile_for_id(profile_id)
+        if download_confirm != "yes":
+            raise ValueError("Confirm the displayed model download size before starting.")
+        state = start_install(profile_id)
+    except (ValueError, httpx.HTTPError) as exc:
+        return _redirect("/ai-models", error=str(exc))
+    audit(
+        db,
+        user,
+        "ai.model_install",
+        "model",
+        profile_id,
+        {"tag": profile["tag"], "download_bytes": profile["download_bytes"]},
+    )
+    db.commit()
+    message = (
+        "Model download already running."
+        if state.get("state") in {"verifying", "downloading", "canceling"}
+        else f"Preparing {profile['label']} ({profile['tag']}). Progress will remain in this window."
+    )
+    return _redirect("/ai-models", message)
+
+
+@app.post("/ai-models/cancel")
+def ai_models_cancel(
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    cancel_install()
+    audit(db, user, "ai.model_install_cancel", "model", "download")
+    db.commit()
+    return _redirect("/ai-models", "Model transfer cancellation requested.")
+
+
+@app.post("/ai-models/select")
+def ai_models_select(
+    profile_id: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    try:
+        profile = profile_for_id(profile_id)
+        local = installed_profile(profile)
+    except (ValueError, httpx.HTTPError) as exc:
+        return _redirect("/ai-models", error=f"Could not verify the selected model ({type(exc).__name__}).")
+    if local is None:
+        return _redirect(
+            "/ai-models",
+            error="That exact pinned model package is not installed; install it before selecting it.",
+        )
+    for key, value in (
+        ("ai.model_tag", profile["tag"]),
+        ("ai.model_profile", profile_id),
+    ):
+        setting = db.get(AppSetting, key)
+        if setting is None:
+            db.add(AppSetting(key=key, value=value))
+        else:
+            setting.value = value
+            setting.updated_at = utcnow()
+    audit(
+        db,
+        user,
+        "ai.model_select",
+        "model",
+        profile_id,
+        {"tag": profile["tag"], "local_digest": local["digest"]},
+    )
+    db.commit()
+    settings.ollama_model = profile["tag"]
+    settings.ollama_model_profile = profile_id
+    return _redirect(
+        "/ai-models",
+        f"{profile['label']} selected. Run its local model test before drafting source content.",
+    )
+
+
+@app.post("/ai-models/test")
+def ai_models_test(
+    profile_id: str = Form(...),
+    user: User = Depends(require_role("editor")),
+    db: Session = Depends(session_dependency),
+    _csrf: None = Depends(require_csrf),
+):
+    try:
+        profile = profile_for_id(profile_id)
+    except ValueError as exc:
+        return _redirect("/ai-models", error=str(exc))
+    if settings.ollama_model != profile["tag"]:
+        return _redirect("/ai-models", error="Select this installed model before running its test.")
+    try:
+        local = installed_profile(profile)
+    except (ValueError, httpx.HTTPError) as exc:
+        return _redirect("/ai-models", error=f"Could not verify the local model ({type(exc).__name__}).")
+    if local is None:
+        return _redirect("/ai-models", error="The exact pinned model is not installed.")
+    state = start_smoke_test(profile_id)
+    audit(
+        db,
+        user,
+        "ai.model_smoke_test",
+        "model",
+        profile_id,
+        {"tag": profile["tag"], "local_digest": local["digest"]},
+    )
+    db.commit()
+    return _redirect(
+        "/ai-models",
+        "Local model test is running in this window."
+        if state.get("state") == "testing"
+        else "A local model test is already running.",
+    )
+
+
+@app.get("/api/ai-models/status")
+def ai_models_status(user: User = Depends(require_role("editor"))):
+    return JSONResponse({"install": install_status(), "smoke": smoke_status()})
+
+
 @app.exception_handler(HTTPException)
 def http_error(request: Request, exc: HTTPException):
     if exc.status_code in {301, 302, 303, 307, 308} and exc.headers and "Location" in exc.headers:
@@ -4685,7 +4893,7 @@ def _health_rows(
         )
 
     ollama = report.ollama or {}
-    if ollama.get("model_present"):
+    if ollama.get("model_ready"):
         rows.append(
             {
                 "label": "Local AI",
@@ -4697,24 +4905,35 @@ def _health_rows(
             }
         )
     else:
+        detail = ollama.get("detail") or "Local model readiness has not been confirmed."
         rows.append(
             {
                 "label": "Local AI",
                 "state": "not_connected" if not ollama.get("reachable") else "attention",
-                "state_label": "Not connected" if not ollama.get("reachable") else "Attention required",
-                "detail": ollama.get("detail") or "Ollama is not reachable.",
-                "action_url": "/diagnostics",
-                "action": "Open diagnostics",
+                "state_label": (
+                    "Not connected"
+                    if not ollama.get("reachable")
+                    else "Test required"
+                    if ollama.get("model_present")
+                    else "Model missing"
+                ),
+                "detail": detail,
+                "action_url": "/ai-models",
+                "action": "Open AI Models",
             }
         )
     rows.append(
         {
             "label": "Configured model",
-            "state": "ready" if ollama.get("model_present") else "degraded",
+            "state": "ready" if ollama.get("model_ready") else "degraded",
             "state_label": settings.ollama_model,
-            "detail": "Installed and available for drafting." if ollama.get("model_present") else "Not confirmed installed.",
-            "action_url": "",
-            "action": "",
+            "detail": (
+                "Installed and locally smoke-tested."
+                if ollama.get("model_ready")
+                else "Installation and a real local draft test are required."
+            ),
+            "action_url": "/ai-models",
+            "action": "Manage model",
         }
     )
 
@@ -4839,6 +5058,11 @@ def system_restart(confirm: str = Form(""),
                    _csrf: None = Depends(require_csrf)):
     if confirm != "restart":
         raise HTTPException(400, "Confirm the service restart first.")
+    if os.environ.get("CHANNEL_PRESS_DESKTOP") == "1":
+        raise HTTPException(
+            409,
+            "Close Channel Press using the window controls, then reopen it to restart the local engine.",
+        )
     if os.name != "nt":
         raise HTTPException(409, "Use the service scripts on the Windows host.")
     audit(db, user, "services.restart", "system", 0)
@@ -4849,6 +5073,8 @@ def system_restart(confirm: str = Form(""),
             ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
              str(BASE_DIR / "scripts" / "restart-services.ps1")],
             cwd=BASE_DIR, stdout=output, stderr=output,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+            close_fds=True,
+            shell=False,
+            **hidden_process_options(),
         )
     return HTMLResponse("Restart requested. Reopen the dashboard shortly. Paused jobs can be resumed in Jobs.")

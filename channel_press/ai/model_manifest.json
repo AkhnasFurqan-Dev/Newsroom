@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "retrieved_at": "2026-10-30",
+  "registry": "https://registry.ollama.ai/v2/library/qwen3.5",
+  "upstream": {
+    "model_family": "Qwen3.5",
+    "license": "Apache-2.0",
+    "license_url": "https://huggingface.co/Qwen/Qwen3.5-4B/blob/main/LICENSE",
+    "license_layer_digest": "sha256:50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+    "license_layer_verified": true
+  },
+  "profiles": [
+    {
+      "id": "standard",
+      "label": "Standard",
+      "tag": "qwen3.5:4b-q4_K_M",
+      "registry_manifest_digest": "sha256:d8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04",
+      "download_bytes": 3324173757,
+      "recommended": true,
+      "description": "Recommended local editorial model for compatible mid-range systems.",
+      "min_recommended_vram_gb": 6,
+      "min_recommended_ram_gb": 8,
+      "layers": {
+        "projector": "sha256:e56a899b1540860385465756dd308c84417410b94dbc1c380adffd20a921ca60",
+        "model": "sha256:a9d0a3e1d8c91732a3812becd31f8d4a8ff57414903f226306069f0437e2ac50",
+        "template": "sha256:b507b9c2f6ca642bffcd06665ea7c91f235fd32daeefdf875a0f938db05fb315",
+        "license": "sha256:50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+        "parameters": "sha256:9371364b27a52acac9d87f88bd93c9db1174d8d6ec57f6888925cdc1788871ff"
+      }
+    },
+    {
+      "id": "enhanced",
+      "label": "Enhanced",
+      "tag": "qwen3.5:9b-q4_K_M",
+      "registry_manifest_digest": "sha256:56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90",
+      "download_bytes": 6550825373,
+      "recommended": false,
+      "description": "Higher-quality option; requires measured memory headroom and explicit download confirmation.",
+      "min_recommended_vram_gb": 12,
+      "min_recommended_ram_gb": 16,
+      "layers": {
+        "projector": "sha256:f836f08f921193f4d6b6a6952dba0a6fb116759d26a757bcb395d570d73976ca",
+        "model": "sha256:02d45dc1cf451ba2475ac33b301c2dd8f985abe4c182ce04a1f2f5bf0260278d",
+        "template": "sha256:b507b9c2f6ca642bffcd06665ea7c91f235fd32daeefdf875a0f938db05fb315",
+        "license": "sha256:50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+        "parameters": "sha256:9371364b27a52acac9d87f88bd93c9db1174d8d6ec57f6888925cdc1788871ff"
+      }
+    },
+    {
+      "id": "compact",
+      "label": "Compact",
+      "tag": "qwen3.5:2b",
+      "registry_manifest_digest": "sha256:0689d44085e06d165161a8a9a1731344278cfb5aade63a3c3dbdb48ab54b130a",
+      "download_bytes": 2683396637,
+      "recommended": false,
+      "description": "Optional limited-hardware fallback; restrict to shorter tasks and retain additional editorial review.",
+      "min_recommended_vram_gb": 4,
+      "min_recommended_ram_gb": 8,
+      "layers": {
+        "projector": "sha256:5ddf560e34046fd958b2576324f2a9b57d70f297afe6526958d60a23f3bfc20b",
+        "model": "sha256:e8bf47d40c5ba68baf8f3e503ee36710da6e8641cb0a670a508cff5b3f0cfbf7",
+        "template": "sha256:b507b9c2f6ca642bffcd06665ea7c91f235fd32daeefdf875a0f938db05fb315",
+        "license": "sha256:50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+        "parameters": "sha256:9371364b27a52acac9d87f88bd93c9db1174d8d6ec57f6888925cdc1788871ff"
+      }
+    }
+  ]
+}

@@ -1291,3 +1291,107 @@ This includes the new research-discovery, health-view, edition-name, branding
 and timeline tests. Live Telegram collection was not repeated in this session;
 the live Ollama and RSS observations above are recorded separately from the
 fixture suite.
+
+## Windows PROD-00 / PROD-01 and Qwen3.5 migration — 30 October 2026
+
+The revised `CHANNEL_PRESS_WINDOWS_PRODUCTION_RELEASE_PLAN_V2.md` is the active
+Windows release contract. Implementation started with PROD-00 inventory and
+PROD-01 shell work; the previous web release plan is superseded.
+
+### Implementation
+
+- Added exact Ollama registry manifest, model-layer and Apache-2.0 license pins
+  for Standard `qwen3.5:4b-q4_K_M`, Enhanced `qwen3.5:9b-q4_K_M` and optional
+  Compact `qwen3.5:2b`. Standard is the new default. The in-app installer asks
+  for explicit size confirmation, verifies manifest/layer/license hashes and
+  reports transfer progress/cancellation in **AI Models**.
+- Updated the local Ollama adapter to require a loopback endpoint, request
+  schema-constrained JSON with Qwen thinking disabled, use only
+  `message.content`, and record local model digest, runtime version, generation
+  settings and evidence IDs. Automatic real-source drafting is blocked until
+  the exact local model digest passes the synthetic FX-01 smoke test.
+- Added an additive provenance migration. A seeded pre-migration Qwen2.5
+  `ModelRun` retained its provider, model, prompt, hashes, validity and latency;
+  new metadata is defaulted and legacy runs are marked `historical`. The new
+  nullable article FK uses `ON DELETE SET NULL`, preserving model-run records
+  when unpublished drafts are cleared.
+- Added a pywebview/WebView2 desktop entrypoint that runs the existing FastAPI
+  app on an ephemeral loopback port and uses a Windows single-instance mutex.
+  The desktop close dialog offers background continuation or checkpoint-safe
+  pause. Workers use a separate GUI-subsystem entrypoint, hidden child-process
+  flags and UTF-8 logs.
+- Added the initial PyInstaller onedir spec, pinned desktop/build extras,
+  explicit setuptools package discovery, generated SPDX SBOM, and updated the
+  setup/manual/admin/troubleshooting/release documentation. No user database,
+  Telegram session, publication identity, article revision or immutable edition
+  was modified.
+
+### Verified commands and outcomes
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e '.[desktop,build]'
+# Passed after adding explicit setuptools package discovery.
+
+.\.venv\Scripts\pytest.exe tests\test_ai_models.py tests\test_desktop.py tests\test_model_provenance_migration.py tests\test_editorial.py tests\test_preflight.py tests\test_web.py -q
+# 40 passed.
+
+.\.venv\Scripts\python.exe -m compileall -q channel_press tests scripts alembic
+# Passed.
+
+.\.venv\Scripts\alembic.exe heads
+# One head: a91c4e7b6d20.
+
+.\.venv\Scripts\pyinstaller.exe --noconfirm --clean .\packaging\ChannelPress.spec
+# Passed. ChannelPress.exe: 19,200,817 bytes, PE subsystem 2 (GUI).
+# ChannelPressWorker.exe: 18,163,990 bytes, PE subsystem 2 (GUI).
+
+.\.venv\Scripts\python.exe .\scripts\build_sbom.py
+# Wrote packaging\sbom.spdx.json for 68 distributions.
+```
+
+Targeted Ruff checks passed for the changed code; `channel_press/web/app.py`
+passed with the repository's existing unrelated F841 unused-local warning
+ignored. A broader baseline scan also reports existing lint findings in
+`graphics/charts.py`, `layout/planner.py`, `research/search.py` and
+`tests/test_research_discovery.py`; those unrelated issues were not changed.
+`PyMuPDF 1.25.1` is identified as `AGPL-3.0-only` in the SBOM and remains a
+closed-source redistribution blocker.
+
+### Not yet verified / next gate
+
+- No Qwen3.5 weights were downloaded. Real inference, pipeline quality,
+  latency, VRAM and performance remain unverified; request owner confirmation
+  before any multi-gigabyte download.
+- The Qwen3.5 request contract, editorial audit/provenance, smoke-test gate,
+  web page and history behavior are covered by deterministic tests, not by an
+  actual Qwen3.5 response.
+- PyInstaller artifact generation and GUI PE subsystems passed, but the
+  packaged window itself has not been launched or inspected. Installer,
+  clean-machine/WebView2 checks, bundled Playwright Chromium/Paged.js,
+  app-owned Ollama lifecycle and full process restore/shutdown acceptance
+  remain open. No production-ready claim is made.
+
+### PROD-00 / PROD-01 follow-up — Desktop edition viewing
+
+- Added the missing `/editions/{id}/working.pdf` route using the edition
+  access-control helper and the saved preview PDF path. Both preview and
+  published PDFs now render inline in desktop mode; browser mode retains
+  attachment behavior.
+- Edition preview PDF, published PDF, e-paper and page-preview links remain in
+  the desktop window. Browser mode keeps separate-tab behavior, while explicit
+  external source links continue to open in the external browser.
+- **Verification:** the focused AI, desktop, migration, editorial, preflight
+  and web suite passed (40 tests); `python -m compileall -q channel_press tests`
+  passed; targeted Ruff checks passed. The working-preview route, inline
+  desktop PDF headers, and navigation target behavior are included in the web
+  test.
+- **Build environment correction:** the ambient machine had setuptools 84.0.0
+  and PyInstaller 6.8.0, which failed because `pkg_resources` was absent.
+  Installed the project-pinned setuptools 75.6.0 and PyInstaller 6.11.1 before
+  rebuilding. This does not resolve the global environment's unrelated
+  TensorBoard/TensorFlow protobuf version warnings.
+- **Bundle rebuild:** `.venv\Scripts\pyinstaller.exe --noconfirm --clean
+  .\packaging\ChannelPress.spec` passed with PyInstaller 6.11.1. The desktop
+  executable is 19,338,213 bytes and the worker is 18,301,081 bytes; both PE
+  subsystem values are 2 (Windows GUI). Native launch/restore and clean-install
+  behavior remain unverified. This is not a production-ready release.

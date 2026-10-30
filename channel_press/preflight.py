@@ -16,6 +16,8 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sqlalchemy.exc import OperationalError
+
 from .config import settings
 
 OK = "ok"
@@ -160,6 +162,9 @@ def ollama_environment(*, probe: bool = True) -> dict:
         "reachable": False,
         "installed_models": [],
         "model_present": False,
+        "model_digest": "",
+        "smoke_tested": False,
+        "model_ready": False,
         "detail": "",
     }
     if not probe:
@@ -172,17 +177,63 @@ def ollama_environment(*, probe: bool = True) -> dict:
             response = client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
         state["reachable"] = response.status_code == 200
         if response.status_code == 200:
-            names = [str(item.get("name")) for item in response.json().get("models", [])]
+            models = {
+                str(item.get("name") or ""): item
+                for item in response.json().get("models", [])
+                if isinstance(item, dict)
+            }
+            names = list(models)
             state["installed_models"] = sorted(names)
             wanted = settings.ollama_model
-            state["model_present"] = wanted in names or any(
-                name.split(":")[0] == wanted.split(":")[0] for name in names
+            model = models.get(wanted)
+            if model is None and ":" not in wanted:
+                model = models.get(f"{wanted}:latest")
+            profile = None
+            try:
+                from .ai.model_profiles import profile_for_model
+
+                profile = profile_for_model(wanted)
+            except (OSError, ValueError):
+                profile = None
+            state["model_present"] = bool(
+                model
+                and (
+                    profile is None
+                    or int(model.get("size") or 0) == int(profile["download_bytes"])
+                )
             )
-            state["detail"] = (
-                f"Model {wanted} is installed."
-                if state["model_present"]
-                else f"Ollama is running but {wanted} is not installed (ollama pull {wanted})."
-            )
+            if model and state["model_present"]:
+                state["model_digest"] = str(model.get("digest") or "")
+                smoke_error = ""
+                try:
+                    from .ai.model_manager import model_smoke_record
+                    from .db import SessionLocal
+
+                    with SessionLocal() as db:
+                        smoke = model_smoke_record(db, wanted, state["model_digest"])
+                    state["smoke_tested"] = smoke is not None
+                except (OperationalError, sqlite3.Error, OSError) as exc:
+                    state["smoke_tested"] = False
+                    smoke_error = type(exc).__name__
+                state["model_ready"] = state["smoke_tested"] and bool(state["model_digest"])
+                if smoke_error:
+                    state["detail"] = (
+                        f"Model {wanted} is installed, but local test status could not be "
+                        f"read ({smoke_error})."
+                    )
+                elif state["smoke_tested"]:
+                    state["detail"] = f"Model {wanted} passed its local draft test."
+                else:
+                    state["detail"] = f"Model {wanted} is installed; run its local draft test in AI Models."
+            elif model:
+                state["detail"] = (
+                    f"Installed {wanted} does not match the reviewed model package size; "
+                    "repair it from AI Models."
+                )
+            else:
+                state["detail"] = (
+                    f"Ollama is running but {wanted} is not installed. Use AI Models to install it."
+                )
         else:
             state["detail"] = f"Ollama returned HTTP {response.status_code}."
     except Exception as exc:  # noqa: BLE001 - offline is an expected state
@@ -326,9 +377,9 @@ def build_preflight(*, probe_ollama: bool = True) -> PreflightReport:
         Check(
             "ollama",
             "Local model",
-            OK if ollama["model_present"] else (WARN if ollama["reachable"] else MISSING),
+            OK if ollama["model_ready"] else (WARN if ollama["reachable"] else MISSING),
             ollama["detail"],
-            "" if ollama["model_present"] else f"Install Ollama and run: ollama pull {settings.ollama_model}",
+            "" if ollama["model_ready"] else "Open AI Models to install and test the selected local model.",
             "AI drafting",
         )
     )

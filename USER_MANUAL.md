@@ -11,21 +11,24 @@ places in that edition are test data.
 
 ## 1. Starting the newsroom
 
-1. Open PowerShell in the project folder.
-2. Start the server:
+In a packaged Windows release, open **Channel Press** from the Start menu. For
+this source-checkout preview, an administrator starts the GUI shell once with:
 
-   ```powershell
-   .\.venv\Scripts\python.exe -m channel_press.cli serve
-   ```
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.desktop
+```
 
-3. Open <http://127.0.0.1:8765>.
-4. Sign in with your username and password.
+The preview opens a dedicated window on an ephemeral local port. The terminal
+used to start a source checkout remains visible; the release executable is
+expected to use the GUI subsystem. Sign in inside the Channel Press window.
+Routine editing, model setup, diagnostics, edition viewing and progress remain
+inside that window.
 
 The header shows the publication name, the current date in the configured
 timezone, your display name and role. The navigation is:
 
 **Dashboard · Sources · Stories · Articles · Build · Editions · Schedules · Jobs ·
-Branding · Users · Audit · Diagnostics**
+AI Models · Branding · Users · Audit · Diagnostics**
 
 Menus you cannot use are hidden or rejected by the server. There is no public
 registration screen; accounts are created by an owner.
@@ -45,18 +48,19 @@ hours (12 by default).
 
 ## 2. The dashboard
 
-Owners see a compact **System health** card with **Check connections** and
-**Restart services**. *Configured* is not the same as *connected and tested*:
+Owners see a compact **System health** card with **Check connections**. In the
+desktop shell, connection checks and the close dialog replace **Restart services**
+so the API is not shut down behind the window. *Configured* is not the same as *connected and tested*:
 credentials can be present while Telegram is unreachable or not signed in, and
 the rows say so. **Check connections** runs a short, read-only check and shows
 readable rows for the application, database, Telegram account, selected source,
 local model, configured model, worker queue and source discovery. PIDs, raw JSON
 and full paths stay out of the normal view.
 
-**Restart Channel Press Services** asks for confirmation, requests a graceful stop,
-keeps every database, session, job and checkpoint, and starts the web app again.
-Jobs that were paused can be resumed from **Jobs**. It is not a repair button for
-wrong credentials or rights.
+In the browser preview only, **Restart Channel Press Services** asks for
+confirmation, requests a graceful stop, keeps every database, session, job and
+checkpoint, and starts the web app again. Jobs that were paused can be resumed
+from **Jobs**. It is not a repair button for wrong credentials or rights.
 
 **Today's desk** summarises:
 
@@ -71,6 +75,20 @@ the synthetic desk. **Open review items** lists each flag with its article and
 timestamp.
 
 The two actions at the top are **Build edition** and **Source desk**.
+
+### AI Models and connection checks
+
+Open **AI Models** to check the local Ollama connection and the pinned model
+profiles. Select **Install** only after reviewing the displayed download size;
+transfer progress, errors and cancellation stay on this page. After the exact
+package is installed, select the profile and run **Test model**. Real-channel
+drafting is blocked until that model digest passes the synthetic smoke test.
+The test uses synthetic FX-01 content, not Telegram posts.
+
+**Diagnostics** provides read-only connection checks for Telegram, the database,
+the worker queue and the selected local model. It does not display credentials,
+tokens or raw provider payloads. Ollama must be installed locally and its service
+reachable; the app does not open an Ollama console.
 
 ## 3. Authorizing a source channel
 
@@ -367,9 +385,12 @@ Open **Build**.
    (manual, scheduled or special) is not a reader-facing title.
 5. Select **Queue build**.
 
-The build creates a persistent job and starts a detached one-shot worker. You can
-close the browser; the job continues. **Jobs** shows progress, and the job page
-polls its status automatically.
+The build creates a persistent job and starts a managed one-shot worker.
+**Jobs** shows progress and the active stage in Channel Press. When closing the
+desktop window, choose **Continue in background** to hide it while work and the
+local service continue; reopening Channel Press focuses the hidden window. Choose
+**Pause safely and exit** to request a checkpoint-safe stop. A regular browser
+preview does not have the desktop close dialog.
 
 The build performs, in order:
 

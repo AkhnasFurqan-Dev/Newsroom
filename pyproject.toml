@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools==75.6.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "channel-press"
 version = "1.0.0"
@@ -30,6 +34,18 @@ telegram = ["telethon==1.38.1"]
 video = ["opencv-python-headless==4.10.0.84"]
 test = ["pytest==8.3.4", "openpyxl==3.1.5"]
 dev = ["ruff==0.8.4"]
+desktop = ["pywebview==5.4.0"]
+build = ["pyinstaller==6.11.1"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["channel_press", "channel_press.*"]
+exclude = ["tests", "tests.*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"channel_press.ai" = ["model_manifest.json", "prompts/*.md", "prompts/*.yaml"]
+"channel_press.web" = ["templates/*.j2", "static/**/*"]
 
 [project.scripts]
 channel-press = "channel_press.cli:main"

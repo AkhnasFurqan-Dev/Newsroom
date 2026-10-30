@@ -927,13 +927,21 @@ class ModelRun(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[Optional[int]] = mapped_column(ForeignKey("jobs.id"), nullable=True, index=True)
+    article_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("articles.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     task: Mapped[str] = mapped_column(String(60), index=True)
     provider: Mapped[str] = mapped_column(String(60))
     model: Mapped[str] = mapped_column(String(120))
+    model_digest: Mapped[str] = mapped_column(String(128), default="")
+    provider_version: Mapped[str] = mapped_column(String(80), default="")
     prompt_version: Mapped[str] = mapped_column(String(40), default="")
+    generation_settings_json: Mapped[str] = mapped_column(Text, default="{}")
+    evidence_manifest_json: Mapped[str] = mapped_column(Text, default="{}")
     input_hash: Mapped[str] = mapped_column(String(64), default="")
     output_hash: Mapped[str] = mapped_column(String(64), default="")
     valid: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(30), default="completed")
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)

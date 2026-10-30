@@ -40,6 +40,7 @@
   <a href="/editions" class="{{ 'is-active' if active == 'editions' }}">Editions</a>
   <a href="/schedules" class="{{ 'is-active' if active == 'schedules' }}">Schedules</a>
   <a href="/jobs" class="{{ 'is-active' if active == 'jobs' }}">Jobs</a>
+  {% if can.edit %}<a href="/ai-models" class="{{ 'is-active' if active == 'ai_models' }}">AI Models</a>{% endif %}
   {% if can.edit %}<a href="/media-cache" class="{{ 'is-active' if active == 'media_cache' }}">Media cache</a>{% endif %}
   <a href="/branding" class="{{ 'is-active' if active == 'branding' }}">Branding</a>
   {% if can.edit %}<a href="/appearance" class="{{ 'is-active' if active == 'appearance' }}">Appearance</a>{% endif %}
@@ -59,6 +60,49 @@
   <span>{{ profile.name if profile else app_name }}</span>
   <span>{% if user %}<a href="/account">Account</a> · {% endif %}Data stays on this computer.</span>
 </footer>
+{% if desktop_mode %}
+<div id="desktop-close-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="desktop-close-title"
+     style="position:fixed;inset:0;background:#171615a8;z-index:1000;display:grid;place-items:center;padding:24px">
+  <style>#desktop-close-dialog[hidden]{display:none!important}</style>
+  <section class="card" style="width:min(560px,100%);background:#fff">
+    <h2 id="desktop-close-title">Close Channel Press?</h2>
+    <p>Choose what should happen to work that is still running.</p>
+    <p id="desktop-close-status" role="status" class="small"></p>
+    <div class="actions">
+      <button class="btn" type="button" data-desktop-close="continue">Continue in background</button>
+      <button class="btn btn--ghost" type="button" data-desktop-close="pause">Pause safely and exit</button>
+      <button class="btn btn--ghost" type="button" id="desktop-close-cancel">Keep open</button>
+    </div>
+  </section>
+</div>
+<script>
+(() => {
+  const dialog = document.getElementById("desktop-close-dialog");
+  const status = document.getElementById("desktop-close-status");
+  window.addEventListener("channel-press-close-request", () => {
+    dialog.hidden = false;
+    dialog.querySelector("[data-desktop-close='continue']").focus();
+  });
+  document.getElementById("desktop-close-cancel").addEventListener("click", () => {
+    dialog.hidden = true;
+  });
+  dialog.querySelectorAll("[data-desktop-close]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      status.textContent = "Applying your choice…";
+      try {
+        const result = await window.pywebview.api.shutdown(button.dataset.desktopClose);
+        status.textContent = result.message;
+        if (!result.closed) button.disabled = false;
+      } catch (_) {
+        status.textContent = "The close action failed. Keep this window open and retry.";
+        button.disabled = false;
+      }
+    });
+  });
+})();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

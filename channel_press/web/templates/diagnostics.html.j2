@@ -42,7 +42,8 @@
       <tr><td>Telegram API id/hash</td><td>{{ 'configured' if telegram.credentials_configured else 'missing (fixture/import mode)' }}</td></tr>
       <tr><td>Telegram session</td><td>{{ 'present' if telegram.session_present else 'not created' }}</td></tr>
       <tr><td>Ollama endpoint</td><td class="mono">{{ ollama.base_url }}</td></tr>
-      <tr><td>Local model</td><td>{{ ollama.model }} · {% if ollama.model_present %}installed{% elif ollama.reachable %}running, model missing{% else %}not reachable{% endif %}</td></tr>
+      <tr><td>Local model</td><td>{{ ollama.model }} · {% if ollama.model_ready %}tested and ready{% elif ollama.model_present %}installed; draft test required{% elif ollama.reachable %}runtime running, model missing{% else %}not reachable{% endif %}</td></tr>
+      <tr><td>AI model controls</td><td><a href="/ai-models">Open AI Models</a></td></tr>
       <tr><td>Pending jobs</td><td>{{ pending_jobs }}</td></tr>
     </tbody>
   </table>

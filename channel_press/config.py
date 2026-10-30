@@ -54,7 +54,8 @@ class Settings(BaseSettings):
     )
 
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:3b-instruct"
+    ollama_model: str = "qwen3.5:4b-q4_K_M"
+    ollama_model_profile: str = "standard"
     ollama_keep_alive: str = "60s"
     ollama_timeout_seconds: int = 240
     ollama_num_ctx: int = 4096

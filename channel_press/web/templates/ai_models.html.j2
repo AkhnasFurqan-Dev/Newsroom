@@ -1,0 +1,120 @@
+{% extends "base.html.j2" %}
+{% block title %}AI Models{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>AI Models</h1>
+    <p>Install and test local Qwen3.5 models. No source content is sent to an online model.</p>
+  </div>
+</div>
+
+{% if runtime_error %}
+<div class="notice notice--warning" role="status">
+  <strong>Local AI runtime unavailable.</strong>
+  <p>{{ runtime_error }} Model downloads and inference need a local Ollama service; Channel Press will not open an Ollama console or start an unowned service.</p>
+</div>
+{% endif %}
+
+<section class="notice">
+  <strong>Current model:</strong> <span class="mono">{{ selected_model }}</span>
+  {% if selected_profile %}
+    {% set current = profiles|selectattr('id', 'equalto', selected_profile)|first %}
+    <span> · {{ 'Ready after local test' if current.smoke_tested else 'Local test required before source drafting' }}</span>
+  {% else %}
+    <span> · Custom model selection; profile testing is not available.</span>
+  {% endif %}
+  <p>All three reviewed model packages are Apache-2.0. Registry digest and download size are checked before and after transfer.</p>
+</section>
+
+<section id="model-download" class="card" aria-live="polite">
+  <div class="card__label">Model transfer</div>
+  <p id="model-download-detail">{{ install.detail }}</p>
+  <progress id="model-download-progress" max="100" value="{{ install.percent }}"></progress>
+  <span id="model-download-percent">{{ install.percent }}%</span>
+  <form method="post" action="/ai-models/cancel" id="model-download-cancel" {% if install.state not in ['verifying', 'downloading', 'canceling'] %}hidden{% endif %}>
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button class="btn btn--ghost btn--small" type="submit">Cancel transfer</button>
+  </form>
+</section>
+
+<div class="grid grid--3">
+{% for profile in profiles %}
+  <article class="card">
+    <div class="card__label">{{ profile.label }}{% if profile.recommended %} · Recommended{% endif %}</div>
+    <h2 class="mono">{{ profile.tag }}</h2>
+    <p>{{ profile.description }}</p>
+    <dl>
+      <dt>Download</dt><dd>{{ (profile.download_bytes / 1000000000)|round(2) }} GB</dd>
+      <dt>License</dt><dd>Apache-2.0</dd>
+      <dt>Pinned registry digest</dt><dd class="mono small">{{ profile.registry_manifest_digest }}</dd>
+      <dt>Hardware guidance</dt><dd>{{ profile.min_recommended_vram_gb }} GB VRAM · {{ profile.min_recommended_ram_gb }} GB RAM suggested; actual fit and speed must be measured</dd>
+      <dt>Installed</dt><dd>{% if profile.installed %}Yes · digest {{ profile.local_digest }}{% else %}Not verified{% endif %}</dd>
+      <dt>Readiness</dt><dd>{% if profile.smoke_tested %}Local source-grounded test passed{% elif profile.installed %}Run the local test before drafting{% else %}Not ready{% endif %}</dd>
+    </dl>
+    {% if profile.id == 'compact' %}
+      <p class="notice">Optional limited-hardware fallback. Prefer short tasks and keep additional human review enabled.</p>
+    {% elif profile.id == 'enhanced' %}
+      <p class="notice">Large download. Prefer 12 GB or more of VRAM or measured adequate system RAM; 6 GB GPUs may need slow partial offload.</p>
+    {% endif %}
+    <form method="post" action="/ai-models/install" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="profile_id" value="{{ profile.id }}">
+      <label class="check">
+        <input type="checkbox" name="download_confirm" value="yes" required>
+        I approve downloading {{ (profile.download_bytes / 1000000000)|round(2) }} GB from the verified Ollama registry.
+      </label>
+      <button class="btn btn--ghost" type="submit" {% if profile.installed or install.state in ['verifying', 'downloading', 'canceling'] %}disabled{% endif %}>
+        {% if profile.installed %}Installed{% else %}Verify and download{% endif %}
+      </button>
+    </form>
+    <form method="post" action="/ai-models/select" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="profile_id" value="{{ profile.id }}">
+      <button class="btn" type="submit" {% if not profile.installed or selected_model == profile.tag %}disabled{% endif %}>
+        {% if selected_model == profile.tag %}Selected{% else %}Select profile{% endif %}
+      </button>
+    </form>
+    {% if selected_model == profile.tag and profile.installed %}
+    <form method="post" action="/ai-models/test" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="profile_id" value="{{ profile.id }}">
+      <button class="btn btn--ghost" type="submit" {% if smoke.state == 'testing' %}disabled{% endif %}>Test local model</button>
+    </form>
+    {% endif %}
+  </article>
+{% endfor %}
+</div>
+<p id="model-smoke-status" class="small" role="status">{{ smoke.detail }}</p>
+<p><a id="model-refresh" href="/ai-models" hidden>Refresh model status and controls</a></p>
+
+<script>
+(() => {
+  const active = new Set(["verifying", "downloading", "canceling", "testing"]);
+  const detail = document.getElementById("model-download-detail");
+  const progress = document.getElementById("model-download-progress");
+  const percent = document.getElementById("model-download-percent");
+  const cancel = document.getElementById("model-download-cancel");
+  const smoke = document.getElementById("model-smoke-status");
+  const refreshLink = document.getElementById("model-refresh");
+  async function refresh() {
+    try {
+      const response = await fetch("/api/ai-models/status", {credentials: "same-origin"});
+      if (!response.ok) return;
+      const data = await response.json();
+      const job = data.install;
+      detail.textContent = job.detail;
+      progress.value = job.percent || 0;
+      percent.textContent = `${job.percent || 0}%`;
+      cancel.hidden = !active.has(job.state);
+      smoke.textContent = data.smoke.detail;
+      refreshLink.hidden = !["complete", "failed", "canceled"].includes(job.state)
+        && !["passed", "failed"].includes(data.smoke.state);
+    } catch (_) {
+      detail.textContent = "Progress is temporarily unavailable; the current transfer state is retained.";
+    }
+  }
+  window.setInterval(refresh, 1500);
+  refresh();
+})();
+</script>
+{% endblock %}

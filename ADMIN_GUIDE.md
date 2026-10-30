@@ -9,6 +9,7 @@ backup and security. Day-to-day editing is in [USER_MANUAL.md](USER_MANUAL.md).
 
 - Windows 10/11 with PowerShell.
 - Python 3.12 (64-bit).
+- Microsoft Edge WebView2 Runtime for the single-window desktop preview.
 - Google Chrome. The print pipeline launches the installed Chrome channel through
   Playwright; Chromium bundled by Playwright is not required.
 - ~2 GB free disk for the virtual environment plus space for media and editions.
@@ -23,7 +24,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 The script:
 
 1. creates `.venv` if missing;
-2. installs pinned dependencies with `pip install -e ".[test,video]"`;
+2. installs pinned dependencies with `pip install -e ".[test,video,desktop,build]"`;
 3. copies `.env.example` to `.env` when absent;
 4. checks for Chrome and warns if it is missing;
 5. runs `init-db` to create or upgrade the SQLite schema.
@@ -34,8 +35,16 @@ Optional integrations are installed separately:
 .\.venv\Scripts\python.exe -m pip install -e ".[telegram]"   # live MTProto adapter
 ```
 
-Local model support is not installed by this script. Install Ollama separately if
-required (see §5).
+Install Ollama separately if local AI is required (see §5). This repository
+setup is a developer/source-checkout preview; it is not the promised Python-free
+Windows installer. In the source preview, start the GUI shell with:
+
+```powershell
+.\.venv\Scripts\python.exe -m channel_press.desktop
+```
+
+The package build produces GUI-subsystem executables, but the installer, WebView2
+prerequisite flow and clean-machine verification are not yet certified.
 
 ### Upgrade
 
@@ -233,60 +242,65 @@ Rules:
 
 ## 5. Local models
 
-The default is deterministic and free. Non-fixture drafting can use Ollama:
+The deterministic fixture provider remains free and offline. Non-fixture
+drafting uses a local Ollama-compatible service at
+`http://127.0.0.1:11434`; model downloads are initiated from **AI Models** in
+Channel Press after an editor confirms the package size. The application does
+not open an Ollama command window. Ollama must already be installed and its
+local service reachable.
 
-```powershell
-ollama pull qwen2.5:3b-instruct
-ollama serve
-```
+The default profile is Standard. Exact registry manifest, layer and license
+digests are recorded in `channel_press/ai/model_manifest.json` and checked
+before the application starts a download:
 
-Configuration (`.env`):
+| Profile | Fixed tag | Package bytes | Guidance |
+|---|---|---:|---|
+| Standard | `qwen3.5:4b-q4_K_M` | 3,324,173,757 | Default; recommended 6 GB VRAM / 8 GB RAM, then measure |
+| Enhanced | `qwen3.5:9b-q4_K_M` | 6,550,825,373 | Optional; recommended 12 GB VRAM / 16 GB RAM and explicit confirmation |
+| Compact | `qwen3.5:2b` | 2,683,396,637 | Optional hardware fallback; restrict to short tasks and retain additional review |
 
-```text
-CHANNEL_PRESS_OLLAMA_BASE_URL=http://127.0.0.1:11434
-CHANNEL_PRESS_OLLAMA_MODEL=qwen2.5:3b-instruct
-CHANNEL_PRESS_OLLAMA_KEEP_ALIVE=60s
-CHANNEL_PRESS_OLLAMA_TIMEOUT_SECONDS=240
-CHANNEL_PRESS_OLLAMA_MAX_CONCURRENCY=1
-CHANNEL_PRESS_OLLAMA_UNLOAD_AFTER_JOB=true
-```
+The three reviewed Ollama registry manifests contain an Apache-2.0 license
+layer. A registry pin is not a quality or performance claim. The machine used
+for this report has **6144 MiB VRAM**; no Qwen3.5 package was downloaded and no
+Qwen3.5 inference was measured. The previously recorded Qwen2.5 3B result is
+historical only. Do not select Enhanced on the 6 GB test GPU based solely on
+the on-disk package size.
 
-All app settings use the `CHANNEL_PRESS_` prefix. The adapter:
+After installation, select the exact profile and run **Test model**. This uses
+synthetic fixture FX-01, records the local model digest/runtime/prompt/settings,
+and must pass before real-source drafting is enabled. Re-run the test when the
+local digest changes. Existing historical `ModelRun` rows and immutable edition
+versions are retained; the schema migration adds nullable/new metadata and marks
+pre-migration runs `historical`.
 
-- sends only the story evidence bundle and the versioned prompt;
-- requires a strict schema and retries a limited number of times;
-- extracts fenced JSON, truncates oversized input and matches the model name
-  exactly;
-- serialises model loads with a global gate (`ollama_max_concurrency=1`) and can
-  unload after the job;
-- falls back to the deterministic composer with a recorded reason when the model
-  is unavailable or invalid;
+The adapter:
+
+- sends only the story evidence bundle and the versioned prompt to local Ollama;
+- requires a JSON Schema response, disables Qwen thinking output and retries
+  invalid output at most once;
+- reads generated article text from `message.content` only;
+- records local digest, runtime version, generation settings and source-evidence
+  IDs with each new article model run;
+- serializes model loads with `ollama_max_concurrency=1` and can unload after a
+  job; and
 - never treats model output as verified. A separate deterministic audit checks
   every fact sentence against the claim ledger.
 
-### Choosing a model for 16 GB / RTX 3060 Laptop
+All app settings use the `CHANNEL_PRESS_` prefix. Keep the local URL loopback;
+remote model endpoints are rejected to prevent implicit source-data transfer.
+Legacy `.env` overrides may still name Qwen2.5, but real-source work remains
+blocked until an installed, pinned profile has passed the in-app test. Select a
+Qwen3.5 profile in **AI Models** rather than editing provenance records.
 
-The build machine has **6144 MiB** of VRAM, not 8 GB. Start with a 3–4B instruct
-model quantized to Q4. `qwen2.5:3b-instruct` (1841 MB) is installed and verified.
-Larger models may fit only at low quantization and short context; measure before
-adopting. Keep `OLLAMA_KEEP_ALIVE=60s` so the model unloads between scheduled
-runs.
-
-Verified result on this machine: a 30-post edition with `qwen2.5:3b-instruct`
-produced 17 stories, 17 articles and 8 pages in 57–62 s, with no fixture fallback
-and a peak VRAM of 2213 MiB. A 70- or 150-post real-model run was not performed.
-
-Measure with:
+Measure wall time, peak RAM/VRAM and fallbacks only after real inference:
 
 ```powershell
-.\.venv\Scripts\python.exe -m channel_press.cli demo --posts 30
 .\.venv\Scripts\python.exe -m channel_press.cli diagnostics
 nvidia-smi
 ```
 
-Record wall time, peak RAM/VRAM and whether a fallback reason appears. `demo`
-uses the fixture provider; the real-model proof is
-`pytest -m live tests\test_ollama_live.py`.
+The fixture demo uses the deterministic provider, not Ollama. A fixture result
+does not validate the live Qwen3.5 pipeline.
 
 ## 5b. Story research providers
 
@@ -577,7 +591,7 @@ Baseline measurements (fixture composer, no model, Chrome rendering):
 | 30 posts (fixture composer) | 9.6 s cold CLI run | 17 articles, 7 pages |
 | 70 posts (fixture composer) | 10.8 s cold CLI run | 27 articles, 8 pages |
 | 150 posts (fixture composer) | 12.1 s cold CLI run | 28 articles, 9 pages |
-| 30 posts (real Ollama, `qwen2.5:3b-instruct`) | 57–62 s | 17 articles, 8 pages, peak VRAM 2213 MiB |
+| Historical 30-post run (`qwen2.5:3b-instruct`, before Qwen3.5 migration) | 57–62 s | 17 articles, 8 pages, peak VRAM 2213 MiB |
 | 150 posts, cold run | ~870 MB peak process group including Chrome | 9 pages |
 
 Cold CLI runs include database creation, fixture import, drafting, Chrome

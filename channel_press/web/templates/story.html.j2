@@ -45,7 +45,7 @@
           <span class="small">{{ post.posted_at|localtime(profile.timezone if profile else 'Asia/Karachi') }}</span>
         </div>
         <p class="prose prose--ui" style="margin:8px 0 0">{{ fragment.text }}</p>
-        {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
+        {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" target="_blank" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
       </div>
     {% else %}
       <p class="muted">No fragments attached.</p>
@@ -81,7 +81,7 @@
           <strong>{{ ref.title or ref.url }}</strong>
           <span class="badge badge--{{ 'approved' if ref.review_status == 'accepted' else ('rejected' if ref.review_status == 'rejected' else 'review') }}">{{ ref.review_status|status_label }}</span>
         </div>
-        <div class="small"><a href="{{ ref.url }}" rel="noopener nofollow noreferrer">{{ ref.url }}</a></div>
+        <div class="small"><a href="{{ ref.url }}" target="_blank" rel="noopener nofollow noreferrer">{{ ref.url }}</a></div>
         <div class="small">{{ ref.publisher }}{% if ref.published_at %} · published {{ ref.published_at|shortdate }}{% endif %}{% if ref.http_status %} · HTTP {{ ref.http_status }}{% endif %} · accessed {{ ref.accessed_at|shortdate }}</div>
         {% if ref.search_query %}<div class="small muted">Query: {{ ref.search_query }}{% if ref.relevance %} · match {{ '%.2f'|format(ref.relevance) }}{% endif %}</div>{% endif %}
         {% if ref.excerpt %}<p class="small">{{ ref.excerpt[:280] }}{% if ref.excerpt|length > 280 %}…{% endif %}</p>{% endif %}

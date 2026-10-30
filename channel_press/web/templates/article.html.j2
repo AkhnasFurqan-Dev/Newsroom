@@ -223,7 +223,7 @@
     {% for ref in external %}
       <div class="small" style="margin-bottom:8px">
         <span class="badge badge--{{ 'approved' if ref.review_status == 'accepted' else ('rejected' if ref.review_status == 'rejected' else 'review') }}">{{ ref.review_status|status_label }}</span>
-        <a href="{{ ref.url }}" rel="noopener nofollow noreferrer">{{ ref.title or ref.url }}</a><br>{{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate }}
+        <a href="{{ ref.url }}" target="_blank" rel="noopener nofollow noreferrer">{{ ref.title or ref.url }}</a><br>{{ ref.publisher }} · accessed {{ ref.accessed_at|shortdate }}
         {% if story %}<div><a href="/stories/{{ story.id }}#research">Review reference</a></div>{% endif %}
       </div>
     {% else %}

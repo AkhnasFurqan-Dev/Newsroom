@@ -152,7 +152,7 @@
         <td class="num mono">{{ post.telegram_message_id }}</td>
         <td class="small">{{ post.posted_at|localtime(profile.timezone if profile else 'Asia/Karachi', '%d %b %H:%M') }}</td>
         <td>{{ post.text[:220] }}{% if post.text|length > 220 %}…{% endif %}
-          {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
+          {% if post.source_url %}<div class="small"><a href="{{ post.source_url }}" target="_blank" rel="noreferrer">{{ post.source_url }}</a></div>{% endif %}
           {% if post.exclusion_reason %}<div class="small error-text">{{ exclusion_reasons.get(post.exclusion_reason, post.exclusion_reason) }}</div>{% endif %}
         </td>
         <td>

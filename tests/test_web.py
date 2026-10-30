@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 
 from channel_press.config import settings
+from channel_press.db import SessionLocal
 from channel_press.models import (
     Channel,
     Edition,
@@ -17,7 +18,6 @@ from channel_press.models import (
     User,
 )
 from channel_press.security import hash_password
-from channel_press.db import SessionLocal
 from tests.conftest import FIXTURES, OWNER_PASSWORD, login
 
 
@@ -220,7 +220,11 @@ def test_live_channel_rights_gate_blocks_import_until_a_grant_is_recorded(client
         assert session.query(SourceImport).filter_by(channel_id=channel_id).count() == before
 
 
-def test_edition_preview_and_epaper_paths_are_served_safely(client, owner, demo_channel, auth, tmp_path):
+def test_edition_preview_and_epaper_paths_are_served_safely(
+    client, owner, demo_channel, auth, tmp_path, monkeypatch
+):
+    from channel_press.web.app import _ENV
+
     output = tmp_path / "edition"
     pages = output / "pages"
     epaper = output / "epaper"
@@ -232,6 +236,8 @@ def test_edition_preview_and_epaper_paths_are_served_safely(client, owner, demo_
     )
     (epaper / "index.html").write_text("<html><body>E-paper proof</body></html>", encoding="utf-8")
     (epaper / "page-01.jpg").write_bytes((FIXTURES / "media" / "chaman_scene_b.png").read_bytes())
+    (output / "sample_issue.pdf").write_bytes(b"%PDF-1.4\n")
+    (output / "working_preview.pdf").write_bytes(b"%PDF-1.4\n% working preview\n")
     (tmp_path / "secret.txt").write_text("outside the bundle", encoding="utf-8")
 
     with SessionLocal() as session:
@@ -247,6 +253,7 @@ def test_edition_preview_and_epaper_paths_are_served_safely(client, owner, demo_
             target_release_at=now,
             output_dir=str(output),
             pdf_path=str(output / "sample_issue.pdf"),
+            preview_pdf_path=str(output / "working_preview.pdf"),
             epaper_dir=str(epaper),
         )
         session.add(edition)
@@ -254,6 +261,26 @@ def test_edition_preview_and_epaper_paths_are_served_safely(client, owner, demo_
         session.add(EditionPage(edition_id=edition.id, page_number=1, preview_path=str(preview)))
         session.commit()
         edition_id = edition.id
+
+    monkeypatch.setitem(_ENV.globals, "desktop_mode", True)
+    monkeypatch.setenv("CHANNEL_PRESS_DESKTOP", "1")
+    detail = client.get(f"/editions/{edition_id}")
+    assert detail.status_code == 200
+    for local_path in (
+        f"/editions/{edition_id}/pdf",
+        f"/editions/{edition_id}/epaper",
+        f"/editions/{edition_id}/preview/1?",
+        f"/editions/{edition_id}/working.pdf",
+    ):
+        assert f'href="{local_path}' in detail.text
+        assert f'href="{local_path}" target="_blank"' not in detail.text
+
+    working_pdf = client.get(f"/editions/{edition_id}/working.pdf")
+    published_pdf = client.get(f"/editions/{edition_id}/pdf")
+    assert working_pdf.status_code == published_pdf.status_code == 200
+    assert working_pdf.headers["content-type"] == "application/pdf"
+    assert "content-disposition" not in working_pdf.headers
+    assert "content-disposition" not in published_pdf.headers
 
     page_response = client.get(f"/editions/{edition_id}/preview/1")
     assert page_response.status_code == 200

@@ -20,7 +20,7 @@ if (-not (Test-Path "$root\.venv\Scripts\python.exe")) {
 
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
 & $venvPython -m pip install --upgrade pip
-& $venvPython -m pip install -e ".[test,video]"
+& $venvPython -m pip install -e ".[test,video,desktop,build]"
 
 if (-not (Test-Path "$root\.env")) {
     Copy-Item "$root\.env.example" "$root\.env"
@@ -46,7 +46,7 @@ Write-Host ""
 Write-Host "Installation finished." -ForegroundColor Green
 Write-Host "1. Create the owner account:  .\.venv\Scripts\python.exe -m channel_press.cli setup --demo-channel"
 Write-Host "2. Build the demo edition:    .\.venv\Scripts\python.exe -m channel_press.cli demo --posts sample --reset"
-Write-Host "3. Start the newsroom UI:     .\.venv\Scripts\python.exe -m channel_press.cli serve"
+Write-Host "3. Open the desktop preview:  .\.venv\Scripts\python.exe -m channel_press.desktop"
 Write-Host "4. Optional worker task:      powershell -ExecutionPolicy Bypass -File .\scripts\install-task.ps1"
 Write-Host ""
 Write-Host "The baseline is fully local: no Telegram credentials, cloud account or paid model is required for the fixture demo."

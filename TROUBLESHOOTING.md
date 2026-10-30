@@ -35,6 +35,22 @@ not run `serve` from both the system Python and `.venv`.
 before restoring an older database. Never delete `channel_press.db-wal` while the
 server is running.
 
+## The desktop window does not open or close as expected
+
+- The source preview requires the desktop extra and the Microsoft Edge WebView2
+  Runtime. A missing runtime or startup error is written to the private desktop
+  log; packaged runtime detection and the installer are not yet certified.
+- If another Channel Press instance is already running, starting it again
+  focuses the existing window. **Continue in background** hides that window but
+  leaves the app and queued work running; launch Channel Press again to restore
+  it. **Pause safely and exit** can take time while work reaches a checkpoint.
+- Worker logs are written under `data\logs\` in a source checkout and under the
+  configured local application data directory in a packaged build. No worker
+  console is opened.
+- The source preview is started with `python -m channel_press.desktop`; the
+  PowerShell window used by an administrator to start it remains visible. Do
+  not mistake that developer terminal for the packaged no-console app.
+
 ## I cannot sign in
 
 - Usernames are case-insensitive; passwords are case-sensitive.
@@ -164,24 +180,40 @@ verified path and needs no Telegram credentials.
 
 **Diagnostics says Ollama unavailable (ConnectTimeout)**
 
-- Ollama is not running or not installed. Start `ollama serve`, or continue with
-  the deterministic composer. The fixture demo never needs a model.
+- Ollama is not running or not installed. Use **AI Models → Check connection**.
+  An administrator must install/enable the local Ollama service; the desktop
+  app does not open its console. The fixture demo never needs a model.
 - Check `CHANNEL_PRESS_OLLAMA_BASE_URL`; the default is
   `http://127.0.0.1:11434`.
+
+**AI Models says a profile is not installed or the package does not match**
+
+- Confirm the local Ollama service is reachable, then start **Install** from
+  **AI Models** and confirm the exact displayed transfer size.
+- The app checks the pinned upstream registry manifest, each layer digest and
+  the Apache-2.0 license text before asking local Ollama to pull the profile.
+- A selected model is not ready until **Test model** passes for its local digest.
+  Run the test again after repairing or replacing the local model.
+- On the 6 GB VRAM test machine, Standard Qwen3.5 4B is the default candidate;
+  Enhanced 9B needs measured memory headroom. Compact 2B is an optional,
+  reduced-capability fallback, not an automatic switch.
 
 **Model loads but the build falls back**
 
 Read the fallback reason on the article page or in the job result:
 
 - schema validation failure after retries — the model did not return the required
-  JSON; try a more instruction-following model or a smaller prompt;
+  JSON; check the model test result and the job's redacted error details;
 - timeout — reduce context or choose a smaller quantized model;
 - out of memory — see the next section.
 
 **Out of VRAM / RAM**
 
-- The build machine's GPU has **6144 MiB** of VRAM. Use a 3–4B Q4 instruct model;
-  `qwen2.5:3b-instruct` peaked at 2213 MiB during the verified 30-post run.
+- The build machine's GPU has **6144 MiB** of VRAM. The earlier
+  `qwen2.5:3b-instruct` measurement (2213 MiB peak during a 30-post run) is
+  historical and does not predict Qwen3.5 memory use.
+- Standard `qwen3.5:4b-q4_K_M` is the current default candidate. Enhanced
+  `qwen3.5:9b-q4_K_M` is not recommended on this GPU without measured headroom.
 - Lower `CHANNEL_PRESS_OLLAMA_NUM_CTX` (default 4096) and
   `CHANNEL_PRESS_OLLAMA_NUM_PREDICT` (default 1800) if the model spills.
 - Keep `OLLAMA_KEEP_ALIVE=60s` and `OLLAMA_UNLOAD_AFTER_JOB=true` so the model
@@ -194,10 +226,12 @@ Read the fallback reason on the article page or in the job result:
 .\.venv\Scripts\python.exe -m channel_press.cli diagnostics
 ```
 
-Check that the configured name matches `ollama list` exactly and that the
-Ollama server is on `127.0.0.1:11434`. A stale `OLLAMA_KEEP_ALIVE` or a model
-still loading can time out; the adapter retries and then records the fallback
-reason rather than silently claiming AI output.
+In the desktop window, open **AI Models** and confirm the installed tag and
+package size match a pinned profile, then select that profile and run **Test
+model**. A legacy `.env` model setting is not a pinned profile; select the new
+profile in the app. A stale `OLLAMA_KEEP_ALIVE` or a model still loading can
+time out; the adapter records the failure rather than silently claiming AI
+output.
 
 A model fallback is not a publication failure. The deterministic composer still
 passes the independent audit; the edition is labelled with its actual provider.

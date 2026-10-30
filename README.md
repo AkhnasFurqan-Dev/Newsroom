@@ -42,8 +42,9 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
   correction reconciliation, a claim ledger with chronology and a separate
   deterministic evidence audit.
 - **Editorial drafting.** Version-controlled prompt templates, a deterministic
-  fixture composer for reproducible tests, and an optional local Ollama provider.
-  Every draft is audited against the claim ledger before it can be released.
+  fixture composer for reproducible tests, and a local Ollama provider using
+  reviewed Qwen3.5 profiles. Every draft is audited against the claim ledger
+  before it can be released.
 - **Story research.** Optional automatic discovery through a configured Google
   Programmable Search or Brave Search API, a keyless publisher-RSS fallback and
   an explicitly selectable GDELT DOC 2.0 adapter. Queries come only from facts in
@@ -67,6 +68,12 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
 - **Newsroom UI.** Source desk, rights declarations, stories, article editing and
   review, edition page studio, schedules, jobs, branding, appearance, users, audit
   and diagnostics.
+- **Single-window Windows shell (preview).** A pywebview/WebView2 window contains
+  the FastAPI newsroom, model setup, diagnostics, article/edition views and worker
+  progress. Managed workers are no-console child processes with private logs;
+  **Continue in background** hides the window without stopping the local service,
+  while **Pause safely and exit** waits for safe checkpoints. The installer and
+  clean-machine release are not complete yet.
 - **Multiple newspapers on one computer.** Each publication keeps its own
   branding, source list, schedules, drafts, editions, archive and editor
   membership. The header selector switches the working newspaper; the server
@@ -80,18 +87,26 @@ synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
   `[previous cutoff, current cutoff)` windows, watermark catch-up, leases and a
   single-worker file lock, atomic release, manifest and checksums, immutable
   numbered versions and a fully offline e-paper bundle.
-- **Verified local AI.** The pipeline ran a real Ollama model
-  (`qwen2.5:3b-instruct`) over a 30-post fixture set: 17 stories, 17 articles,
-  8 tabloid pages, no fixture fallback, peak VRAM 2213 MiB.
+- **Pinned local AI.** The **AI Models** page offers Standard
+  `qwen3.5:4b-q4_K_M` (3,324,173,757 bytes), Enhanced
+  `qwen3.5:9b-q4_K_M` (6,550,825,373 bytes) and optional Compact `qwen3.5:2b`
+  (2,683,396,637 bytes). Registry manifest, layer and Apache-2.0 license hashes
+  are checked before an in-window download. New selections require a synthetic
+  local smoke test before real-channel drafting. Qwen3.5 weights and real
+  Qwen3.5 inference have **not** yet been verified on this machine; Qwen2.5
+  results below are historical measurements, not evidence for the new models.
 
 ![Edition detail](docs/images/edition-detail.png)
 
 ## Requirements
 
 - Windows 10/11, Python 3.12.
+- Microsoft Edge WebView2 Runtime for the desktop shell.
 - Google Chrome installed (the PDF pipeline launches the installed Chrome
   channel through Playwright). No cloud account or paid API is required.
-- Optional: Ollama with a local instruct model for non-fixture drafting.
+- Optional: Ollama for local non-fixture drafting and in-app model downloads.
+  Ollama must be installed and its local service reachable; model weights are
+  downloaded only after an editor confirms the displayed size.
 - No FFmpeg is required; OpenCV supplies video frame extraction.
 
 ## Install
@@ -102,8 +117,10 @@ cd E:\newsroom
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-The script creates `.venv`, installs pinned dependencies, copies `.env.example`
-to `.env` if needed, checks for Chrome and initialises the SQLite database.
+The script creates `.venv`, installs pinned application/test/desktop/build
+dependencies, copies `.env.example` to `.env` if needed, checks for Chrome and
+initialises the SQLite database. This is a developer/source-checkout setup, not
+the promised no-Python end-user installer.
 
 ## Five-minute demo
 
@@ -111,12 +128,16 @@ to `.env` if needed, checks for Chrome and initialises the SQLite database.
 # 1. Import the synthetic fixtures and build a complete edition.
 .\.venv\Scripts\python.exe -m channel_press.cli demo --posts sample --reset
 
-# 2. Start the newsroom UI.
-.\.venv\Scripts\python.exe -m channel_press.cli serve
+# 2. Open the single-window desktop preview.
+.\.venv\Scripts\python.exe -m channel_press.desktop
 ```
 
-Open <http://127.0.0.1:8765>. If no owner exists yet, `demo` creates one and
-prints a generated password once. Use `set-password` to choose a new one:
+The app opens its own Channel Press window and selects an ephemeral loopback
+port. It does not spawn a browser, worker console or Ollama console; a developer
+terminal used to start this source preview remains visible. A packaged GUI
+executable is required for a console-free end-user launch. If no owner exists
+yet, `demo` creates one and prints a generated password once. Use `set-password`
+to choose a new one:
 
 ```powershell
 .\.venv\Scripts\python.exe -m channel_press.cli set-password --username owner
@@ -365,7 +386,8 @@ and leading.
 ## Measured performance on the build machine
 
 12th-gen Intel i7, 16 GB RAM, RTX 3060 Laptop GPU (**6144 MiB**), Windows 11,
-Chrome installed, Ollama 0.40.9 with `qwen2.5:3b-instruct` (1841 MB).
+Chrome installed, Ollama 0.40.9. The Qwen2.5 3B result below is historical; no
+Qwen3.5 weights or inference are represented by these measurements.
 
 | Scenario | Result |
 | --- | --- |
@@ -374,7 +396,7 @@ Chrome installed, Ollama 0.40.9 with `qwen2.5:3b-instruct` (1841 MB).
 | 30-post fixture build | 9.6 s cold CLI run, 17 stories/articles, 7 pages |
 | 70-post fixture build | 10.8 s cold CLI run, 27 stories/articles, 8 pages |
 | 150-post fixture build | 12.1 s cold CLI run (9.7 s inside the pipeline), 28 stories/articles, 9 pages, ~870 MB peak process group including Chrome |
-| 30-post **real Ollama** build | 57–62 s, 17 stories, 17 articles, 8 pages, no fixture fallback, peak VRAM 2213 MiB |
+| Historical 30-post real Ollama build (`qwen2.5:3b-instruct`) | 57–62 s, 17 stories, 17 articles, 8 pages, no fixture fallback, peak VRAM 2213 MiB |
 | PDF page size | exactly 792 × 1224 pt (11 × 17 in) on every page |
 | GPU | unused for fixture composition and layout; used only while drafting |
 
@@ -403,8 +425,10 @@ and one real build before relying on a tight cutoff-to-release window.
 .\.venv\Scripts\python.exe -m ruff check .
 ```
 
-Last recorded run: **277 passed, 2 skipped** in 345 s. The skips are the two
-Ollama live tests because no model server was running. The suite renders actual
+Last recorded pre-migration baseline: **299 passed, 0 failed** in 280.92 s.
+That is not a result for the Qwen3.5/desktop changes in this branch; focused
+results are recorded in [the Windows release report](docs/WINDOWS_RELEASE_REPORT.md).
+The full suite has not been rerun for this migration. The earlier suite renders actual
 PDFs, checks exact page geometry, verifies searchable text, inspects every page
 proof for blank/overflow defects and confirms the e-paper bundle and checksums.
 The moderation/media regression file covers meaningless-post exclusion, English,
