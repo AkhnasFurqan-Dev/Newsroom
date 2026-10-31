@@ -1,4 +1,4 @@
-# Channel Press — Administrator Guide
+# Newsroom — Administrator Guide
 
 This guide covers installation, accounts, rights, secrets, models, schedules,
 backup and security. Day-to-day editing is in [USER_MANUAL.md](USER_MANUAL.md).
@@ -6,6 +6,13 @@ backup and security. Day-to-day editing is in [USER_MANUAL.md](USER_MANUAL.md).
 ## 1. Installation and upgrade
 
 ### Baseline
+
+The Newsroom installer upgrades the earlier Channel Press installation in place
+using the same Windows installer identity. It preserves the existing per-user
+data, settings, Telegram sessions, model files and edition archive; do not
+uninstall the previous version before upgrading.
+The Newsroom logo is used in the application and Windows shell only. It never
+replaces a publication's custom masthead or print theme.
 
 - Windows 10/11, 64-bit.
 - Python 3.12 is needed only for a source checkout or developer build.
@@ -45,13 +52,17 @@ candidate and Inno Setup online installer can be built with:
 ```
 
 The installer installs the per-user app files, bundled renderer and WebView2
-bootstrapper. It includes an existing-install confirmation; isolated
-install/update/uninstall smoke tests passed on the development machine with its
-existing WebView2 Runtime. A separate data sentinel survived uninstall. The
-interactive confirmation and missing-WebView2 bootstrap path have not been
-verified on a clean machine. This is not a full offline AI package: Ollama and
-model weights are not bundled. Review dependency licensing before
-redistributing the package.
+bootstrapper. It uses the original Channel Press installer identity, so a
+Channel Press installation is replaced in place rather than registered twice.
+A controlled upgrade from Channel Press 1.0.0 to Newsroom 1.0.0 was verified on
+31 October 2026: the SQLite database hash and a data sentinel were unchanged,
+the old executables and "Channel Press" shortcuts were replaced by
+`Newsroom.exe` and "Newsroom" shortcuts, and only one Programs-list entry
+remained. Uninstalling the upgraded test installation removed the app and
+shortcuts but left the user data intact. The interactive existing-install
+confirmation and the missing-WebView2 bootstrap path have not been verified on
+a clean machine. This is not a full offline AI package: Ollama and model weights
+are not bundled. Review dependency licensing before redistributing the package.
 
 In the source preview, start the GUI shell with:
 
@@ -83,7 +94,7 @@ pins, and test a fixture build after any upgrade.
 
 ## 2. Accounts and roles
 
-The first account is created by **Set up Channel Press** or:
+The first account is created by **Set up Newsroom** or:
 
 ```powershell
 .\.venv\Scripts\python.exe -m channel_press.cli setup --demo-channel
@@ -262,7 +273,7 @@ Rules:
 The deterministic fixture provider remains free and offline. Non-fixture
 drafting uses a local Ollama-compatible service at
 `http://127.0.0.1:11434`; model downloads are initiated from **AI Models** in
-Channel Press after an editor confirms the package size. The application does
+Newsroom after an editor confirms the package size. The application does
 not open an Ollama command window. Ollama must already be installed and its
 local service reachable.
 
@@ -348,7 +359,8 @@ Scheduler:
 powershell -ExecutionPolicy Bypass -File .\scripts\install-task.ps1
 ```
 
-This registers `ChannelPressWorker`, running `scripts\run-worker.ps1` every 15
+This registers the existing `ChannelPressWorker` task identity, running
+`scripts\run-worker.ps1` every 15
 minutes. The script performs one worker pass and exits. Logs go to
 `data\logs\worker-YYYYMMDD.log`.
 
@@ -440,7 +452,7 @@ On this repository's Windows venv, one `python.exe` invocation shows two PIDs (a
 launcher stub plus the base interpreter); leases record the real PID, so judge by
 `owners`, not by process count. No kill is issued by these scripts; if a managed
 service is genuinely unresponsive, stop its recorded PID only after confirming it
-is Channel Press.
+is Newsroom.
 
 ## 7. Manual overrides
 

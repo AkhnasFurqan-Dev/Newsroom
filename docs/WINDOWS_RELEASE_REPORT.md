@@ -204,3 +204,59 @@ inference validation on hardware with adequate memory.
   live publication remain unverified. The earlier synthetic PDF inspection
   also found underfilled pages; successful PDF generation is not visual
   composition certification.
+
+## Newsroom rebrand completion — 31 October 2026
+
+- Inspected the unfinished installer verification first. The earlier exit code 1
+  came from a PowerShell `Start-Process -ArgumentList` call that split `/DIR`
+  and `/LOG` paths containing spaces; the Inno Setup log recorded
+  `Installation process succeeded`. That run updated an existing disposable
+  Newsroom target, however, so it did not exercise a Channel Press upgrade.
+- Safeguarded `%LOCALAPPDATA%\ChannelPress` to `.build\upgrade-backup` before
+  testing. The database SHA-256 was
+  `E717F35BCF0D559A47B8FB90EB9B4A540FD3394DAFA3768F6F896C2E5F033816` before and
+  after every install, upgrade and uninstall step, and an added sentinel file
+  survived each step.
+- Ran a clean Channel Press 1.0.0 install from the preserved
+  `ChannelPressSetup.exe` into a disposable `.build` target, then upgraded it
+  with the final `NewsroomSetup.exe` without `/DIR` so Inno used its previous
+  application directory. Both setups returned 0. The result contained only
+  `Newsroom.exe`, `NewsroomWorker.exe` and the uninstaller; both "Channel
+  Press" shortcuts were replaced by "Newsroom" shortcuts targeting
+  `Newsroom.exe`; and one uninstall entry remained, named
+  `Newsroom version 1.0.0`. The original Inno Setup `AppId`
+  `{A3D921D3-84CB-4D2B-82C2-2D723CD0E71A}` was preserved.
+- Added PyInstaller version resources for both executables. The rebuilt
+  artifacts are GUI-subsystem (PE subsystem 2) and carry
+  `ProductName=Newsroom`, `FileDescription=Newsroom` /
+  `Newsroom background worker`, version `1.0.0` and distinct original
+  filenames. The 32×32 icon extracted from both executables and the installer
+  is byte-identical to the extracted frame from the approved
+  `newsroom.ico`; the ICO contains 16, 24, 32, 48, 64, 128 and 256 px frames.
+- Launched the final installed `Newsroom.exe` against a disposable copy of the
+  real profile. One window titled `Newsroom` opened; its only browser child was
+  `msedgewebview2.exe`; no CMD, PowerShell, Python, Ollama or worker console
+  appeared. A second launch exited and left one desktop instance. The login
+  page contained the Newsroom wordmark and no "Channel Press" text. The
+  loopback shutdown endpoint accepted **Pause safely and exit**, and the
+  desktop process, WebView2 child and listener all terminated with no orphan
+  `Newsroom` or `NewsroomWorker` process.
+- Uninstalled the disposable upgraded installation with its own uninstaller:
+  exit 0, uninstall key removed, application directory removed, shortcuts
+  removed, database hash and sentinel unchanged. The test sentinel was then
+  removed, restoring the user data directory to its original three files.
+- Focused checks: 14 tests passed covering the desktop shell/shutdown/bridge,
+  Newsroom brand assets and publication-identity preservation, edition
+  preview/e-paper paths, and the synthetic fixture-to-printable-edition
+  workflow. No full regression suite was run.
+- **Final artifacts:** `dist/release-candidate/Newsroom/Newsroom.exe`
+  (19,309,645 bytes), `dist/release-candidate/Newsroom/NewsroomWorker.exe`
+  (18,266,025 bytes) and `dist/installer/NewsroomSetup.exe` (288,395,624
+  bytes). The stale `ChannelPressSetup.exe` was removed from `dist/installer`.
+- **Release blockers remain unchanged:** PyMuPDF declares AGPL-3.0-only; the
+  package must not be redistributed as a closed-source release until that
+  license is resolved or the renderer is replaced. Clean-machine/WebView2
+  bootstrap, offline installation, bundled Ollama/model weights, live Telegram
+  credentials, Enhanced-model inference on adequate hardware, code signing and
+  rollback also remain unverified. PDF generation success is not visual
+  composition certification.
