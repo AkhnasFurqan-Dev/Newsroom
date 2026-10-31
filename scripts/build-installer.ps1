@@ -14,10 +14,14 @@ if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
     $OutputPath = Join-Path $root $OutputPath
 }
 
-$sourceDir = Join-Path $BuildPath "ChannelPress"
-foreach ($name in @("ChannelPress.exe", "ChannelPressWorker.exe")) {
+$sourceDir = Join-Path $BuildPath "Newsroom"
+foreach ($name in @("Newsroom.exe", "NewsroomWorker.exe")) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceDir $name) -PathType Leaf)) {
         throw "The packaged application is incomplete. Missing '$name' in '$sourceDir'."
+    }
+    $brandIcon = Join-Path $root "assets\brand\newsroom\newsroom.ico"
+    if (-not (Test-Path -LiteralPath $brandIcon -PathType Leaf)) {
+        throw "The approved Newsroom installer icon is missing: $brandIcon"
     }
 }
 
@@ -56,18 +60,18 @@ if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notm
     throw "The WebView2 bootstrapper did not pass Microsoft Authenticode verification."
 }
 
-Write-Host "Compiling the per-user Channel Press installer."
+Write-Host "Compiling the per-user Newsroom installer."
 & $compiler `
     "/DAppVersion=$appVersion" `
     "/DSourceDir=$sourceDir" `
     "/DWebView2Bootstrapper=$bootstrapper" `
     "/O$OutputPath" `
-    "packaging\ChannelPress.iss"
+    "packaging\Newsroom.iss"
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup failed to compile the installer."
 }
 
-$installer = Join-Path $OutputPath "ChannelPressSetup.exe"
+$installer = Join-Path $OutputPath "NewsroomSetup.exe"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
     throw "The installer compiler returned success without producing '$installer'."
 }

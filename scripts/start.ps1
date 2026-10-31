@@ -18,7 +18,7 @@ $restartArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $restart, 
 if ($ProbeTelegram) { $restartArgs += "-ProbeTelegram" }
 & powershell.exe @restartArgs
 if ($LASTEXITCODE -ne 0) {
-    throw "Channel Press could not start. Inspect data\logs\service-*.stderr."
+    throw "Newsroom could not start. Inspect data\logs\service-*.stderr."
 }
 
 $url = (& $python -c "from channel_press.config import settings; host = settings.host if settings.host not in ('0.0.0.0', '') else '127.0.0.1'; print(f'http://{host}:{settings.port}/')" | Out-String).Trim()
@@ -37,5 +37,5 @@ if ($chrome) {
 } else {
     Start-Process $url
 }
-Write-Output "Channel Press is ready at $url"
+Write-Output "Newsroom is ready at $url"
 Write-Output "A recovery worker pass is running in the background."

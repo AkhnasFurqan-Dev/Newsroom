@@ -30,9 +30,9 @@ def hidden_process_options() -> dict:
 
 def worker_command() -> list[str]:
     if getattr(sys, "frozen", False):
-        executable = Path(sys.executable).with_name("ChannelPressWorker.exe")
+        executable = Path(sys.executable).with_name("NewsroomWorker.exe")
         if not executable.is_file():
-            raise FileNotFoundError("The bundled Channel Press worker is missing.")
+            raise FileNotFoundError("The bundled Newsroom worker is missing.")
         return [str(executable)]
     return [sys.executable, "-m", "channel_press.cli", "worker", "--once"]
 

@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from channel_press.bootstrap import ensure_defaults
 from channel_press.config import settings
 from channel_press.db import SessionLocal
 from channel_press.models import (
@@ -45,7 +46,8 @@ def test_healthz_and_first_run_setup_flow(client):
 
     dashboard = client.get("/")
     assert dashboard.status_code == 200
-    assert "Channel Press" in dashboard.text
+    assert "Newsroom" in dashboard.text
+    assert "/brand/newsroom/newsroom-logo-horizontal.svg" in dashboard.text
     assert "Dashboard" in dashboard.text
     assert client.get("/healthz").json()["setup_complete"] is True
 
@@ -62,6 +64,33 @@ def test_healthz_and_first_run_setup_flow(client):
     )
     assert again.status_code == 303
     assert "/login" in again.headers["location"]
+
+
+def test_newsroom_brand_assets_are_served_without_changing_newspaper_identity(client):
+    logo = client.get("/brand/newsroom/newsroom-logo-horizontal.svg")
+    icon = client.get("/brand/newsroom/newsroom.ico")
+
+    assert logo.status_code == 200
+    assert "<svg" in logo.text
+    assert icon.status_code == 200
+    assert icon.content.startswith(b"\x00\x00\x01\x00")
+    assert "Newsroom" in client.get("/setup").text
+
+
+def test_only_the_default_fixture_channel_name_is_rebranded(demo_channel):
+    with SessionLocal() as session:
+        channel = session.get(Channel, demo_channel.id)
+        channel.title = "Channel Press Fixture Desk"
+        session.commit()
+
+        ensure_defaults(session)
+        session.commit()
+        assert channel.title == "Newsroom Fixture Desk"
+
+        channel.title = "Publisher's authorized channel"
+        session.commit()
+        ensure_defaults(session)
+        assert channel.title == "Publisher's authorized channel"
 
 
 def test_login_throttling_after_repeated_failures(client, owner):
@@ -90,7 +119,10 @@ def test_csrf_and_role_boundaries(client, owner, demo_channel, auth):
 
     # The owner can open owner-only pages.
     assert client.get("/users").status_code == 200
-    assert client.get("/diagnostics").status_code == 200
+    diagnostics = client.get("/diagnostics")
+    assert diagnostics.status_code == 200
+    assert "About Newsroom" in diagnostics.text
+    assert "/brand/newsroom/newsroom-symbol.svg" in diagnostics.text
 
     with SessionLocal() as session:
         editor = User(

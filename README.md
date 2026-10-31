@@ -1,9 +1,15 @@
-# Channel Press
+# Newsroom
 
-Channel Press turns an owner-authorized Telegram channel into a printable local
+Newsroom turns an owner-authorized Telegram channel into a printable local
 newspaper and an offline e-paper edition. It runs on a single Windows laptop,
 keeps source evidence next to every sentence, and produces a real 11 × 17 inch
 tabloid PDF rather than a web page styled as a newspaper.
+
+Newsroom is the final product name for the application formerly distributed as
+Channel Press. The internal Python package, CLI command, legacy data paths and
+database identifiers remain unchanged for upgrade compatibility.
+The Folio Mark identifies the application only; each publisher's newspaper
+masthead, print theme and existing editions remain theirs and are not replaced.
 
 The repository ships with a complete, credential-free demonstration built from
 synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
@@ -141,7 +147,7 @@ and model weights.
 .\.venv\Scripts\python.exe -m channel_press.desktop
 ```
 
-The app opens its own Channel Press window and selects an ephemeral loopback
+The app opens its own Newsroom window and selects an ephemeral loopback
 port. It does not spawn a browser, worker console or Ollama console; a developer
 terminal used to start this source preview remains visible. A packaged GUI
 executable is required for a console-free end-user launch. If no owner exists

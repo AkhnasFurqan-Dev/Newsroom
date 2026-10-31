@@ -57,7 +57,7 @@ class FileLease:
         except OSError as exc:
             self.handle.close()
             self.handle = None
-            raise ResourceBusy("Resource currently owned by another Channel Press operation.") from exc
+            raise ResourceBusy("Resource currently owned by another Newsroom operation.") from exc
         logging.getLogger("channel_press.locks").info(
             "lease_acquired pid=%s resource=%s", os.getpid(),
             hashlib.sha256(str(self.path.resolve()).encode()).hexdigest()[:12])

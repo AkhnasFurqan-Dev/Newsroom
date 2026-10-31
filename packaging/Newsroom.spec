@@ -60,13 +60,15 @@ desktop_exe = EXE(
     desktop_analysis.scripts,
     [],
     exclude_binaries=True,
-    name="ChannelPress",
+    name="Newsroom",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=False,
     disable_windowed_traceback=True,
+    icon=str(ROOT / "assets" / "brand" / "newsroom" / "newsroom.ico"),
+    version=str(ROOT / "packaging" / "Newsroom.version"),
 )
 
 worker_analysis = Analysis(
@@ -87,13 +89,15 @@ worker_exe = EXE(
     worker_analysis.scripts,
     [],
     exclude_binaries=True,
-    name="ChannelPressWorker",
+    name="NewsroomWorker",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=False,
     disable_windowed_traceback=True,
+    icon=str(ROOT / "assets" / "brand" / "newsroom" / "newsroom.ico"),
+    version=str(ROOT / "packaging" / "NewsroomWorker.version"),
 )
 
 COLLECT(
@@ -103,7 +107,7 @@ COLLECT(
     desktop_analysis.datas,
     worker_analysis.binaries,
     worker_analysis.datas,
-    name="ChannelPress",
+    name="Newsroom",
     strip=False,
     upx=False,
     upx_exclude=[],

@@ -1267,7 +1267,7 @@ class WorkerLease:
         except OSError as exc:
             self.handle.close()
             self.handle = None
-            raise WorkerBusy("Another Channel Press worker is already running.") from exc
+            raise WorkerBusy("Another Newsroom worker is already running.") from exc
         self.handle.seek(0)
         self.handle.truncate()
         self.handle.write(f"{os.getpid()}\n")

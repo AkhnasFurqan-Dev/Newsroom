@@ -1,4 +1,4 @@
-"""Channel Press command line entry point.
+"""Newsroom command line entry point.
 
 All commands are local and safe by default. Nothing here contacts Telegram,
 an online model or a remote host unless an owner explicitly configures and
@@ -371,7 +371,7 @@ def cmd_import(args: argparse.Namespace) -> int:
                 )
             if not args.grantor or not args.authority_basis:
                 raise SystemExit(
-                    "Creating a live channel requires --grantor and --authority-basis. Channel Press will not "
+                    "Creating a live channel requires --grantor and --authority-basis. Newsroom will not "
                     "process real content without a recorded rights declaration."
                 )
             channel = Channel(
@@ -633,7 +633,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     settings.ensure_dirs()
     upgrade_database()
     configure_logging("web")
-    _print(f"Channel Press at http://{args.host}:{args.port}")
+    _print(f"Newsroom at http://{args.host}:{args.port}")
     if args.reload:
         _print("Note: --reload is ignored under managed service control; restart to apply changes.")
     from .operations import run_web
@@ -733,7 +733,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
     with zipfile.ZipFile(archive_path) as archive:
         names = set(archive.namelist())
         if "backup-manifest.json" not in names or "channel_press.db" not in names:
-            raise SystemExit("Archive is not a Channel Press backup (manifest/database missing).")
+            raise SystemExit("Archive is not a Newsroom or compatible legacy backup (manifest/database missing).")
         manifest = json.loads(archive.read("backup-manifest.json"))
         safety = settings.data_dir / "backups" / f"pre-restore-{utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
         safety.parent.mkdir(parents=True, exist_ok=True)
@@ -786,7 +786,7 @@ def cmd_set_password(args: argparse.Namespace) -> int:
 def cmd_diagnostics(args: argparse.Namespace) -> int:
     import importlib.metadata
 
-    _print("Channel Press diagnostics")
+    _print("Newsroom diagnostics")
     _print(f"  Time:      {iso_utc(utcnow())}")
     _print(f"  Platform:  {platform.platform()}")
     _print(f"  Python:    {sys.version.split()[0]} ({sys.executable})")

@@ -110,6 +110,15 @@ def test_desktop_close_callback_does_not_block_on_webview(monkeypatch):
     assert release.wait(timeout=1)
 
 
+def test_desktop_start_page_uses_packaged_newsroom_wordmark():
+    page = desktop._starting_page()
+
+    assert "<title>Newsroom</title>" in page
+    assert 'alt="Newsroom"' in page
+    assert "data:image/svg+xml;base64," in page
+    assert "Channel Press" not in page
+
+
 def test_windows_worker_launch_has_no_console():
     options = processes.hidden_process_options()
     if os.name == "nt":
@@ -121,8 +130,8 @@ def test_windows_worker_launch_has_no_console():
 
 
 def test_frozen_worker_uses_the_bundled_gui_executable(tmp_path, monkeypatch):
-    app_executable = tmp_path / "ChannelPress.exe"
-    worker_executable = tmp_path / "ChannelPressWorker.exe"
+    app_executable = tmp_path / "Newsroom.exe"
+    worker_executable = tmp_path / "NewsroomWorker.exe"
     app_executable.touch()
     worker_executable.touch()
     monkeypatch.setattr(processes.sys, "executable", str(app_executable))

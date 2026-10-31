@@ -381,7 +381,7 @@ def build_preflight(*, probe_ollama: bool = True) -> PreflightReport:
                 )
             ),
             (
-                "Install the Microsoft Edge WebView2 Evergreen Runtime and restart Channel Press."
+                "Install the Microsoft Edge WebView2 Evergreen Runtime and restart Newsroom."
                 if os.name == "nt" and not webview2
                 else ""
             ),

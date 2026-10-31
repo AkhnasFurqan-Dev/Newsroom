@@ -2,7 +2,7 @@ param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
     [int]$TimeoutSeconds = 300
 )
-# Graceful stop only: ask Channel Press services to pause at a safe checkpoint,
+# Graceful stop only: ask Newsroom services to pause at a safe checkpoint,
 # wait for them to exit, and never kill unrelated processes.
 $ErrorActionPreference = "Stop"
 Set-Location $Root
@@ -22,7 +22,7 @@ while ((Get-Date) -lt $until) {
     $count = 0
     if ($owners -and $owners.PSObject.Properties.Name -contains "count") { $count = [int]$owners.count }
     if ($count -eq 0) {
-        Write-Output "Channel Press managed services stopped cleanly. Databases, sessions and jobs were preserved."
+        Write-Output "Newsroom managed services stopped cleanly. Databases, sessions and jobs were preserved."
         exit 0
     }
     Write-Output ("Waiting for {0} managed service(s) to finish a bounded operation..." -f $count)

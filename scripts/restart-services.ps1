@@ -19,13 +19,13 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Output "2/6 Check whether an unmanaged web server is already listening"
 try {
     Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "$url/login" | Out-Null
-    Write-Error "A web server already answers at $url but is not managed by Channel Press. Stop that process yourself, then re-run this script."
+    Write-Error "A web server already answers at $url but is not managed by Newsroom. Stop that process yourself, then re-run this script."
     exit 1
 } catch {
     # No answer: expected, so the restart owns the port.
 }
 
-Write-Output "3/6 Graceful stop of Channel Press services"
+Write-Output "3/6 Graceful stop of Newsroom services"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\stop-services.ps1") -Root $Root -TimeoutSeconds $TimeoutSeconds
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

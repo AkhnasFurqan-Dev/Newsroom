@@ -3,7 +3,11 @@
 #endif
 
 #ifndef SourceDir
-#define SourceDir "..\dist\release-candidate\ChannelPress"
+#define SourceDir "..\dist\release-candidate\Newsroom"
+#endif
+
+#ifndef BrandIcon
+#define BrandIcon "..\assets\brand\newsroom\newsroom.ico"
 #endif
 
 #ifndef WebView2Bootstrapper
@@ -12,21 +16,23 @@
 
 [Setup]
 AppId={{A3D921D3-84CB-4D2B-82C2-2D723CD0E71A}
-AppName=Channel Press
+AppName=Newsroom
 AppVersion={#AppVersion}
-AppPublisher=AkhnasFurqan-Dev
-DefaultDirName={localappdata}\Programs\Channel Press
-DefaultGroupName=Channel Press
+AppPublisher=Newsroom
+DefaultDirName={localappdata}\Programs\Newsroom
+UsePreviousAppDir=yes
+DefaultGroupName=Newsroom
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist\installer
-OutputBaseFilename=ChannelPressSetup
+OutputBaseFilename=NewsroomSetup
+SetupIconFile={#BrandIcon}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\ChannelPress.exe
+UninstallDisplayIcon={app}\Newsroom.exe
 CloseApplications=yes
 RestartApplications=no
 
@@ -40,12 +46,18 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#WebView2Bootstrapper}"; DestDir: "{tmp}"; Flags: dontcopy
 
+[InstallDelete]
+Type: files; Name: "{app}\ChannelPress.exe"
+Type: files; Name: "{app}\ChannelPressWorker.exe"
+Type: files; Name: "{autoprograms}\Channel Press.lnk"
+Type: files; Name: "{autodesktop}\Channel Press.lnk"
+
 [Icons]
-Name: "{autoprograms}\Channel Press"; Filename: "{app}\ChannelPress.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\Channel Press"; Filename: "{app}\ChannelPress.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\Newsroom"; Filename: "{app}\Newsroom.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Newsroom.exe"
+Name: "{autodesktop}\Newsroom"; Filename: "{app}\Newsroom.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Newsroom.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\ChannelPress.exe"; Description: "Launch Channel Press"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Newsroom.exe"; Description: "Launch Newsroom"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
@@ -94,8 +106,8 @@ begin
     if not WizardSilent then
       Result :=
         MsgBox(
-          'An existing Channel Press installation was found (version ' + ExistingVersion + ').' + #13#10 + #13#10 +
-          'This setup will update or repair application files. Your personal data, Telegram sessions, settings and editions are stored separately and will not be removed. Continue?',
+          'An existing compatible installation was found (version ' + ExistingVersion + ').' + #13#10 + #13#10 +
+          'This setup updates application files in place. Your personal data, Telegram sessions, settings and editions are stored separately and will not be removed. Continue?',
           mbConfirmation,
           MB_YESNO
         ) = IDYES;
@@ -125,5 +137,5 @@ begin
   end;
 
   if not WebView2Installed() then
-    Result := 'WebView2 Runtime was not detected after installation. Channel Press setup cannot continue.';
+    Result := 'WebView2 Runtime was not detected after installation. Newsroom setup cannot continue.';
 end;

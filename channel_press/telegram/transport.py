@@ -119,7 +119,7 @@ class TelethonTransport:
                 str(self.session_path),
                 int(self.api_id),
                 self.api_hash,
-                device_model="Channel Press Desktop",
+                device_model="Newsroom Desktop",
                 system_version="Windows",
                 app_version="1.0",
                 connection_retries=3,

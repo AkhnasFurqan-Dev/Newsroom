@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "channel-press"
 version = "1.0.0"
-description = "Channel Press: authorized Telegram-channel roundup to printable newspaper and e-paper"
+description = "Newsroom: authorized Telegram-channel roundup to printable newspaper and e-paper"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi==0.115.6",

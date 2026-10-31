@@ -1,4 +1,4 @@
-# Channel Press — Troubleshooting
+# Newsroom — Troubleshooting
 
 Start with **Connections** in the desktop app for bounded status and remediation
 links. **Diagnostics** shows detailed local reports. For a source checkout, use:
@@ -43,9 +43,9 @@ server is running.
   install when WebView2 is absent. If the runtime is blocked by policy, install
   the supported Evergreen Runtime and retry. A startup error is written to the
   private desktop log.
-- If another Channel Press instance is already running, starting it again
+- If another Newsroom instance is already running, starting it again
   focuses the existing window. **Continue in background** hides that window but
-  leaves the app and queued work running; launch Channel Press again to restore
+  leaves the app and queued work running; launch Newsroom again to restore
   it. **Pause safely and exit** can take time while work reaches a checkpoint.
 - Worker logs are written under `data\logs\` in a source checkout and under the
   configured local application data directory in a packaged build. No worker
@@ -64,7 +64,7 @@ server is running.
   .\.venv\Scripts\python.exe -m channel_press.cli set-password --username owner
   ```
 
-- If no owner exists, the app shows **Set up Channel Press**. If the database has
+- If no owner exists, the app shows **Set up Newsroom**. If the database has
   users but you are locked out, reset with `set-password`; do not delete the
   database.
 
@@ -311,7 +311,7 @@ paths before posting a log publicly.
 
 ## “Database temporarily busy. Your change was not saved.” (HTTP 503)
 
-This is the bounded fallback, not a crash. Another Channel Press process held the
+This is the bounded fallback, not a crash. Another Newsroom process held the
 single SQLite writer through three short retries. The request was **not** applied
 and the audit trail is intact.
 
@@ -328,7 +328,7 @@ Do not delete `-wal`/`-shm` files or switch the database while services run.
 
 ## “Telegram session currently busy”
 
-Another Channel Press process (usually the worker, or a second web server) owns
+Another Newsroom process (usually the worker, or a second web server) owns
 the authenticated Telethon session. This is the safe refusal: it prevents two
 Telethon clients from writing the same `.session` SQLite file.
 
@@ -489,7 +489,7 @@ To re-render an older edition, install the family again or re-import the license
 file.
 
 **Bundled print browser missing or corrupt** — packaged builds require the exact
-Playwright-pinned Chromium under `ChannelPress\_internal\pw-browsers`. Use the
+Playwright-pinned Chromium under `Newsroom\_internal\pw-browsers`. Use the
 installer's update/repair path or rebuild the candidate with
 `scripts\build-windows.ps1`; do not install an arbitrary Chromium revision into
 the package. A source checkout may use installed Chrome/Edge or run
@@ -675,7 +675,7 @@ independent reporting.
 ## Backup and restore problems
 
 - **Restore refuses to run** — stop the server and worker, then add `--force`.
-- **Archive is not a Channel Press backup** — the zip lacks
+- **Archive is not a Newsroom or compatible legacy backup** — the zip lacks
   `backup-manifest.json` or `channel_press.db`. Do not extract arbitrary archives
   over `data\`.
 - **Restore succeeded but editions are missing** — backups include the database,

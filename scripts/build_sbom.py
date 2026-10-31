@@ -69,11 +69,11 @@ def build_document() -> dict:
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
-        "name": "Channel Press Windows build environment",
+        "name": "Newsroom Windows build environment",
         "documentNamespace": f"https://channelpress.local/sbom/{created}",
         "creationInfo": {
             "created": created,
-            "creators": ["Tool: ChannelPress scripts/build_sbom.py"],
+            "creators": ["Tool: Newsroom scripts/build_sbom.py"],
         },
         "packages": packages,
     }

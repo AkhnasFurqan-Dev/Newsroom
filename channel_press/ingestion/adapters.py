@@ -66,7 +66,7 @@ def _parse_date(value: Any) -> datetime:
 
 
 def normalize_messages(payload: dict, *, media_root: Path | None = None) -> list[NormalizedMessage]:
-    """Normalize Channel Press owner-import format and Telegram Desktop JSON.
+    """Normalize Newsroom (legacy Channel Press) owner-import format and Telegram Desktop JSON.
 
     Both formats are treated as untrusted data. Unknown fields are preserved in
     ``raw`` but never interpreted as instructions.

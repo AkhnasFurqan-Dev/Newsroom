@@ -1,12 +1,12 @@
 :root {
-  --paper: #f4f1ea;
+  --paper: #F3F0E8;
   --paper-deep: #ebe6db;
-  --ink: #1b1a17;
+  --ink: #20272B;
   --muted: #5d594f;
   --rule: #cec7b8;
   --rule-strong: #8f8778;
-  --accent: #7b1f24;
-  --accent-soft: #f0dedd;
+  --accent: #913E36;
+  --accent-soft: #f1e4e1;
   --ok: #2f5d43;
   --warn: #8a5a13;
   --danger: #8c271e;
@@ -41,8 +41,8 @@ a:hover { text-decoration: underline; }
   border-bottom: 3px double var(--ink);
   background: var(--paper);
 }
-.brand { font-family: var(--serif); font-size: 29px; letter-spacing: -.02em; color: var(--ink); }
-.brand span { color: var(--accent); }
+.brand { display: inline-flex; align-items: center; min-width: 120px; }
+.brand img { display: block; width: 168px; max-width: 100%; height: auto; }
 .brand:hover { text-decoration: none; }
 .topbar__meta { color: var(--muted); font-size: 12px; text-align: right; line-height: 1.35; }
 
@@ -271,6 +271,8 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: Consolas, mono
 .login-card { width: 100%; max-width: 440px; background: #fbf9f4; border: 1px solid var(--rule); border-top: 6px solid var(--accent); padding: 30px 32px; }
 .login-card h1 { font-size: 31px; }
 .login-card .masthead { border-bottom: 1px solid var(--rule); padding-bottom: 12px; margin-bottom: 20px; }
+.product-logo { display: block; width: 210px; max-width: 100%; height: auto; margin-bottom: 16px; }
+.about-mark { display: block; width: 48px; height: 48px; margin-bottom: 12px; }
 
 footer.site-footer {
   border-top: 1px solid var(--rule);

@@ -42,32 +42,33 @@ if ($LASTEXITCODE -ne 0) {
     throw "Playwright Chromium installation failed."
 }
 
-Write-Host "Building ChannelPress.exe and ChannelPressWorker.exe with the local renderer."
+Write-Host "Building Newsroom.exe and NewsroomWorker.exe with the local renderer."
 & $PythonPath -m PyInstaller --noconfirm --clean `
     --distpath $OutputPath `
     --workpath $workRoot `
-    packaging\ChannelPress.spec
+    packaging\Newsroom.spec
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller failed to build the Windows application."
 }
 
-$appPath = Join-Path $OutputPath "ChannelPress\ChannelPress.exe"
-$workerPath = Join-Path $OutputPath "ChannelPress\ChannelPressWorker.exe"
+$appPath = Join-Path $OutputPath "Newsroom\Newsroom.exe"
+$workerPath = Join-Path $OutputPath "Newsroom\NewsroomWorker.exe"
 foreach ($executable in @($appPath,$workerPath)) {
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw "Expected packaged executable was not produced: $executable"
     }
 }
-$browserDirs = @(Get-ChildItem -LiteralPath (Join-Path $OutputPath "ChannelPress\_internal\pw-browsers") `
+$browserDirs = @(Get-ChildItem -LiteralPath (Join-Path $OutputPath "Newsroom\_internal\pw-browsers") `
     -Directory -Filter "chromium-*")
 if ($browserDirs.Count -ne 1) {
     throw "Expected exactly one pinned Chromium revision in the packaged browser directory."
 }
 $requiredFiles = @(
     (Join-Path $browserDirs[0].FullName "chrome-win\chrome.exe"),
-    (Join-Path $OutputPath "ChannelPress\_internal\channel_press\layout\templates\postprocess.js"),
-    (Join-Path $OutputPath "ChannelPress\_internal\channel_press\web\static\vendor\paged.polyfill.min.js"),
-    (Join-Path $OutputPath "ChannelPress\_internal\channel_press\publishing\templates\epaper.html.j2")
+    (Join-Path $OutputPath "Newsroom\_internal\channel_press\layout\templates\postprocess.js"),
+    (Join-Path $OutputPath "Newsroom\_internal\channel_press\web\static\vendor\paged.polyfill.min.js"),
+    (Join-Path $OutputPath "Newsroom\_internal\channel_press\publishing\templates\epaper.html.j2"),
+    (Join-Path $OutputPath "Newsroom\_internal\assets\brand\newsroom\newsroom.ico")
 )
 foreach ($requiredFile in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {

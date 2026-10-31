@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import ctypes
 import html
 import os
@@ -9,6 +10,14 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+
+_ICON_HANDLES: list[int] = []
+
+
+def _brand_asset_path(name: str) -> Path:
+    root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    return root / "assets" / "brand" / "newsroom" / name
 
 
 def _configure_environment() -> None:
@@ -23,17 +32,18 @@ def _configure_environment() -> None:
 
 _START_PAGE = """<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Channel Press</title>
+<title>Newsroom</title>
 <style>
-body{margin:0;background:#f4f1e8;color:#242321;font:16px/1.5 Segoe UI,sans-serif}
-main{max-width:680px;margin:18vh auto;padding:32px 38px;border-top:4px solid #8e2d2b;background:#fff}
-h1{font:600 30px Georgia,serif;margin:0 0 8px}p{color:#62605b}
-</style><main><h1>Channel Press</h1><p>Starting the local newsroom. This window will continue when the workspace is ready.</p>
+body{margin:0;background:#F3F0E8;color:#20272B;font:16px/1.5 Segoe UI,sans-serif}
+main{max-width:680px;margin:18vh auto;padding:32px 38px;border-top:4px solid #913E36;background:#fff}
+.wordmark{display:block;width:190px;height:auto;margin-bottom:20px}
+p{color:#5d594f}
+</style><main><img class="wordmark" alt="Newsroom" src="__NEWSROOM_LOGO_DATA__"><p>Starting the local edition workspace. This window will continue when the workspace is ready.</p>
 <p id="status">Checking local services…</p>
 <div id="close" hidden><p>Choose what should happen to the current work before closing.</p>
 <button onclick="requestCloseChoice('continue')">Continue work in background</button>
 <button onclick="requestCloseChoice('pause')">Pause safely and exit</button>
-<button onclick="document.getElementById('close').hidden=true">Keep Channel Press open</button></div>
+<button onclick="document.getElementById('close').hidden=true">Keep Newsroom open</button></div>
 <script>
 window.addEventListener('channel-press-close-request',()=>document.getElementById('close').hidden=false);
 async function requestCloseChoice(choice) {
@@ -46,6 +56,59 @@ async function requestCloseChoice(choice) {
 }
 </script>
 </main></html>"""
+
+
+def _set_window_icon() -> None:
+    if os.name != "nt":
+        return
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.LoadImageW.restype = wintypes.HANDLE
+    user32.LoadImageW.argtypes = (
+        wintypes.HINSTANCE,
+        wintypes.LPCWSTR,
+        wintypes.UINT,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    )
+    user32.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+    user32.GetWindowTextW.restype = ctypes.c_int
+    user32.SendMessageW.argtypes = (
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    )
+    user32.SendMessageW.restype = ctypes.c_ssize_t
+    icon_path = str(_brand_asset_path("newsroom.ico"))
+    flags = 0x0010 | 0x0040
+    large = user32.LoadImageW(None, icon_path, 1, 32, 32, flags)
+    small = user32.LoadImageW(None, icon_path, 1, 16, 16, flags)
+    if not large or not small:
+        raise ctypes.WinError(ctypes.get_last_error())
+    _ICON_HANDLES.extend((large, small))
+
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = (callback_type, wintypes.LPARAM)
+    user32.EnumWindows.restype = wintypes.BOOL
+
+    def set_icon(hwnd, _):
+        length = user32.GetWindowTextLengthW(hwnd)
+        if not length:
+            return True
+        title = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, title, length + 1)
+        if title.value.casefold() == "newsroom":
+            user32.SendMessageW(hwnd, 0x0080, 1, large)
+            user32.SendMessageW(hwnd, 0x0080, 0, small)
+            return False
+        return True
+
+    user32.EnumWindows(callback_type(set_icon), 0)
 
 
 def _focus_existing_window() -> None:
@@ -62,7 +125,7 @@ def _focus_existing_window() -> None:
         if length:
             title = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, title, length + 1)
-            if "channel press" in title.value.casefold():
+            if "newsroom" in title.value.casefold() or "channel press" in title.value.casefold():
                 found.append(hwnd)
                 return False
         return True
@@ -126,7 +189,7 @@ class DesktopBridge:
 
     def shutdown(self, choice: str) -> dict[str, str | bool]:
         if choice not in {"continue", "pause"}:
-            return {"closed": False, "message": "Channel Press remains open."}
+            return {"closed": False, "message": "Newsroom remains open."}
         with self._shutdown_lock:
             if self._shutdown_choice is not None:
                 return {"closed": False, "message": "A close action is already in progress."}
@@ -136,7 +199,7 @@ class DesktopBridge:
             "message": (
                 "The current worker will finish in the background."
                 if choice == "continue"
-                else "Channel Press is pausing at a safe checkpoint."
+                else "Newsroom is pausing at a safe checkpoint."
             ),
         }
 
@@ -191,7 +254,7 @@ class DesktopBridge:
                 try:
                     self.window.evaluate_js(
                         "document.getElementById('desktop-close-status').textContent="
-                        + repr("Shutdown failed. Keep Channel Press open and retry.")
+                        + repr("Shutdown failed. Keep Newsroom open and retry.")
                         + ";document.querySelectorAll('[data-desktop-close]').forEach((button)=>button.disabled=false)"
                     )
                 except Exception:
@@ -202,7 +265,11 @@ class DesktopBridge:
 
 
 def _starting_page(log_path: Path | None = None) -> str:
+    logo = base64.b64encode(_brand_asset_path("newsroom-logo-horizontal.svg").read_bytes()).decode("ascii")
     page = _START_PAGE.replace(
+        "__NEWSROOM_LOGO_DATA__",
+        f"data:image/svg+xml;base64,{logo}",
+    ).replace(
         "</main>",
         '<p id="desktop-close-status" aria-live="polite"></p></main>',
     )
@@ -311,7 +378,7 @@ def main() -> int:
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
         bridge = DesktopBridge()
         window = webview.create_window(
-            "Channel Press",
+            "Newsroom",
             html=_starting_page(),
             width=1440,
             height=940,
@@ -327,6 +394,7 @@ def main() -> int:
             if backend_started.is_set():
                 return
             backend_started.set()
+            _set_window_icon()
             threading.Thread(
                 target=_launch_backend,
                 args=(window, bridge),

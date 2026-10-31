@@ -40,6 +40,13 @@ def set_setting(db: Session, key: str, value: str) -> None:
 
 
 def ensure_defaults(db: Session) -> PublicationProfile:
+    fixture_channel = db.scalar(select(Channel).where(Channel.slug == "fixture-desk"))
+    if (
+        fixture_channel is not None
+        and fixture_channel.is_demo
+        and fixture_channel.title == "Channel Press Fixture Desk"
+    ):
+        fixture_channel.title = "Newsroom Fixture Desk"
     profile = db.scalar(select(PublicationProfile).order_by(PublicationProfile.id.asc()))
     if profile is None:
         profile = PublicationProfile(
@@ -136,7 +143,7 @@ def get_or_create_demo_channel(db: Session, owner: User) -> Channel:
     if channel is None:
         channel = Channel(
             slug="fixture-desk",
-            title="Channel Press Fixture Desk",
+            title="Newsroom Fixture Desk",
             handle="@fixture_newsroom",
             telegram_channel_id=-1001234567890,
             is_public=False,

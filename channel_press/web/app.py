@@ -231,9 +231,15 @@ STATIC_DIR = WEB_DIR / "static"
 configure_logging("web", console=os.environ.get("CHANNEL_PRESS_DESKTOP") != "1")
 logger = get_logger("web")
 
-app = FastAPI(title="Channel Press", docs_url=None, redoc_url=None)
+PRODUCT_NAME = "Newsroom"
+app = FastAPI(title=PRODUCT_NAME, docs_url=None, redoc_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1200)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount(
+    "/brand/newsroom",
+    StaticFiles(directory=str(BASE_DIR / "assets" / "brand" / "newsroom")),
+    name="newsroom_brand",
+)
 
 
 @app.on_event("startup")
@@ -305,7 +311,7 @@ def render(request: Request, name: str, context: dict, status_code: int = 200) -
     template = _ENV.get_template(name)
     base = {
         "request": request,
-        "app_name": settings.app_name,
+        "app_name": PRODUCT_NAME,
         "message": request.query_params.get("msg", ""),
         "error": request.query_params.get("err", ""),
         "today": utcnow(),
@@ -4883,7 +4889,7 @@ def _health_rows(
             "label": "Application",
             "state": "ready",
             "state_label": "Ready",
-            "detail": f"Web server responding · {settings.app_name}",
+            "detail": f"Web server responding · {PRODUCT_NAME}",
             "action_url": "",
             "action": "",
         }
@@ -5143,7 +5149,7 @@ def system_restart(confirm: str = Form(""),
     if os.environ.get("CHANNEL_PRESS_DESKTOP") == "1":
         raise HTTPException(
             409,
-            "Close Channel Press using the window controls, then reopen it to restart the local engine.",
+            "Close Newsroom using the window controls, then reopen it to restart the local engine.",
         )
     if os.name != "nt":
         raise HTTPException(409, "Use the service scripts on the Windows host.")

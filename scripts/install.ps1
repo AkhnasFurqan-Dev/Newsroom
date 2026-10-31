@@ -1,11 +1,11 @@
-# Channel Press — local Windows installation
+# Newsroom — local Windows installation
 # Usage:  powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-Write-Host "Channel Press installation" -ForegroundColor Cyan
+Write-Host "Newsroom installation" -ForegroundColor Cyan
 Write-Host "Workspace: $root"
 
 if (-not (Test-Path "$root\.venv\Scripts\python.exe")) {

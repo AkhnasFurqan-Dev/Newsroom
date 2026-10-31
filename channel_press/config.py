@@ -32,7 +32,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "Channel Press"
     host: str = "127.0.0.1"
     port: int = 8765
     data_dir: Path = Field(default=BASE_DIR / "data")

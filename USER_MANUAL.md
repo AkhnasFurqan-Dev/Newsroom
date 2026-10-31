@@ -1,4 +1,4 @@
-# Channel Press — User Manual
+# Newsroom — User Manual
 
 This manual is for the editor who runs the newsroom day to day. It describes the
 screens and procedures that exist in this build, using the labels shown in the
@@ -11,7 +11,7 @@ places in that edition are test data.
 
 ## 1. Starting the newsroom
 
-In a packaged Windows release, open **Channel Press** from the Start menu. For
+In a packaged Windows release, open **Newsroom** from the Start menu. For
 this source-checkout preview, an administrator starts the GUI shell once with:
 
 ```powershell
@@ -20,12 +20,14 @@ this source-checkout preview, an administrator starts the GUI shell once with:
 
 The preview opens a dedicated window on an ephemeral local port. The terminal
 used to start a source checkout remains visible; the release executable is
-expected to use the GUI subsystem. Sign in inside the Channel Press window.
+expected to use the GUI subsystem. Sign in inside the Newsroom window.
 Routine editing, model setup, diagnostics, edition viewing and progress remain
 inside that window.
 
-The header shows the publication name, the current date in the configured
-timezone, your display name and role. The navigation is:
+The Newsroom wordmark identifies the application. The publication selector and
+page heading identify the active newspaper; its masthead and print theme remain
+separate from the application logo. The header also shows the current date in
+the configured timezone, your display name and role. The navigation is:
 
 **Dashboard · Sources · Stories · Articles · Build · Editions · Schedules · Jobs ·
 AI Models · Branding · Users · Audit · Diagnostics**
@@ -37,7 +39,7 @@ registration screen; accounts are created by an owner.
 
 ### First-run setup
 
-When no owner exists, the app shows **Set up Channel Press**. Enter a username,
+When no owner exists, the app shows **Set up Newsroom**. Enter a username,
 display name and a password of at least 12 characters. The first account becomes
 the owner. After setup, the same window opens **Connections** with a first-run
 checklist for local AI, newspaper identity, authorized sources or licensed
@@ -66,7 +68,7 @@ readable rows for the application, database, Telegram account, selected source,
 local model, configured model, worker queue and source discovery. PIDs, raw JSON
 and full paths stay out of the normal view.
 
-In the browser preview only, **Restart Channel Press Services** asks for
+In the browser preview only, **Restart Newsroom Services** asks for
 confirmation, requests a graceful stop, keeps every database, session, job and
 checkpoint, and starts the web app again. Jobs that were paused can be resumed
 from **Jobs**. It is not a repair button for wrong credentials or rights.
@@ -395,9 +397,9 @@ Open **Build**.
 5. Select **Queue build**.
 
 The build creates a persistent job and starts a managed one-shot worker.
-**Jobs** shows progress and the active stage in Channel Press. When closing the
+**Jobs** shows progress and the active stage in Newsroom. When closing the
 desktop window, choose **Continue in background** to hide it while work and the
-local service continue; reopening Channel Press focuses the hidden window. Choose
+local service continue; reopening Newsroom focuses the hidden window. Choose
 **Pause safely and exit** to request a checkpoint-safe stop. A regular browser
 preview does not have the desktop close dialog.
 
