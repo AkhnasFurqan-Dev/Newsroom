@@ -301,3 +301,54 @@ def test_edition_preview_and_epaper_paths_are_served_safely(
     pdf_redirect = client.get(f"/editions/{edition_id}/sample_issue.pdf", follow_redirects=False)
     assert pdf_redirect.status_code == 307
     assert pdf_redirect.headers["location"].endswith(f"/editions/{edition_id}/pdf")
+
+
+def test_desktop_shutdown_route_requires_token_and_loopback():
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from channel_press.web.app import desktop_shutdown
+
+    calls = []
+
+    class Bridge:
+        def shutdown(self, choice):
+            calls.append(choice)
+            return {"closed": True}
+
+        def finish_shutdown(self):
+            calls.append("finish")
+            return {"started": True}
+
+    app = SimpleNamespace(
+        state=SimpleNamespace(desktop_control_token="private-token", desktop_bridge=Bridge())
+    )
+
+    def request(host, token):
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "headers": [(b"x-channel-press-token", token.encode())],
+                "client": (host, 54321),
+                "app": app,
+            }
+        )
+
+    with pytest.raises(HTTPException) as invalid_token:
+        asyncio.run(desktop_shutdown("pause", request("127.0.0.1", "wrong")))
+    assert invalid_token.value.status_code == 403
+
+    response = asyncio.run(desktop_shutdown("pause", request("127.0.0.1", "private-token")))
+    assert response.status_code == 200
+    assert json.loads(response.body) == {"closed": True}
+    assert calls == ["pause"]
+
+    with pytest.raises(HTTPException) as non_local:
+        asyncio.run(desktop_shutdown("pause", request("192.0.2.1", "private-token")))
+    assert non_local.value.status_code == 403

@@ -63,6 +63,7 @@
 </footer>
 {% if desktop_mode %}
 <div id="desktop-close-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="desktop-close-title"
+     data-desktop-token="{{ desktop_control_token }}"
      style="position:fixed;inset:0;background:#171615a8;z-index:1000;display:grid;place-items:center;padding:24px">
   <style>#desktop-close-dialog[hidden]{display:none!important}</style>
   <section class="card" style="width:min(560px,100%);background:#fff">
@@ -80,6 +81,14 @@
 (() => {
   const dialog = document.getElementById("desktop-close-dialog");
   const status = document.getElementById("desktop-close-status");
+  const control = async (action) => {
+    const response = await fetch(`/desktop/shutdown/${action}`, {
+      method: "POST",
+      headers: { "X-Channel-Press-Token": dialog.dataset.desktopToken },
+    });
+    if (!response.ok) throw new Error(`Local shutdown endpoint returned HTTP ${response.status}.`);
+    return response.json();
+  };
   window.addEventListener("channel-press-close-request", () => {
     dialog.hidden = false;
     dialog.querySelector("[data-desktop-close='continue']").focus();
@@ -92,11 +101,28 @@
       button.disabled = true;
       status.textContent = "Applying your choice…";
       try {
-        const result = await window.pywebview.api.shutdown(button.dataset.desktopClose);
+        const result = await control(button.dataset.desktopClose);
         status.textContent = result.message;
-        if (!result.closed) button.disabled = false;
-      } catch (_) {
-        status.textContent = "The close action failed. Keep this window open and retry.";
+        if (!result.closed) {
+          button.disabled = false;
+          return;
+        }
+        window.setTimeout(async () => {
+          try {
+            const completion = await control("finish");
+            if (!completion.started) {
+              status.textContent = "The close action could not be started. Keep this window open and retry.";
+              button.disabled = false;
+            }
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            status.textContent = `Shutdown finalization failed: ${detail.slice(0, 160)}`;
+            button.disabled = false;
+          }
+        }, 0);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        status.textContent = `Shutdown request failed: ${detail.slice(0, 160)}`;
         button.disabled = false;
       }
     });

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import html
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -30,10 +31,20 @@ h1{font:600 30px Georgia,serif;margin:0 0 8px}p{color:#62605b}
 </style><main><h1>Channel Press</h1><p>Starting the local newsroom. This window will continue when the workspace is ready.</p>
 <p id="status">Checking local services…</p>
 <div id="close" hidden><p>Choose what should happen to the current work before closing.</p>
-<button onclick="window.pywebview.api.shutdown('continue')">Continue work in background</button>
-<button onclick="window.pywebview.api.shutdown('pause')">Pause safely and exit</button>
+<button onclick="requestCloseChoice('continue')">Continue work in background</button>
+<button onclick="requestCloseChoice('pause')">Pause safely and exit</button>
 <button onclick="document.getElementById('close').hidden=true">Keep Channel Press open</button></div>
-<script>window.addEventListener('channel-press-close-request',()=>document.getElementById('close').hidden=false)</script>
+<script>
+window.addEventListener('channel-press-close-request',()=>document.getElementById('close').hidden=false);
+async function requestCloseChoice(choice) {
+  try {
+    const result = await window.pywebview.api.shutdown(choice);
+    if (result.closed) window.setTimeout(() => window.pywebview.api.finish_shutdown(), 0);
+  } catch (_) {
+    document.getElementById('status').textContent = 'The close action failed. Keep this window open and retry.';
+  }
+}
+</script>
 </main></html>"""
 
 
@@ -86,6 +97,10 @@ class DesktopBridge:
         self.window = None
         self.server = None
         self.allow_close = False
+        self.control_token = secrets.token_urlsafe(32)
+        self._shutdown_choice: str | None = None
+        self._shutdown_started = False
+        self._shutdown_lock = threading.Lock()
 
     def on_closing(self):
         if self.allow_close:
@@ -112,18 +127,44 @@ class DesktopBridge:
     def shutdown(self, choice: str) -> dict[str, str | bool]:
         if choice not in {"continue", "pause"}:
             return {"closed": False, "message": "Channel Press remains open."}
+        with self._shutdown_lock:
+            if self._shutdown_choice is not None:
+                return {"closed": False, "message": "A close action is already in progress."}
+            self._shutdown_choice = choice
+        return {
+            "closed": True,
+            "message": (
+                "The current worker will finish in the background."
+                if choice == "continue"
+                else "Channel Press is pausing at a safe checkpoint."
+            ),
+        }
 
-        def finish() -> None:
+    def finish_shutdown(self) -> dict[str, bool]:
+        with self._shutdown_lock:
+            choice = self._shutdown_choice
+            if choice is None or self._shutdown_started:
+                return {"started": False}
+            self._shutdown_started = True
+        threading.Timer(1, self._finish_shutdown, args=(choice,)).start()
+        return {"started": True}
+
+    def _finish_shutdown(self, choice: str) -> None:
+        try:
             from channel_press.ai.model_manager import cancel_and_wait, wait_for_smoke_test
             from channel_press.processes import pause_owned_workers
 
             if choice == "continue":
+                with self._shutdown_lock:
+                    self._shutdown_choice = None
+                    self._shutdown_started = False
                 if self.window is not None:
                     self.window.hide()
                 return
-            if choice == "pause" and (
-                not cancel_and_wait() or not wait_for_smoke_test() or not pause_owned_workers()
-            ):
+            if not cancel_and_wait() or not wait_for_smoke_test() or not pause_owned_workers():
+                with self._shutdown_lock:
+                    self._shutdown_choice = None
+                    self._shutdown_started = False
                 if self.window is not None:
                     self.window.evaluate_js(
                         "document.getElementById('desktop-close-status').textContent="
@@ -136,16 +177,28 @@ class DesktopBridge:
                 self.server.should_exit = True
             if self.window is not None:
                 self.window.destroy()
+        except Exception:
+            from channel_press.logging_setup import get_logger
 
-        threading.Thread(target=finish, name="channel-press-shutdown", daemon=True).start()
-        return {
-            "closed": True,
-            "message": (
-                "The current worker will finish in the background."
-                if choice == "continue"
-                else "Channel Press is pausing at a safe checkpoint."
-            ),
-        }
+            get_logger("desktop").exception(
+                "desktop_shutdown_failed",
+                extra={"kind": "desktop"},
+            )
+            with self._shutdown_lock:
+                self._shutdown_choice = None
+                self._shutdown_started = False
+            if self.window is not None:
+                try:
+                    self.window.evaluate_js(
+                        "document.getElementById('desktop-close-status').textContent="
+                        + repr("Shutdown failed. Keep Channel Press open and retry.")
+                        + ";document.querySelectorAll('[data-desktop-close]').forEach((button)=>button.disabled=false)"
+                    )
+                except Exception:
+                    get_logger("desktop").exception(
+                        "desktop_shutdown_error_display_failed",
+                        extra={"kind": "desktop"},
+                    )
 
 
 def _starting_page(log_path: Path | None = None) -> str:
@@ -183,6 +236,9 @@ def _launch_backend(window, bridge: DesktopBridge) -> None:
         import uvicorn
 
         from channel_press.web.app import app
+
+        app.state.desktop_control_token = bridge.control_token
+        app.state.desktop_bridge = bridge
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

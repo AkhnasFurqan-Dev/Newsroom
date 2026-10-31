@@ -26,9 +26,12 @@ def test_desktop_continue_hides_window_and_keeps_local_api_alive():
     result = bridge.shutdown("continue")
 
     assert result["closed"] is True
+    assert bridge.finish_shutdown() == {"started": True}
     assert hidden.wait(2)
     assert bridge.server.should_exit is False
     assert bridge.allow_close is False
+    assert bridge._shutdown_choice is None
+    assert bridge._shutdown_started is False
 
 
 def test_desktop_pause_stops_api_and_destroys_window(monkeypatch):
@@ -56,9 +59,28 @@ def test_desktop_pause_stops_api_and_destroys_window(monkeypatch):
     result = bridge.shutdown("pause")
 
     assert result["closed"] is True
+    assert bridge.finish_shutdown() == {"started": True}
+    assert not stopped.is_set()
     assert stopped.wait(2)
     assert bridge.server.should_exit is True
     assert bridge.allow_close is True
+
+
+def test_desktop_shutdown_requires_acknowledgement_before_finishing():
+    bridge = desktop.DesktopBridge()
+
+    assert bridge.shutdown("pause")["closed"] is True
+    assert bridge.finish_shutdown() == {"started": True}
+    assert bridge.finish_shutdown() == {"started": False}
+
+
+def test_desktop_shutdown_rejects_duplicate_close_choices():
+    bridge = desktop.DesktopBridge()
+
+    assert bridge.shutdown("pause")["closed"] is True
+    result = bridge.shutdown("continue")
+
+    assert result == {"closed": False, "message": "A close action is already in progress."}
 
 
 def test_desktop_close_callback_does_not_block_on_webview(monkeypatch):

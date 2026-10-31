@@ -8,6 +8,8 @@ worker, so closing the browser does not cancel an edition.
 
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import os
 import re
@@ -310,6 +312,7 @@ def render(request: Request, name: str, context: dict, status_code: int = 200) -
         "sections": SECTIONS,
         "section_labels": SECTION_LABELS,
         "role_rank": ROLE_RANK,
+        "desktop_control_token": getattr(request.app.state, "desktop_control_token", ""),
     }
     base.update(context)
     return HTMLResponse(template.render(**base), status_code=status_code)
@@ -620,6 +623,26 @@ def healthz() -> JSONResponse:
                 "database": str(db.bind.url).startswith("sqlite"),
             }
         )
+
+
+@app.post("/desktop/shutdown/{action}")
+async def desktop_shutdown(action: str, request: Request):
+    expected = getattr(request.app.state, "desktop_control_token", "")
+    bridge = getattr(request.app.state, "desktop_bridge", None)
+    if not expected or bridge is None:
+        raise HTTPException(404, "Desktop controls are unavailable.")
+    provided = request.headers.get("x-channel-press-token", "")
+    if not hmac.compare_digest(expected, provided):
+        raise HTTPException(403, "Desktop control token is invalid.")
+    client_host = request.client.host if request.client else ""
+    try:
+        if not ipaddress.ip_address(client_host).is_loopback:
+            raise HTTPException(403, "Desktop controls are available only locally.")
+    except ValueError as exc:
+        raise HTTPException(403, "Desktop controls are available only locally.") from exc
+    result = bridge.finish_shutdown() if action == "finish" else bridge.shutdown(action)
+    accepted = result.get("closed", result.get("started", False))
+    return JSONResponse(result, status_code=200 if accepted else 409)
 
 
 @app.get("/setup")

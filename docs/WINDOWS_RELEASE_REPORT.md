@@ -128,8 +128,8 @@ inference validation on hardware with adequate memory.
   AI Models, Branding, authorized Sources/import, Schedules and Build.
   Connection checks stay inside the app. The packaged WebView2 window and
   worker had no visible console; the desktop process used WebView2 as its
-  browser child. A successful graceful "Pause safely and exit" choice remains
-  unverified.
+  browser child. At this snapshot, a successful graceful "Pause safely and
+  exit" choice remained unverified; the later retest is recorded below.
 - Readiness regression check found that preflight compared Ollama's installed
   package size with the registry layer total; Ollama adds local metadata bytes.
   Changed the check to compare the exact pinned model digest and added a test
@@ -172,3 +172,35 @@ inference validation on hardware with adequate memory.
   owner-approved licensing choice or renderer replacement before
   closed-source redistribution. Do not describe this prototype as
   production-ready.
+
+## Final desktop shutdown and installer verification — 31 October 2026
+
+- Reproduced the close failure in the packaged app. On the FastAPI page,
+  `window.pywebview.api` had no exposed methods, so both close choices failed
+  before reaching Python. Replaced the newsroom page's bridge calls with a
+  loopback-only shutdown endpoint protected by a random per-process token;
+  shutdown now acknowledges the first request before scheduling the final
+  worker/model pause and window teardown.
+- Rebuilt the GUI app, worker and installer. Final sizes: app 19,345,744 bytes,
+  worker 18,303,773 bytes, installer 288,438,276 bytes. The installer silently
+  updated the isolated existing installation with exit code 0; executable
+  files were present afterward and the synthetic profile database SHA-256 was
+  unchanged.
+- **Installed-app smoke:** `/healthz` returned healthy with setup complete.
+  **Continue in background** hid the window while the API stayed available;
+  launching again restored the single existing window. **Pause safely and
+  exit** then terminated the desktop process, its WebView2 child and the local
+  API listener. The same flow also passed against `dist/ChannelPress` directly.
+  The existing synthetic edition/profile was used; no real Telegram content
+  or publication was changed.
+- **Focused checks:** 15 tests passed in `tests/test_desktop.py` and
+  `tests/test_web.py`; Ruff passed for changed Python files with the existing
+  unrelated `F841` ignored; `compileall` and `git diff --check` passed. No full
+  regression suite or clean-machine test was run.
+- **Release blockers remain:** PyMuPDF's declared AGPL-3.0-only distribution
+  license has not been resolved for closed-source redistribution. Clean-machine
+  WebView2 bootstrap, offline installation, bundled Ollama/model weights,
+  Enhanced inference on sufficient hardware, real Telegram credentials and
+  live publication remain unverified. The earlier synthetic PDF inspection
+  also found underfilled pages; successful PDF generation is not visual
+  composition certification.

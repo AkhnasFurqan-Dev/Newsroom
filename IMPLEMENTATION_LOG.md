@@ -1487,3 +1487,33 @@ closed-source redistribution blocker.
   review, Enhanced inference on suitable hardware, real Telegram access, full
   acceptance coverage, and underfilled-page composition. The PyMuPDF AGPL
   distribution blocker remains.
+
+## Windows final completion pass — 31 October 2026
+
+- A packaged run exposed that the page's pywebview JavaScript API was empty
+  after navigation to the FastAPI newsroom. Replaced the newsroom close
+  controls with a loopback-only endpoint authenticated by a random
+  per-process token. Split intent acknowledgement from final shutdown so the
+  response reaches the page before the worker/API/window teardown begins.
+  Reset the pending choice after **Continue in background** so a restored
+  instance can later pause and exit.
+- **Focused verification:** 15 tests passed in
+  `tests/test_desktop.py tests/test_web.py -q`; Ruff passed for changed Python
+  files with the pre-existing unrelated `F841` ignored; Python `compileall`
+  and `git diff --check` passed.
+- **Final artifacts:** `dist/ChannelPress/ChannelPress.exe` (19,345,744 bytes),
+  `dist/ChannelPress/ChannelPressWorker.exe` (18,303,773 bytes), and
+  `dist/installer/ChannelPressSetup.exe` (288,438,276 bytes). The final
+  Inno Setup 6.7.3 compilation completed successfully. A silent update of the
+  isolated installed application exited 0 and left the synthetic profile DB
+  hash unchanged.
+- **Installed-app smoke:** healthy `/healthz`; the close-choice buttons hid the
+  app while preserving the API, restored the existing single instance on
+  relaunch, and then paused/exited with no desktop process, WebView2 child, or
+  API listener remaining. Repeated against the direct `dist` build. Existing
+  synthetic data only; no real Telegram content was accessed or published.
+- **Still not release-certified:** PyMuPDF AGPL redistribution licensing,
+  clean-machine/WebView2-missing flow, offline Ollama/model setup, Enhanced
+  inference on capable hardware, real Telegram credentials, live publication,
+  full regression coverage, and the known underfilled-page composition issue
+  remain open.
