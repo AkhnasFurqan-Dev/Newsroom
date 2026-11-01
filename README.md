@@ -1,507 +1,184 @@
+<p align="center">
+  <a href="assets/brand/newsroom/newsroom-logo-horizontal.svg">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/brand/newsroom/newsroom-logo-reversed.svg">
+      <img src="assets/brand/newsroom/newsroom-logo-horizontal.svg" alt="Newsroom — The Folio Mark" width="300">
+    </picture>
+  </a>
+</p>
+
+<p align="center"><em>Many sources. One edition.</em></p>
+
 # Newsroom
 
-Newsroom turns an owner-authorized Telegram channel into a printable local
-newspaper and an offline e-paper edition. It runs on a single Windows laptop,
-keeps source evidence next to every sentence, and produces a real 11 × 17 inch
-tabloid PDF rather than a web page styled as a newspaper.
-
-Newsroom is the final product name for the application formerly distributed as
-Channel Press. The internal Python package, CLI command, legacy data paths and
-database identifiers remain unchanged for upgrade compatibility.
-The Folio Mark identifies the application only; each publisher's newspaper
-masthead, print theme and existing editions remain theirs and are not replaced.
-
-The repository ships with a complete, credential-free demonstration built from
-synthetic fixtures. Nothing in the demo pretends to be live Telegram reporting.
-
-![Dashboard](docs/images/dashboard.png)
-
-## What is implemented
-
-- **Authorized intake.** Owner import of Telegram Desktop JSON or the owner-format
-  export, albums, edits, replies, deletions and rights withdrawal. A live MTProto
-  user-session adapter performs the local login, resolves `@handle` to a stable
-  channel id, and collects an exact cutoff window with checkpointed resume. Live
-  login and retrieval still need the owner's Telegram API values and consent; see
-  [Live Telegram setup](#live-telegram-setup-owner-only) and
-  [Limitations](#limitations).
-- **Moderation and source languages.** Every post is classified before drafting:
-  greetings, emoji, promotions, link-only reposts and number-only posts are
-  excluded with a persisted reason, while short casualty, correction and emergency
-  alerts are retained. English, Urdu script, Roman Urdu and mixed Urdu/English are
-  detected separately. Profanity is detected in plain and obfuscated forms, but a
-  report that quotes abuse is not discarded; threats and targeted abuse are routed
-  to review. An editor decision survives re-imports and classifier upgrades. Before
-  clustering, the pipeline reclassifies stored posts written by an older ruleset and
-  creates missing fragments for newly includable posts; `classify-posts` exposes the
-  same backfill on the command line.
-- **Institutional attribution.** The publication is identified as the source, never
-  as an individual reporter or eyewitness. The byline and source disclosure are
-  configurable, and the attribution scan flags invented scene reporting, staff
-  correspondents and fabricated journalist identities before release.
-- **Media lifecycle.** Relevant, rights-cleared source media is downloaded in a
-  bounded pre-layout stage with retry and size limits. Layout and PDF rendering use
-  local files only and never call Telegram. Downloads stay for drafts, review,
-  failed or interrupted editions and are removed only after a verified publication;
-  provenance, checksums, rights links and source records are retained.
-- **Story memory.** Post splitting, duplicate clustering, reply linking,
-  correction reconciliation, a claim ledger with chronology and a separate
-  deterministic evidence audit.
-- **Editorial drafting.** Version-controlled prompt templates, a deterministic
-  fixture composer for reproducible tests, and a local Ollama provider using
-  reviewed Qwen3.5 profiles. Every draft is audited against the claim ledger
-  before it can be released.
-- **Story research.** Optional automatic discovery through a configured Google
-  Programmable Search or Brave Search API, a keyless publisher-RSS fallback and
-  an explicitly selectable GDELT DOC 2.0 adapter. Queries come only from facts in
-  the story; pages are fetched through the existing SSRF/robots/size limits and
-  stay candidates until an editor accepts them. Accepted context is attributed to
-  its outlet and never presented as automatic verification.
-- **Media and graphics.** Source-linked photos, reversible derivatives,
-  OpenCV video frames, collages with credits, sourced charts, chronological
-  timelines and locator maps from bundled Natural Earth data.
-- **Print engine.** Paged.js pagination rendered through installed Chrome, a
-  distinct tabloid front page, 3–4 column interiors, continuation labels, one
-  compact verified source code per story, embedded fonts, measured per-page fill
-  and automated overflow/blank-page/orphan-head checks. Full evidence stays in
-  the manifest, database and digital `sources/<id>/` bundles.
-- **Per-newspaper appearance.** Each paper carries an immutable, revisioned print
-  identity: nine palette colours with HEX controls and presets, seven type roles,
-  print metrics, contrast/ink warnings and real specimen proofs. Fonts come from
-  installed families or validated `.ttf`/`.otf`/`.ttc` imports kept in a managed
-  library. A released edition pins the exact theme and bundled font files it was
-  printed with, and the e-paper uses the same palette and typography.
-- **Newsroom UI.** Source desk, rights declarations, stories, article editing and
-  review, edition page studio, schedules, jobs, branding, appearance, users, audit
-  and diagnostics.
-- **Single-window Windows shell (preview).** A pywebview/WebView2 window contains
-  the FastAPI newsroom, model setup, diagnostics, article/edition views and worker
-  progress. Managed workers are no-console child processes with private logs;
-  **Continue in background** hides the window without stopping the local service,
-  while **Pause safely and exit** waits for safe checkpoints. The candidate now
-  bundles the Playwright-pinned Chromium, Paged.js, and print/e-paper templates.
-  The per-user online installer passed isolated install/update/uninstall checks
-  on the development machine; no clean-machine release is certified.
-- **Multiple newspapers on one computer.** Each publication keeps its own
-  branding, source list, schedules, drafts, editions, archive and editor
-  membership. The header selector switches the working newspaper; the server
-  enforces access on every page and edition download.
-- **Multiple authorized sources per newspaper.** Priority and weighting decide
-  which report leads a shared story; each edition can include every enabled
-  source or one channel only. Duplicate reports are folded into one attributed
-  story, and a per-source collection failure leaves a clearly marked partial
-  edition rather than silently dropping that source.
-- **Scheduling and publication.** Deterministic job keys, exact
-  `[previous cutoff, current cutoff)` windows, watermark catch-up, leases and a
-  single-worker file lock, atomic release, manifest and checksums, immutable
-  numbered versions and a fully offline e-paper bundle.
-- **Pinned local AI.** The **AI Models** page offers Standard
-  `qwen3.5:4b-q4_K_M` (3,324,173,757 bytes), Enhanced
-  `qwen3.5:9b-q4_K_M` (6,550,825,373 bytes) and optional Compact `qwen3.5:2b`
-  (2,683,396,637 bytes). Registry manifest, layer and Apache-2.0 license hashes
-  are checked before an in-window download. New selections require a synthetic
-  local smoke test before real-channel drafting. Standard and Compact passed
-  their synthetic local smoke tests; Standard also passed a live editorial draft
-  and evidence-audit path. Enhanced was downloaded and digest-verified but was
-  not loaded because this laptop has 6 GB VRAM and insufficient free RAM at the
-  time of the check. These are local observations, not a 9B quality or
-  performance claim.
-
-![Edition detail](docs/images/edition-detail.png)
-
-## Requirements
-
-- Windows 10/11, 64-bit. The packaged application includes its Python runtime
-  and the Playwright-pinned Chromium renderer. WebView2 Runtime is required; the
-  online installer attempts to install it if missing.
-- No developer Python, Chrome, cloud account or paid API is required to launch
-  the packaged fixture/import workflow.
-- Non-fixture local AI currently requires an installed, reachable Ollama runtime.
-  The installer does not bundle Ollama or model weights; AI readiness remains
-  incomplete until an exact pinned model passes the in-app smoke test.
-- No FFmpeg is required; OpenCV supplies video frame extraction.
-
-## Install
-
-```powershell
-git clone <repository> E:\newsroom
-cd E:\newsroom
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
-```
-
-The script creates `.venv`, installs pinned application/test/desktop/build
-dependencies, copies `.env.example` to `.env` if needed, checks renderer
-prerequisites and initialises the SQLite database. This is a developer
-source-checkout setup. To build a packaged candidate and online installer, use
-`scripts\build-windows.ps1` followed by `scripts\build-installer.ps1`; neither
-command certifies a clean Windows installation or supplies the Ollama runtime
-and model weights.
-
-## Five-minute demo
-
-```powershell
-# 1. Import the synthetic fixtures and build a complete edition.
-.\.venv\Scripts\python.exe -m channel_press.cli demo --posts sample --reset
-
-# 2. Open the single-window desktop preview.
-.\.venv\Scripts\python.exe -m channel_press.desktop
-```
-
-The app opens its own Newsroom window and selects an ephemeral loopback
-port. It does not spawn a browser, worker console or Ollama console; a developer
-terminal used to start this source preview remains visible. A packaged GUI
-executable is required for a console-free end-user launch. If no owner exists
-yet, `demo` creates one and prints a generated password once. Use `set-password`
-to choose a new one:
-
-```powershell
-.\.venv\Scripts\python.exe -m channel_press.cli set-password --username owner
-```
-
-The build writes a real edition to:
-
-```text
-output\the-channel-dispatch\2026-10-21-manual-001-v1\
-  sample_issue.pdf      5-page, 11 × 17 in, searchable PDF
-  print.html            print composition
-  edition.html          same composition for browser review
-  pages\page-01..05.png page proofs
-  epaper\index.html     offline e-paper viewer
-  epaper\text.html      text edition with per-article source links
-  epaper\sources\       static per-story evidence pages
-  manifest.json         version, page geometry, hashes and provenance
-  checksums.json        SHA-256 for the bundle files
-```
-
-![Front page](docs/images/front-page.png)
-
-Open `epaper\index.html` directly from disk to confirm the offline bundle works
-without the server. The in-app viewer lives at `/editions/1/epaper/`.
-
-## Live Telegram setup (owner only)
-
-The application never asks for credentials in chat and never stores a login code
-or two-step password. `.env` is untracked and already contains empty
-placeholders; only the owner fills it in.
-
-1. Register a Telegram application at <https://my.telegram.org> and edit `.env`:
-
-   ```text
-   CHANNEL_PRESS_TELEGRAM_API_ID=<your numeric app id>
-   CHANNEL_PRESS_TELEGRAM_API_HASH=<your app hash>
-   CHANNEL_PRESS_TELEGRAM_SESSION_PATH=./data/telegram.session
-   ```
-
-2. Install the optional adapter and restart the server:
-
-   ```powershell
-   .\.venv\Scripts\python.exe -m pip install -e ".[telegram]"
-   .\.venv\Scripts\python.exe -m channel_press.cli serve
-   ```
-
-3. In **Sources**, register the channel and record a rights declaration covering
-   **Ingest**, **AI processing** and **Publication** for the scopes you actually
-   hold. API access alone is not permission to republish.
-4. Open the channel's **Telegram connection** page. Save the `@handle`, select
-   **Test source connection**, then request a login code with the account that may
-   read the channel. Enter the code and any two-step password only in that local
-   form.
-5. Use **Import last 30 days (context only)** for story memory. It is labelled
-   `context` and never enters the next daily edition.
-6. Create a daily schedule, then check the **Effective window** card: start is
-   inclusive, end is exclusive. A post at exactly the cutoff belongs to the next
-   issue. Use **Sync window** to store the posts without building.
-7. Build from **Build** with **Collect this window from Telegram before building**
-   ticked, or let the Windows task do it at the cutoff.
-
-`diagnostics` and the **Diagnostics** page report configured / missing /
-session-present states without printing any secret value.
-
-## Everyday commands
-
-| Task | Command |
-| --- | --- |
-| Initialise or migrate the database | `python -m channel_press.cli init-db` |
-| Create the first owner | `python -m channel_press.cli setup --demo-channel` |
-| Build a demo edition | `python -m channel_press.cli demo --posts sample --reset` |
-| Capacity fixtures | `python -m channel_press.cli demo --posts 30` (also `70`, `150`) |
-| Import an authorized export | `python -m channel_press.cli import --channel <slug> --file <export.json> --media-root <folder>` |
-| Build the latest window now | `python -m channel_press.cli run-now --channel <slug>` |
-| Run one worker pass | `python -m channel_press.cli worker --once` |
-| Inspect media cache (no deletion) | `python -m channel_press.cli media-cache --dry-run` |
-| Clear unused media cache | `python -m channel_press.cli media-cache --clear-unused --confirm` |
-| Retry cleanup for one published edition | `python -m channel_press.cli media-cache --finalize-edition <id>` |
-| Start the UI | `python -m channel_press.cli serve` |
-| Check an edition | `python -m channel_press.cli check-edition --edition-id 1` |
-| Back up | `python -m channel_press.cli backup` |
-| Restore (app stopped) | `python -m channel_press.cli restore --archive <zip>` |
-| Environment report | `python -m channel_press.cli diagnostics` |
-| Health (configured vs tested) | `python -m channel_press.operations health` |
-| Start the complete local desk | `powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1` |
-| Graceful stop | `powershell -ExecutionPolicy Bypass -File .\scripts\stop-services.ps1` |
-| Controlled restart | `powershell -ExecutionPolicy Bypass -File .\scripts\restart-services.ps1` |
-
-All Python commands use `.\.venv\Scripts\python.exe` on Windows.
-
-### Media cache and source retention
-
-`data/media` holds downloaded source files and generated derivatives. The
-**Media cache** page and `media-cache` command remove local files only; source
-posts, media rows, captions, credits, checksums, rights links and audit events
-remain. Both default to a dry run and require explicit confirmation before
-deletion.
-
-Protected files are never removed: anything used by a draft, awaiting-review,
-failed or running edition; media under an editor lock; media referenced by an
-active job; files inside the configured `media_retention_hours` window; and the
-working media of a published edition whose PDF or e-paper bundle is incomplete.
-After a verified publication, the edition's downloaded working media is removed
-automatically. A cleanup failure is recorded as `pending` and can be retried with
-`media-cache --finalize-edition <id>`; it never reverses a successful release.
-Owner-supplied imported files are treated as a source library and are only
-removed by an explicit cache command.
-
-Two helper scripts cover the automation path:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install-task.ps1   # worker every 15 min
-powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-task.ps1
-```
-
-The task calls `run-worker.ps1`, which performs one short-lived worker pass and
-exits. No model or server process stays resident while the desk is idle.
-
-For normal interactive use, run `scripts\start.ps1`. It validates the
-configuration and database, stops an old managed instance, starts the web
-service detached, launches one background worker pass to recover queued or
-stale jobs, waits for the login page to answer, and opens the local URL in
-Google Chrome. Use `scripts\stop-services.ps1` when finished; it requests a
-cooperative stop and waits for the web service or in-flight worker operation
-to release its resources. The startup worker is intentionally one-shot: local
-models are not kept loaded while the desk is idle.
-
-`stop-services.ps1` requests a graceful stop and waits; it never kills unrelated
-processes. `restart-services.ps1` validates configuration and the database, stops
-what is managed, resumes, checks the local model, starts the web app detached and
-polls it until it answers. `service-health.ps1 -Validate -Probe` adds a bounded,
-read-only Telegram check. See `docs/CONCURRENCY_RECOVERY_REPORT.md` for verified
-results and `TROUBLESHOOTING.md` for failures.
-
-### Concurrency and live safety
-
-- One SQLite writer, short transactions. Network, model, media and PDF work never
-  run inside an open write transaction; a transient `database is locked` is
-  retried with backoff and then reported as a friendly `503`, never a raw `500`.
-- One Telegram session owner. The web app and the worker share a serialised
-  gateway with a cross-process lease on the `.session` file; rendering a page never
-  contacts Telegram.
-- One collector per channel/window. An edition that finds its window already being
-  collected waits (`waiting_for_collector`) instead of failing or duplicating it.
-- Queue Build performs a bounded, read-only Telegram preflight when live collection
-  is requested and refuses to queue a job with a concrete reason if it fails.
-  Fixture and manual-import builds need no Telegram connection.
-
-## How it works
-
-```text
-authorized export / fixture
-        |
-   ingestion  ->  normalization, exclusion reasons, versions, media
-        |
-   story      ->  fragments, clusters, claims, corrections, timeline
-        |
-   editorial  ->  ranking, review gates, article state
-        |
-   ai         ->  fixture or Ollama draft -> independent evidence audit
-        |
-   media/graphics -> photos, frames, charts, timelines, maps
-        |
-   layout     ->  plan pages -> Paged.js + Chrome -> PDF -> geometry QA
-        |
-   publishing ->  atomic folder + manifest + checksums + e-paper bundle
-        |
-   scheduling ->  deterministic jobs, watermark, lease, release policy
-```
-
-Key modules live under `channel_press/`:
-
-| Package | Responsibility |
-| --- | --- |
-| `ingestion` | Export formats, normalization, exclusion, media, MTProto adapter |
-| `telegram` | Local user-session login, handle resolution, windowed history fetch |
-| `collection` | Exact cutoff windows, durable staging, checkpoints, watermark |
-| `editorial` | Story clustering, claims, correction, review rules |
-| `ai` | Prompt templates, fixture/Ollama providers, audit, style lint |
-| `media` | Asset cache, ranking, derivatives, frame extraction |
-| `graphics` | Charts, timelines, cartography |
-| `layout` | Edition plan, chunking, print HTML, PDF rendering, theme proof, QA |
-| `publishing` | Atomic release, manifest, checksums, e-paper |
-| `scheduling` | Jobs, watermarks, leases, worker |
-| `web` | FastAPI routes, Jinja templates, session/CSRF/role checks |
-
-Theming lives in `channel_press/theming.py` and the managed font library in
-`channel_press/fonts.py`.
-
-Data stays under `data/` (SQLite database, media originals and derivatives,
-imported fonts, theme proofs, secret key, logs) and `output/` (published
-editions). Both are gitignored.
-
-## Print identity and themes
-
-Each newspaper owns its print design rather than sharing a global stylesheet.
-The **Appearance** screen edits nine palette colours (masthead, accent, body ink,
-paper, rules and so on), seven type roles (masthead, headline, section,
-standfirst, body, caption, numbers) and bounded print metrics such as body size
-and leading.
-
-- Colours are entered as HEX values or loaded from a named preset. The screen
-  reports low-contrast text and paper/ink combinations that would waste ink or
-  become unreadable in print.
-- Fonts are chosen from families actually installed on the machine, or imported
-  as `.ttf`, `.otf` or `.ttc` after file validation and a licence confirmation.
-  The app reports missing weights/styles and glyph coverage instead of faking
-  bold or silently substituting a face.
-- Saving creates a new immutable **theme revision**. A draft uses the current
-  revision; a released edition pins the exact revision, palette, font files and
-  metrics it rendered with. Editing the theme afterwards never rewrites an
-  archived issue.
-- **Render specimen proof** produces a real tabloid PNG from the same
-  `print.css` and compiled theme CSS used by the PDF, so the preview is not a
-  browser approximation. Proofs are cached by theme hash and regenerated when
-  the theme changes.
-- The PDF, page PNGs, e-paper, charts, maps, captions and QR labels all consume
-  the same palette and font stacks. QR modules remain black on white for scan
-  reliability.
-
-## Publication truthfulness
-
-- The demonstrated edition is labelled **synthetic fixture edition — not for
-  publication** on its front page and in its manifest.
-- Reader-facing pages carry no provenance appendix, message IDs, claim counters
-  or software-facing footer. The evidence remains in the database, manifest and
-  e-paper source bundles.
-- A compact story code is printed only when a verified public evidence page or a
-  real public Telegram message URL exists. Otherwise the editor sees an
-  actionable source-code warning and no broken placeholder is printed.
-- `public_base_url` is empty by default, so no localhost or placeholder QR is
-  emitted.
-
-## Security and privacy
-
-- Argon2id password hashing, server-side sessions, CSRF tokens on every mutating
-  form, role checks on every route, login throttling and audit logging.
-- Secrets live in `data/secret.key` or environment variables; they are never
-  rendered into HTML, PDFs, manifests or logs.
-- Imported JSON, captions and model output are treated as untrusted data.
-  Prompt-injection sentences are detected and neutralised as evidence, not
-  followed.
-- External URL validation blocks loopback, link-local and private-network
-  targets. Source data is not sent to any online service by default.
-
-## Measured performance on the build machine
-
-12th-gen Intel i7, 16 GB RAM, RTX 3060 Laptop GPU (**6144 MiB**), Windows 11,
-Chrome installed, Ollama 0.40.9. The Qwen2.5 3B result below is historical; no
-Qwen3.5 weights or inference are represented by these measurements.
-
-| Scenario | Result |
-| --- | --- |
-| Idle web server | ~62 MB working set, 0 CPU seconds over a 10 s sample, 13 threads |
-| sample fixture (26 messages), fixture composer | 6.4 s, 15 stories/articles, 5 pages |
-| 30-post fixture build | 9.6 s cold CLI run, 17 stories/articles, 7 pages |
-| 70-post fixture build | 10.8 s cold CLI run, 27 stories/articles, 8 pages |
-| 150-post fixture build | 12.1 s cold CLI run (9.7 s inside the pipeline), 28 stories/articles, 9 pages, ~870 MB peak process group including Chrome |
-| Historical 30-post real Ollama build (`qwen2.5:3b-instruct`) | 57–62 s, 17 stories, 17 articles, 8 pages, no fixture fallback, peak VRAM 2213 MiB |
-| PDF page size | exactly 792 × 1224 pt (11 × 17 in) on every page |
-| GPU | unused for fixture composition and layout; used only while drafting |
-
-The fixture rows were re-measured on 2026-10-27 with a cold data directory, so
-they include database creation, fixture import, composition, Chrome rendering
-and publication. Page counts depend on the copy: the capacity fixtures repeat a
-small number of topics, so their pages end shorter than the sample edition's.
-Their manifests report underfull pages as diagnostics and no proof warnings.
-
-These are measurements, not throughput promises. The 30-post real-model run is
-the only real-model capacity result; its page count predates the current page
-packing. 70- and 150-post real-model runs were not performed. Run `diagnostics`
-and one real build before relying on a tight cutoff-to-release window.
-
-## Tests
-
-```powershell
-# Fast unit/integration suite
-.\.venv\Scripts\python.exe -m pytest -m "not slow" -q
-
-# Full suite, including real PDF renders for sample/30/70/150 fixtures
-.\.venv\Scripts\python.exe -m pytest -q
-
-# Lint (dev extra)
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m ruff check .
-```
-
-Last recorded pre-migration baseline: **299 passed, 0 failed** in 280.92 s.
-That is not a result for the Qwen3.5/desktop changes in this branch; focused
-results are recorded in [the Windows release report](docs/WINDOWS_RELEASE_REPORT.md).
-The full suite has not been rerun for this migration. The earlier suite renders actual
-PDFs, checks exact page geometry, verifies searchable text, inspects every page
-proof for blank/overflow defects and confirms the e-paper bundle and checksums.
-The moderation/media regression file covers meaningless-post exclusion, English,
-Urdu script, Roman Urdu and mixed-language alerts, obfuscated profanity, threats,
-institutional attribution, legacy stored-post backfill before clustering,
-rights-gated bounded downloads, local-only rendering, cache protection/path
-traversal, post-publication cleanup and the protected web and CLI controls.
-Collection tests cover window boundaries, pagination resume, duplicate windows,
-context backfill and watermark commits.
-
-```powershell
-# Real local model proof (needs Ollama running with the configured model)
-.\.venv\Scripts\python.exe -m pytest -m live tests\test_ollama_live.py -q
-
-# Live Telegram proof (needs .env values, a completed login and rights)
-.\.venv\Scripts\python.exe -m pytest -m live tests\test_telegram_live.py -q
-```
-
-## Limitations
-
-- **Live Telegram was not verified in this pass.** The fixture and owner-import
-  paths are covered by automated tests. Login, handle resolution, windowed
-  collection and resume are implemented, but the real target channel
-  (`The Pakistan News`) still requires the owner's Telegram login, content rights
-  and a supervised run. No claim in this README treats a fixture result as live
-  evidence.
-- **Real-model coverage is 30 posts only.** A 70- or 150-post real-model build was
-  not run. The deterministic fixture composer remains the fallback and is always
-  labelled as such.
-- **The real-model audit is strict.** In the 30-post proof, 14 of 17 articles were
-  held as **Needs review** because the model introduced contextual proper nouns
-  (for example a country the source did not name). That is the intended gate, not
-  a silent pass; an editor must clear the flags before release.
-- **No public hosting.** E-paper bundles are local folders; the app does not
-  promise a public landing page. QR output is disabled unless a reachable public
-  URL is configured.
-- The demo uses synthetic names, places and figures. They exist to exercise the
-  pipeline and must not be quoted as news.
-- Maps are locator graphics from public-domain Natural Earth layers, not
-  survey-grade or operational products. See `docs/CARTOGRAPHY.md`.
-
-## Documentation
-
-- [User manual](USER_MANUAL.md) — day-to-day editor procedures.
-- [Admin guide](ADMIN_GUIDE.md) — users, rights, secrets, models, schedules,
-  backup and security.
-- [Troubleshooting](TROUBLESHOOTING.md) — recovery procedures.
-- [Implementation log](IMPLEMENTATION_LOG.md) — milestone history and test results.
-- [QA report](docs/QA_REPORT.md) — acceptance evidence, page inspection and
-  measured limits.
-- [Post-M14 readiness report](docs/POST_M14_READINESS_REPORT.md) — separate
-  `fixture`, `local AI`, `Telegram live` and `scheduled publication` statuses.
-- [Cartography](docs/CARTOGRAPHY.md) and [decision records](docs/decisions/).
-
-## Licence and source rights
-
-The application code is provided for the owner's use. Bundled Natural Earth data
-is public domain; fonts come from the Windows installation and are embedded for
-print. Telegram content is processed only with a recorded rights declaration.
-The software does not grant republication rights and must not be used to bypass
-Telegram's terms or a channel owner's consent.
+Newsroom is a local-first Windows newsroom and newspaper publishing application. It brings authorized source material, editorial review, page design and printable editions into one desktop workspace, so a publisher can take a story from a source post to a finished paper without assembling a chain of separate tools.
+
+The database, source media, drafts and published editions stay on the computer. The finished issue leaves as an 11 × 17 inch tabloid PDF and an offline e-paper bundle that opens in a browser.
+
+**Windows 10 or Windows 11, 64-bit · Newsroom 1.0**
+
+![Newsroom dashboard showing a synthetic newspaper, source and article totals, recent editions and open review items](docs/images/readme/newsroom-dashboard-annotated.png)
+
+*The dashboard for a synthetic demonstration newspaper. The same screen shows production totals, the current review queue and the latest edition.*
+
+1. Choose the newspaper you are working on. Sources, drafts and editions follow this selector.
+2. Start a new edition, or open **Sources** to add material.
+3. See how many items are waiting for an editor.
+4. A released issue shows its status, page count and PDF link.
+
+## What Newsroom does
+
+**One desk, several newspapers.** Each newspaper on the computer keeps its own name, masthead, source list, schedules, drafts, archive and editor access. The selector in the header switches the working paper without mixing one publication's material into another.
+
+**From an authorized source to a supported story.** Newsroom imports rights-cleared Telegram Desktop JSON or an owner-format export. It separates greetings, promotions and link-only posts from reportable material, then groups duplicate reports, albums, replies and corrections into one story. Every draft is tied to a claim ledger, a chronology and the source posts behind it, so an editor can see what a sentence is based on.
+
+**Drafting with a local model, when you choose to use one.** The **AI Models** page manages the optional local Qwen3.5 models that run through Ollama on the same computer. Drafts are checked against the story's claims before they can move forward, and the editor remains responsible for the published text. Newsroom does not send source text to a hosted AI service.
+
+**A newspaper, not a web page styled as one.** The build produces a real tabloid PDF with a front page, multi-column interiors, continuation lines, source codes, embedded fonts and measured page fill. Alongside the PDF, Newsroom writes an offline e-paper bundle with the same pages and a searchable text edition.
+
+**A different look for every paper.** **Appearance** gives each newspaper its own palette, type roles, print metrics and specimen proofs. A released edition pins the exact theme and font files it was printed with, so later design changes do not alter an archived issue.
+
+**Work that keeps its place.** Builds run as local jobs with a visible stage, progress and retry history. Editions are numbered and versioned; a published issue is frozen, while a new working draft can be opened from it. **Schedules** record recurring windows and can be run on demand. Unattended runs need a Windows task or worker that you configure; the installer does not create one.
+
+## An illustrated tour
+
+The screens below come from Newsroom's synthetic demonstration profile. No live channel, personal account or unpublished news is shown.
+
+### Start with an authorized source
+
+![Source desk with a synthetic Telegram source, active rights status and a channel registration form](docs/images/readme/newsroom-sources-annotated.png)
+
+*Source desk. The source list, its rights declaration and the registration form sit on one page.*
+
+1. The boundary notice explains why public read access is not the same as permission to republish.
+2. Every source carries a mode, a rights status and the person or organization that granted permission.
+3. Record the grantor, authority basis and evidence reference before importing live content.
+4. Open the stories produced by this source.
+
+### Turn posts into stories
+
+![Stories list showing a correction, section, risk rating and editorial status for synthetic reports](docs/images/readme/newsroom-stories-annotated.png)
+
+*Stories. Reports are grouped, classified and rated before anyone writes a headline.*
+
+1. Filter the desk by source and section.
+2. Corrections stay attached to the story they change, instead of replacing the record.
+3. Risk, importance and draft status are visible before an editor opens the story.
+
+### Choose a local drafting model
+
+![AI Models page showing local runtime status, the current model and three Qwen3.5 model options](docs/images/readme/newsroom-ai-models-annotated.png)
+
+*AI Models. Local drafting is optional; the page reports the state of the model runtime honestly.*
+
+1. If Ollama is not reachable, Newsroom says so instead of falling back to a remote service.
+2. The current model selection is shown with its status.
+3. Standard, Enhanced and Compact profiles cover different hardware and quality needs.
+4. Model transfers and readiness are reported before a draft can use them.
+
+### Review the article, not just the text
+
+![Article editor with a held publication notice, editable draft fields and an evidence audit panel](docs/images/readme/newsroom-article-annotated.png)
+
+*Article review. A held article names the blocking item and keeps the evidence beside the draft.*
+
+1. A held article explains what must be resolved before it can be approved.
+2. Headline, deck, standfirst and body are edited in place, with revision history behind them.
+3. The audit panel reports citation coverage, supported claims and independent quality checks.
+4. **Story evidence** opens the claim ledger, chronology and source posts behind the draft.
+
+### Give each newspaper its own look
+
+![Appearance page with print checks, palette presets, colour fields and revision naming](docs/images/readme/newsroom-appearance-annotated.png)
+
+*Appearance. Print checks, palette presets and exact colour values belong to one newspaper.*
+
+1. Print checks flag missing glyph coverage before a page is built.
+2. A preset creates a new theme revision without changing an issue already in the archive.
+3. Colours are entered as exact HEX values, with contrast and ink warnings.
+4. Each revision is named and its change recorded, so the print identity has a history.
+
+### Set the edition window and queue the build
+
+![Build page with a source selector, cutoff window, edition name and build queue](docs/images/readme/newsroom-build-annotated.png)
+
+*Build. The window, the source and the edition name are set before the job enters the queue.*
+
+1. Choose the source channel for this edition.
+2. Set the exact start, end and cutoff. A later post is never treated as fresh content inside an earlier window.
+3. Name the edition; the name appears on the masthead and in the archive.
+4. Queue the build. The job continues in the local worker while the window is open.
+5. High-risk or unsupported material is held for an editor instead of being released automatically.
+
+### Read the edition before release
+
+![Edition workspace with a frozen published version, article list, review controls and a newspaper page preview](docs/images/readme/newsroom-edition-annotated.png)
+
+*Edition workspace. The release state, article list, review controls and print preview share one screen.*
+
+1. A published version is frozen, with its manifest and checksums fixed.
+2. Select an article to review; held items are marked in the list.
+3. The preview uses the real page layout, not a mock-up.
+4. Open the offline e-paper or the published PDF from the same toolbar.
+
+### Publish a paper people can read offline
+
+![E-paper viewer showing the synthetic front page, page navigation and print link](docs/images/readme/newsroom-epaper-annotated.png)
+
+*E-paper. The released issue opens as a complete offline edition, page by page.*
+
+1. The e-paper marks synthetic demonstration content clearly.
+2. Page navigation and actual-size view work without a network connection.
+3. The front page is the same layout used for the PDF.
+4. **Print PDF** opens the print-ready issue.
+
+## A short workflow
+
+1. Create the owner account and name the first newspaper.
+2. Open **Sources**, add a channel you are authorized to use, and record its rights declaration.
+3. Import a rights-cleared export, then review the grouped reports under **Stories**.
+4. If you use local AI, install a model on **AI Models** and draft from a story.
+5. Resolve held items under **Articles**; edit the text and check the evidence panel.
+6. Set the paper's palette and type on **Appearance**, then choose the window on **Build**.
+7. Preview the PDF and e-paper under **Editions**, release the issue, and keep the published version as the archive record.
+
+## Installation and first use
+
+Newsroom runs on Windows 10 or Windows 11, 64-bit. The supplied distribution includes `NewsroomSetup.exe` under `dist\installer`. The installer is per-user and normally needs no administrator account. It installs the application under `%LOCALAPPDATA%\Programs\Newsroom` and can add a desktop shortcut.
+
+Microsoft Edge WebView2 Runtime is required. If it is missing, the installer runs Microsoft's signed bootstrapper, which needs an internet connection. Allow about 1 GB for the application, plus space for editions, media and any local models.
+
+On first run:
+
+1. Create the owner account and keep the password safe. There is no email-based password reset.
+2. Name the newspaper and set its masthead and publication details.
+3. Add an authorized source under **Sources** and record the rights declaration.
+4. Import a rights-cleared export, or use the synthetic demonstration channel to practise the workflow.
+5. Build a first edition, read the preview, then release it when the content is ready.
+
+Local AI is a separate installation. Newsroom does not bundle Ollama or model weights. Install Ollama on the same PC if you want local drafting, then use **AI Models** to download and prepare a supported Qwen3.5 model. The import, editing, PDF and e-paper workflow does not need a model.
+
+The full instructions are in the product documentation:
+
+- [Quick Start](docs/user/01-QUICK-START.md) — install, first run and a first edition.
+- [User Manual](docs/user/02-USER-MANUAL.md) — every screen and control.
+- [Editorial & Publishing Guide](docs/user/03-EDITORIAL-AND-PUBLISHING-GUIDE.md) — review, release and corrections.
+- [Installation & Maintenance](docs/user/04-INSTALLATION-AND-MAINTENANCE.md) — updates, backup and recovery.
+- [Troubleshooting & FAQ](docs/user/05-TROUBLESHOOTING-AND-FAQ.md) — symptoms and safe steps.
+- [Documentation index](docs/user/00-DOCUMENTATION-INDEX.md) — the complete manual set, including PDFs.
+
+## Privacy, data and product scope
+
+Newsroom is designed around a local desk. The installed application keeps its database, media cache, drafts and editions under `%LOCALAPPDATA%\ChannelPress`, with published editions in the `output` folder inside it. Editing, previewing and reading an existing edition work without a network connection.
+
+A connection is used when you choose a feature that needs one: Telegram sign-in or collection when Telegram API credentials are configured, external story research when you enable a provider, the WebView2 bootstrap during installation, or a model download from the Ollama registry. Local drafting uses Ollama on the same computer; it does not send source text to a hosted AI service.
+
+Source rights and editorial judgement remain with the publisher. Permission to read a channel is not permission to republish it, and every live source should have a recorded rights declaration. Newsroom helps keep the evidence and review record, but it does not decide whether a story is safe or lawful to publish.
+
+The Newsroom name and Folio Mark identify the software. They do not replace a customer newspaper's masthead, and they are not inserted into the newspaper's own pages.
+
+## Documentation and rights
+
+Start with the [documentation index](docs/user/00-DOCUMENTATION-INDEX.md) or the [Quick Start](docs/user/01-QUICK-START.md).
+
+Newsroom is proprietary software. All rights reserved. No permission to redistribute, modify, publish, or create derivative works is granted. See [LICENSE](LICENSE). Third-party components remain under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -1,0 +1,89 @@
+# NEWSROOM — PROPRIETARY SOFTWARE
+
+## ALL RIGHTS RESERVED
+
+**Copyright (c) 2026 [COPYRIGHT HOLDER — CONFIRM]**
+
+This notice governs the original Newsroom software and original Newsroom materials. It is not an open-source license. It does not grant the public any right to use, copy, modify, redistribute, publish or build upon Newsroom.
+
+## 1. Ownership
+
+The copyright holder owns all right, title and interest in and to the original Newsroom software and materials, including:
+
+- the original source code, object code, compiled programs, installer and build scripts;
+- the user interface, screen designs, layouts, templates and original visual elements;
+- the Newsroom name, the Folio Mark and other original brand assets;
+- the original documentation, text, illustrations, screenshots and example content; and
+- all original works derived from, or incorporated into, the above.
+
+These materials are protected by copyright and other applicable laws. This notice does not transfer ownership of any of them.
+
+## 2. Limited license for lawful recipients
+
+If you lawfully obtained a copy of Newsroom from the copyright holder or an authorized distributor, you may install and run that copy, and make the technical copies that are necessarily incidental to installation, execution, ordinary backup and recovery, for the internal editorial purposes of the person or organization that obtained it.
+
+That license is limited, personal to that person or organization, non-exclusive, non-transferable and revocable. It does not permit you to give, share, publish or distribute Newsroom or any copy of it to any other person or organization. It does not permit any use beyond this notice or any separate written agreement.
+
+No other permission is granted, whether by implication, estoppel or otherwise.
+
+## 3. Prohibited uses
+
+Except as expressly permitted by Section 2, with the copyright holder's prior written permission, or where a non-waivable legal exception applies, you may not:
+
+- copy, reproduce, record, screenshot, scan, scrape, extract or otherwise capture the original Newsroom software, interface, artwork, brand assets, documentation or other original materials;
+- publish, post, upload, download, mirror, frame, link to an unauthorized copy, distribute, share, syndicate or otherwise make Newsroom available to any other person;
+- sell, resell, rent, lease, lend, license, sublicense, assign or transfer Newsroom or any right in it;
+- modify, adapt, translate, port, arrange, alter or create derivative works from Newsroom or any original Newsroom material;
+- reverse engineer, decompile, disassemble or otherwise attempt to derive the source code, except to the extent a non-waivable legal right expressly permits it;
+- remove, obscure or alter any copyright, trademark, proprietary or attribution notice;
+- incorporate Newsroom, or any original part of it, into another product, service, dataset, model or publication;
+- use Newsroom's original code, text, images or other materials as training data for a machine-learning model; or
+- use the Newsroom name, the Folio Mark or any confusingly similar mark in a way that suggests sponsorship, endorsement or affiliation without written permission.
+
+This prohibition applies to reproduction in any medium or form, including digital, physical, photographic, screen-based, printed and machine-readable forms.
+
+## 4. Public availability is not a license
+
+Making the repository visible, publishing a description of Newsroom, providing an installer, allowing access to a running copy, or distributing a build does not grant any license to copy, reuse, modify, redistribute or republish Newsroom.
+
+Any access to the software is subject to this notice and to any separate written agreement with the copyright holder. No course of dealing, public statement or repository setting creates a reuse license.
+
+## 5. Prior grants
+
+No prior public license grant from the copyright holder is identified in this repository. If a valid written license was previously granted for an earlier version, that grant continues to apply to that earlier version according to its terms. This notice does not retroactively revoke rights that were validly granted for a version already received under that earlier license.
+
+This notice applies to the original Newsroom materials. It does not apply to third-party components, which are addressed in Section 6.
+
+## 6. Third-party components
+
+Newsroom includes or depends on third-party software, fonts, models, runtimes and other components. Those components remain under their own licenses and notices. This notice does not claim ownership of them, and does not limit, narrow or replace their license terms.
+
+If this notice conflicts with a third-party license as to that third-party component, the third-party license governs that component. Third-party license texts and attribution information are included with the relevant component and summarized in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `packaging/sbom.spdx.json`.
+
+Some third-party components may be licensed under copyleft terms. Distributing a combined installer or a modified application may create obligations under those terms. The copyright holder should obtain legal review before distributing Newsroom or its installer to any other person.
+
+## 7. No warranty
+
+To the maximum extent permitted by applicable law, Newsroom is provided **as is** and **as available**, without warranties of any kind, whether express, implied or statutory, including any implied warranty of merchantability, fitness for a particular purpose, title, quiet enjoyment or non-infringement.
+
+The copyright holder does not warrant that Newsroom will be uninterrupted, error-free, secure, complete or suitable for any particular publishing purpose.
+
+## 8. Limitation of liability
+
+To the maximum extent permitted by applicable law, the copyright holder is not liable for any indirect, incidental, special, consequential, exemplary or punitive damages, or for any loss of data, content, revenue, profits, goodwill or business opportunity, arising out of or relating to Newsroom or this notice, even if advised of the possibility of such damages.
+
+Where liability cannot be excluded, it is limited to the maximum extent permitted by law.
+
+## 9. Legal rights and exceptions
+
+Nothing in this notice excludes or limits any right that cannot lawfully be excluded or limited, including mandatory consumer rights, fair use or fair dealing, and other statutory exceptions. Nothing in this notice is intended to prohibit conduct that applicable law expressly permits despite a contractual restriction.
+
+This notice is not legal advice. The existence of this notice does not guarantee that every provision is enforceable in every jurisdiction. Copyright, contract and trademark rules differ between countries, and a court may decline to enforce a particular restriction.
+
+## 10. Permission requests
+
+Requests for permission to use, reproduce, distribute, modify or license any original Newsroom material must be made in writing to the copyright holder and must be expressly accepted in writing. Any permission is limited to its stated terms and does not extend to any other person, version, medium or purpose.
+
+---
+
+**Newsroom and the Folio Mark identify the copyright holder's software. No registered trademark, patent or other registration is claimed by this notice.**
